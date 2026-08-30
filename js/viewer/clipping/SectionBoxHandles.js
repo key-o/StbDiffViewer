@@ -10,9 +10,12 @@ import * as THREE from 'three';
 const HANDLE_CONFIG = {
   coneRadius: 300,
   coneHeight: 600,
-  color: 0xff6600,
-  hoverColor: 0xffaa00,
-  activeColor: 0xff0000,
+  color: 0x607d8b,
+  hoverColor: 0x42a5f5,
+  activeColor: 0x1976d2,
+  opacity: 0.5,
+  hoverOpacity: 0.8,
+  activeOpacity: 0.95,
   segments: 12,
 };
 
@@ -94,8 +97,9 @@ export function createAllHandles() {
     const material = new THREE.MeshBasicMaterial({
       color: HANDLE_CONFIG.color,
       depthTest: false,
+      depthWrite: false,
       transparent: true,
-      opacity: 0.85,
+      opacity: HANDLE_CONFIG.opacity,
     });
 
     const mesh = new THREE.Mesh(geometry, material);
@@ -107,6 +111,14 @@ export function createAllHandles() {
       axis: face.axis,
       sign: face.sign,
       normal: face.normal.clone(),
+    };
+
+    // THREE.RaycasterはObject3D.visibleを自動では考慮しないため、
+    // 図面表示で隠した奥行きハンドルが透明な当たり判定として残らないようにする。
+    const meshRaycast = mesh.raycast;
+    mesh.raycast = function raycastVisibleSectionBoxHandle(raycaster, intersects) {
+      if (this.visible === false) return;
+      meshRaycast.call(this, raycaster, intersects);
     };
 
     return mesh;
@@ -142,12 +154,14 @@ export function positionHandles(handles, box) {
  * @param {'default' | 'hover' | 'active'} state - 状態
  */
 export function setHandleState(handle, state) {
-  const colorMap = {
-    default: HANDLE_CONFIG.color,
-    hover: HANDLE_CONFIG.hoverColor,
-    active: HANDLE_CONFIG.activeColor,
+  const appearanceMap = {
+    default: { color: HANDLE_CONFIG.color, opacity: HANDLE_CONFIG.opacity },
+    hover: { color: HANDLE_CONFIG.hoverColor, opacity: HANDLE_CONFIG.hoverOpacity },
+    active: { color: HANDLE_CONFIG.activeColor, opacity: HANDLE_CONFIG.activeOpacity },
   };
-  handle.material.color.setHex(colorMap[state] || HANDLE_CONFIG.color);
+  const appearance = appearanceMap[state] || appearanceMap.default;
+  handle.material.color.setHex(appearance.color);
+  handle.material.opacity = appearance.opacity;
 }
 
 /**

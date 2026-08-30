@@ -16,6 +16,7 @@ import { createLabelSprite } from './labels.js';
 import { colorManager } from '../rendering/colorManager.js';
 import { AXIS_LINE_PATTERN } from '../../config/renderingConstants.js';
 import { createLogger } from '../../utils/logger.js';
+import { buildCanvasFont } from '../../utils/typography.js';
 import { disposeRecursive } from '../utils/ResourceDisposer.js';
 
 const log = createLogger('viewer:annotations:layout');
@@ -79,14 +80,14 @@ function drawAxisDimensions(sortedAxes, axisType, group, z, modelBounds, extendX
     const padding = 6;
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
-    ctx.font = `${fontSize}px sans-serif`;
+    ctx.font = buildCanvasFont(fontSize);
     const textW = Math.ceil(ctx.measureText(text).width) + padding * 2;
     const textH = fontSize + padding * 2;
     canvas.width = textW;
     canvas.height = textH;
     ctx.fillStyle = 'rgba(255,255,255,0.9)';
     ctx.fillRect(0, 0, textW, textH);
-    ctx.font = `${fontSize}px sans-serif`;
+    ctx.font = buildCanvasFont(fontSize);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#333333';

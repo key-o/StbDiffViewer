@@ -16,6 +16,7 @@
  */
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+const GENERIC_SYMBOL = { type: 'filled', radius: 5 };
 
 /**
  * 鉄筋記号の定義
@@ -241,6 +242,10 @@ export function addBarSymbolDefs(svg, prefix = 'bar') {
     defs.appendChild(g);
   }
 
+  const generic = createSvgElement('g', { id: `${prefix}-GENERIC` });
+  generic.appendChild(createSymbolElement(GENERIC_SYMBOL.type, GENERIC_SYMBOL));
+  defs.appendChild(generic);
+
   svg.appendChild(defs);
 }
 
@@ -259,9 +264,14 @@ export function placeBarSymbol(svg, dia, cx, cy, scale = 1, prefix = 'bar') {
   if (!REBAR_SYMBOLS[dia] && dia.startsWith('T')) {
     symbolDia = 'D' + dia.substring(1);
   }
+  // U系高強度筋や将来径など、記号定義外でも鉄筋自体を消さない。
+  if (!REBAR_SYMBOLS[symbolDia]) {
+    symbolDia = 'GENERIC';
+  }
   const use = createSvgElement('use', { href: `#${prefix}-${symbolDia}` });
   use.setAttribute('transform', `translate(${cx}, ${cy}) scale(${scale})`);
   svg.appendChild(use);
+  return use;
 }
 
 /**

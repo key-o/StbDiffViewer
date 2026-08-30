@@ -27,6 +27,10 @@
 │  - MeshCreationValidator.js         │
 │  - MeshMetadataBuilder.js           │
 │  - ProfileParameterMapper.js        │
+│  - ElementNodeResolver.js           │
+│  - ElementSectionResolver.js        │
+│  - ElementPlacementResolver.js      │
+│  - SectionProfileFactory.js         │
 │  - sectionTypeUtil.js (common-stb)  │
 └─────────────────────────────────────┘
 ```
@@ -127,7 +131,20 @@ options: {
 
 ---
 
-### 3. ThreeJSConverter.js （Three.js依存）
+### 3. Element resolver / placement modules
+
+**役割**: 要素ジェネレーターが必要とする入力解決を責務別に集約
+
+- `ElementNodeResolver.js`: STB節点Map / JSON geometryから節点位置を解決
+- `ElementSectionResolver.js`: STB/JSON断面参照と天端基準用の断面高さを解決
+- `ElementPlacementResolver.js`: STB offset/rotateを配置入力へ変換し、`GeometryCalculator` の結果をThree.js型へ変換
+- `SectionProfileFactory.js`: IFC優先・ProfileCalculatorフォールバックの断面プロファイル生成を集約
+
+旧 `ElementGeometryUtils.js` の多責務クラスは廃止し、ジェネレーターは必要な機能だけを直接importします。
+
+---
+
+### 4. ThreeJSConverter.js （Three.js依存）
 
 **役割**: Pure JavaScriptのデータをThree.jsオブジェクトに変換
 

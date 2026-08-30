@@ -3,9 +3,9 @@
  *
  * このファイルは、3Dビューワーの全ての色付けを一元管理します：
  * - 差分表示モードの色管理
- * - 部材別色付けモードの色管理
- * - スキーマエラー表示モードの色管理
- * - 重要度別色付けモードの色管理
+ * - 部材別色付けモード - 要素タイプごとに色を設定
+ * - スキーマエラー表示モード - スキーマチェックエラーを表示
+ * - 重要度別色付けモード - 属性の重要度で色分け
  * - マテリアルのキャッシュと再利用
  *
  * 各色設定は専用のマネージャークラスで管理され、
@@ -13,7 +13,7 @@
  */
 
 import * as THREE from 'three';
-import { renderer } from '../core/core.js';
+import { clippingStateManager } from '../clipping/ClippingStateManager.js';
 import elementColorManager from './elementColorManager.js';
 import diffColorManager from './diffColorManager.js';
 import schemaColorManager from './schemaColorManager.js';
@@ -103,7 +103,39 @@ class ColorManager {
    * @param {string} color - 色コード
    */
   setElementColor(elementType, color) {
-    this.elementColorManager.setElementColor(elementType, color);
+    return this.elementColorManager.setElementColor(elementType, color);
+  }
+
+  /**
+   * 全ての部材別色を取得
+   * @returns {Object<string, string>} 要素タイプ別の色
+   */
+  getAllElementColors() {
+    return this.elementColorManager.getAllElementColors();
+  }
+
+  /**
+   * 複数の部材別色を設定
+   * @param {Object<string, string>} colors - 要素タイプ別の色
+   */
+  setAllElementColors(colors) {
+    this.elementColorManager.setAllColors(colors);
+  }
+
+  /**
+   * 部材別色をデフォルトへ一括リセット
+   */
+  resetElementColors() {
+    this.elementColorManager.resetToDefault();
+  }
+
+  /**
+   * 部材別色の変更を購読
+   * @param {Function} callback - (elementType, color) => void
+   * @returns {Function} 購読解除関数
+   */
+  onElementColorChange(callback) {
+    return this.elementColorManager.onColorChange(callback);
   }
 
   /**
@@ -166,7 +198,7 @@ class ColorManager {
    * @param {string} color - 色コード
    */
   setLoadColor(loadType, color) {
-    this.loadColorManager.setLoadColor(loadType, color);
+    return this.loadColorManager.setLoadColor(loadType, color);
   }
 
   /**
@@ -177,15 +209,35 @@ class ColorManager {
    */
   getMaterial(colorMode, params = {}) {
     const cacheKey = this._generateCacheKey(colorMode, params);
+    let material;
 
     if (this.materialCache.has(cacheKey)) {
-      return this.materialCache.get(cacheKey);
+      material = this.materialCache.get(cacheKey);
+    } else {
+      material = this._createMaterial(colorMode, params);
+      this.materialCache.set(cacheKey, material);
     }
 
-    const material = this._createMaterial(colorMode, params);
-    this.materialCache.set(cacheKey, material);
-
+    this._syncClippingPolicy(material, colorMode, params);
     return material;
+  }
+
+  /**
+   * キャッシュ済みMaterialを含め、取得のたびにactive clipping policyへ同期する。
+   * 通常時はMaterial-local clippingを空にし、SectionBox中だけ対象Renderableへ6面を適用する。
+   * @private
+   * @param {THREE.Material} material
+   * @param {string} colorMode
+   * @param {Object} params
+   */
+  _syncClippingPolicy(material, colorMode, params) {
+    // Spriteは既存契約どおりclippingを持たせない。
+    if (params.isSprite) return;
+
+    clippingStateManager.applyToMaterial(material, {
+      // Axis/Story等のlayout materialはSectionBox対象外。
+      sectionBoxExempt: colorMode === 'layout',
+    });
   }
 
   /**
@@ -207,7 +259,10 @@ class ColorManager {
     let material;
     const materialOptions = {
       side: THREE.DoubleSide,
-      clippingPlanes: renderer?.clippingPlanes || [],
+      // 新規Materialは常に「SectionBox外」のlocal clipping状態から生成する。
+      // getMaterial()末尾の共通同期でactive SectionBox 6面を適用し、その際に
+      // この空baselineを復元先として記録する。
+      clippingPlanes: clippingStateManager.getMaterialPlanes({ clippingExempt: true }),
     };
 
     // 構成要素ごとの明示色（例: SRC柱のRC/S）
@@ -338,7 +393,7 @@ class ColorManager {
    * @returns {THREE.Material}
    */
   _createHighlightMaterial(params) {
-    const clippingPlanes = renderer?.clippingPlanes || [];
+    const clippingPlanes = clippingStateManager.getMaterialPlanes({ clippingExempt: true });
     const highlightColor = '#ffc107'; // Material Amber
 
     if (params.isLine) {
@@ -376,7 +431,7 @@ class ColorManager {
    * @returns {THREE.Material}
    */
   _createSelectionCandidateMaterial(params) {
-    const clippingPlanes = renderer?.clippingPlanes || [];
+    const clippingPlanes = clippingStateManager.getMaterialPlanes({ clippingExempt: true });
     const candidateColor = '#26c6da'; // Cyan
 
     if (params.isLine) {
@@ -414,7 +469,7 @@ class ColorManager {
    * @returns {THREE.Material}
    */
   _createLayoutMaterial(params) {
-    const clippingPlanes = renderer?.clippingPlanes || [];
+    const clippingPlanes = clippingStateManager.getMaterialPlanes({ clippingExempt: true });
     const layoutType = params.layoutType || 'axis';
 
     if (params.isLine) {

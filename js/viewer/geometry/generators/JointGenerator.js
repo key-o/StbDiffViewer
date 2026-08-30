@@ -12,7 +12,8 @@
 import * as THREE from 'three';
 import { colorManager } from '../../rendering/colorManager.js';
 import { BaseElementGenerator } from '../core/BaseElementGenerator.js';
-import { ElementGeometryUtils } from '../ElementGeometryUtils.js';
+import { getSectionHeight } from '../core/ElementSectionResolver.js';
+import { getHorizontalElementOffsets } from '../core/ElementPlacementResolver.js';
 
 /**
  * 継手形状生成クラス
@@ -158,17 +159,14 @@ export class JointGenerator extends BaseElementGenerator {
           // 鉄骨高さは steelProfile から取得
           if (sectionData.steelProfile?.dimensions) {
             const steelSectionType = sectionData.steelProfile.section_type || 'H';
-            const sh = ElementGeometryUtils.getSectionHeight(
+            const sh = getSectionHeight(
               { dimensions: sectionData.steelProfile.dimensions },
               steelSectionType,
             );
             if (sh > 0) steelHeight = sh;
           }
         } else {
-          const height = ElementGeometryUtils.getSectionHeight(
-            sectionData,
-            sectionData.shape || 'H',
-          );
+          const height = getSectionHeight(sectionData, sectionData.shape || 'H');
           if (height > 0) {
             beamHeight = height;
             steelHeight = height;
@@ -178,7 +176,7 @@ export class JointGenerator extends BaseElementGenerator {
     }
 
     // 継手位置を計算（梁のオフセットを適用）
-    const offsets = ElementGeometryUtils.getHorizontalElementOffsets(element);
+    const offsets = getHorizontalElementOffsets(element);
     const startPos = new THREE.Vector3(
       startNode.x + offsets.startOffset.x,
       startNode.y + offsets.startOffset.y,

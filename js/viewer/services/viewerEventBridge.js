@@ -9,7 +9,7 @@
 
 import { eventBus } from '../../data/events/eventBus.js';
 import { AxisEvents, RenderEvents } from '../../constants/eventTypes.js';
-import { drawAxes, elementGroups } from '../index.js';
+import { drawAxes, elementGroups, finalizeRenderableBatch } from '../index.js';
 import { getCameraContext, getCameraMode } from '../camera/cameraManagerImpl.js';
 import { CAMERA_CONTEXTS, CAMERA_MODES } from '../../constants/displayModes.js';
 import { scheduleRender } from '../../utils/renderScheduler.js';
@@ -88,6 +88,10 @@ class ViewerEventBridge {
       is2DMode,
       showDimensions: showDimensions === true,
     });
+
+    // 階選択時のAxis再描画も通常のgeometry再生成と同じbatch lifecycleへ載せる。
+    // SectionBox有効中にlayout materialが作り直されても、通知前に現在の6面を同期する。
+    finalizeRenderableBatch({ elementType: 'Axis', group: axisGroup });
 
     eventBus.emit(AxisEvents.REDRAW_COMPLETED);
   }

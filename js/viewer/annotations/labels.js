@@ -14,6 +14,7 @@
 
 import * as THREE from 'three';
 import { createLogger } from '../../utils/logger.js';
+import { buildCanvasFont, getBaseFontFamily } from '../../utils/typography.js';
 import { LABEL_SETTINGS, LABEL_OCCLUSION_SETTINGS } from '../../config/renderingConstants.js';
 import { elementGroups } from '../core/core.js';
 
@@ -107,7 +108,7 @@ export function createLabelSprite(text, position, spriteGroup, elementType, meta
 
       // テキストを描画（通り芯名のみ、@以降は省略）
       const displayText = text.includes('@') ? text.split('@')[0] : text;
-      ctx.font = `bold ${balloonFontSize}px sans-serif`;
+      ctx.font = buildCanvasFont(balloonFontSize, { weight: 'bold' });
       ctx.fillStyle = 'black';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -141,7 +142,7 @@ export function createLabelSprite(text, position, spriteGroup, elementType, meta
 
       // テキストを描画（階名のみ）
       const displayText = text.includes('(') ? text.split('(')[0].trim() : text;
-      ctx.font = `bold ${storyFontSize}px sans-serif`;
+      ctx.font = buildCanvasFont(storyFontSize, { weight: 'bold' });
       ctx.fillStyle = 'black';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -160,7 +161,7 @@ export function createLabelSprite(text, position, spriteGroup, elementType, meta
         return null;
       }
       ctx.clearRect(0, 0, labelCanvasWidth, labelCanvasHeight);
-      ctx.font = `bold ${labelFontSize}px sans-serif`;
+      ctx.font = buildCanvasFont(labelFontSize, { weight: 'bold' });
       // テキストを描画（透明背景）
       ctx.fillStyle = 'black';
       ctx.textAlign = 'center';
@@ -468,7 +469,7 @@ export function createLabelSprite(text, position, spriteGroup, elementType, meta
  * @property {string} [modelSource='A'] - モデルソース ('A', 'B', 'matched')
  * @property {Object} [options={}] - 追加オプション
  * @property {number} [options.fontSize=16] - フォントサイズ
- * @property {string} [options.fontFamily='Arial'] - フォントファミリー
+ * @property {string} [options.fontFamily] - フォントファミリー。省略時は共通UIフォント。
  * @property {string} [options.color='rgba(0, 0, 0, 1)'] - テキスト色
  * @property {number} [options.padding=6] - パディング
  */
@@ -483,7 +484,7 @@ export function createLabel(config) {
   const { x, y, z } = position;
 
   const fontSize = options.fontSize || 16;
-  const fontFamily = options.fontFamily || 'Arial';
+  const fontFamily = options.fontFamily || getBaseFontFamily();
   const textColor = options.color || 'rgba(0, 0, 0, 1)'; // デフォルトは黒
   const padding = options.padding || 6; // パディングを少し増加
 

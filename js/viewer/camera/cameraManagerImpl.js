@@ -10,9 +10,16 @@ import {
   camera,
   orthographicCamera,
   controls,
+  renderer,
   getActiveCamera,
   setActiveCamera,
 } from '../core/core.js';
+import { getCanvasAspect } from '../core/viewportMetrics.js';
+import {
+  getOrthographicAspect,
+  matchOrthographicToPerspective,
+  setOrthographicViewHeight,
+} from '../core/orthographicProjection.js';
 import { CAMERA_MODES, CAMERA_CONTEXTS } from '../../constants/displayModes.js';
 import { createLogger } from '../../utils/logger.js';
 
@@ -75,21 +82,17 @@ export function setCameraMode(mode, _transitionDuration = 0) {
     newCamera.up.copy(oldCamera.up);
     newCamera.rotation.copy(oldCamera.rotation);
 
-    // OrthographicCameraに切り替える場合、frustumサイズを調整
-    if (newCamera.isOrthographicCamera && controls && controls._cc) {
+    // 3D Perspective の現在の見かけスケールを正投影へ引き継ぐ。
+    // FOV/位置/targetは変更せず、Orthographic側のfrustumだけを調整する。
+    if (
+      newCamera.isOrthographicCamera &&
+      oldCamera.isPerspectiveCamera &&
+      controls &&
+      controls._cc
+    ) {
       const target = controls._cc.getTarget(new THREE.Vector3());
-      const distance = newCamera.position.distanceTo(target);
-      const aspect = window.innerWidth / window.innerHeight;
-
-      // 距離に基づいてfrustumサイズを設定
-      const frustumHeight = distance * 0.5; // 視野を調整
-      const frustumWidth = frustumHeight * aspect;
-
-      newCamera.left = -frustumWidth / 2;
-      newCamera.right = frustumWidth / 2;
-      newCamera.top = frustumHeight / 2;
-      newCamera.bottom = -frustumHeight / 2;
-      newCamera.zoom = 1.0; // ズームをリセット
+      const aspect = getCanvasAspect(renderer?.domElement);
+      matchOrthographicToPerspective(newCamera, oldCamera, target, aspect);
     }
 
     newCamera.updateProjectionMatrix();
@@ -213,12 +216,8 @@ export function setOrthographicSize(size) {
     return;
   }
 
-  const aspect = orthographicCamera.right / orthographicCamera.top;
-  orthographicCamera.left = (-size * aspect) / 2;
-  orthographicCamera.right = (size * aspect) / 2;
-  orthographicCamera.top = size / 2;
-  orthographicCamera.bottom = -size / 2;
-  orthographicCamera.updateProjectionMatrix();
+  const aspect = getOrthographicAspect(orthographicCamera);
+  setOrthographicViewHeight(orthographicCamera, size, aspect, { resetZoom: false });
 }
 
 /**

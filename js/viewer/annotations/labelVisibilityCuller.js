@@ -1,13 +1,16 @@
 /**
  * @fileoverview Camera-frustum based visibility culling for label sprites.
  *
- * UI visibility is stored separately as `labelBaseVisible`. This culler only
- * applies camera visibility and maximum visible label limits.
+ * UI visibility is stored separately as `labelBaseVisible`. This culler applies
+ * SectionBox semantic visibility first, then camera visibility and maximum
+ * visible label limits.
  */
 
 import * as THREE from 'three';
+import { clippingStateManager } from '../clipping/ClippingStateManager.js';
 
 const ALWAYS_VISIBLE_LABEL_TYPES = new Set(['Axis', 'Story']);
+const SECTION_BOX_EPSILON = 1e-6;
 
 export const DEFAULT_LABEL_CULLING_OPTIONS = {
   enabled: true,
@@ -19,6 +22,7 @@ export const DEFAULT_LABEL_CULLING_OPTIONS = {
  * @typedef {Object} LabelCullingStats
  * @property {number} total
  * @property {number} baseHidden
+ * @property {number} sectionBoxHidden
  * @property {number} alwaysVisible
  * @property {number} candidates
  * @property {number} visible
@@ -35,6 +39,7 @@ export class LabelVisibilityCuller {
     this._projScreenMatrix = new THREE.Matrix4();
     this._projectedPosition = new THREE.Vector3();
     this._worldPosition = new THREE.Vector3();
+    this._sectionBoxAnchor = new THREE.Vector3();
     this._lastStats = this._createEmptyStats();
   }
 
@@ -75,6 +80,9 @@ export class LabelVisibilityCuller {
     const candidates = [];
     const margin = Math.max(1, this.options.margin);
     const maxVisibleLabels = Math.max(0, this.options.maxVisibleLabels);
+    const sectionBoxBounds = clippingStateManager.isSectionBoxActive()
+      ? clippingStateManager.getSectionBoxBounds()
+      : null;
 
     for (const label of labels) {
       if (!label?.userData) continue;
@@ -85,6 +93,12 @@ export class LabelVisibilityCuller {
       if (!baseVisible) {
         label.visible = false;
         stats.baseHidden++;
+        continue;
+      }
+
+      if (sectionBoxBounds && !this._isInsideSectionBox(label, sectionBoxBounds)) {
+        label.visible = false;
+        stats.sectionBoxHidden++;
         continue;
       }
 
@@ -125,6 +139,67 @@ export class LabelVisibilityCuller {
     return this.getStats();
   }
 
+  /**
+   * SectionBox内判定はラベルの描画位置ではなく、要素を表す意味上の位置で行う。
+   * Story/Axisラベルはモデル外周へ配置されるため、実Sprite座標で判定すると
+   * SectionBox内の参照ラベルまで全て消えてしまう。
+   * @param {THREE.Object3D} label
+   * @param {THREE.Box3} bounds
+   * @returns {boolean}
+   */
+  _isInsideSectionBox(label, bounds) {
+    const data = label.userData || {};
+    const elementType = data.elementType;
+    const meta = data.meta || {};
+    const originalPosition = data.originalPosition || label.position;
+
+    if (!originalPosition) return true;
+
+    if (elementType === 'Story') {
+      const storyHeight = Number.isFinite(meta.storyHeight) ? meta.storyHeight : originalPosition.z;
+      return this._isWithin(storyHeight, bounds.min.z, bounds.max.z);
+    }
+
+    if (elementType === 'Axis') {
+      const storyHeight = Number.isFinite(meta.storyHeight) ? meta.storyHeight : originalPosition.z;
+      if (!this._isWithin(storyHeight, bounds.min.z, bounds.max.z)) return false;
+
+      // 円弧/放射軸はラベル端点がSectionBox外でも軸自体が交差し得るため、
+      // Z範囲だけで落とし、XYは実ジオメトリのMaterial clippingへ任せる。
+      if (meta.axisKind === 'arc' || meta.axisKind === 'radial') return true;
+
+      if (meta.axisType === 'X') {
+        const x = Number.isFinite(meta.distance) ? meta.distance : originalPosition.x;
+        return this._isWithin(x, bounds.min.x, bounds.max.x);
+      }
+      if (meta.axisType === 'Y') {
+        const y = Number.isFinite(meta.distance) ? meta.distance : originalPosition.y;
+        return this._isWithin(y, bounds.min.y, bounds.max.y);
+      }
+
+      return this._isPointWithin(originalPosition, bounds);
+    }
+
+    return this._isPointWithin(originalPosition, bounds);
+  }
+
+  _isPointWithin(point, bounds) {
+    this._sectionBoxAnchor.copy(point);
+    return (
+      this._isWithin(this._sectionBoxAnchor.x, bounds.min.x, bounds.max.x) &&
+      this._isWithin(this._sectionBoxAnchor.y, bounds.min.y, bounds.max.y) &&
+      this._isWithin(this._sectionBoxAnchor.z, bounds.min.z, bounds.max.z)
+    );
+  }
+
+  _isWithin(value, min, max) {
+    return (
+      Number.isFinite(value) &&
+      value >= min - SECTION_BOX_EPSILON &&
+      value <= max + SECTION_BOX_EPSILON
+    );
+  }
+
   _getLabelWorldPosition(label) {
     label.updateWorldMatrix?.(true, false);
     if (typeof label.getWorldPosition === 'function') {
@@ -156,6 +231,7 @@ export class LabelVisibilityCuller {
     return {
       total: 0,
       baseHidden: 0,
+      sectionBoxHidden: 0,
       alwaysVisible: 0,
       candidates: 0,
       visible: 0,

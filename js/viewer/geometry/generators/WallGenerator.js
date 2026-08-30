@@ -2,10 +2,11 @@
  * @fileoverview 壁形状生成モジュール
  *
  * BaseElementGeneratorを継承した統一アーキテクチャ:
- * - 4ノード（StbNodeIdOrder）による矩形形状
- * - 各ノードへのオフセット対応（StbWallOffset）
+ * - StbNodeIdOrder の順序を保持した壁外形
+ * - 各ノードへの StbWallOffset 対応
+ * - 第1基準点を原点とする ST-Bridge 壁部材座標系
  * - 厚さ（t）による押し出し形状
- * - 開口部（StbOpen）対応
+ * - StbOpen の position_X / position_Y / rotate 対応
  * - STB形式とJSON形式の両対応
  *
  * 作成: 2025-12
@@ -50,17 +51,15 @@ export class WallGenerator extends BaseElementGenerator {
     isJsonInput = false,
     openingElements = null,
   ) {
-    // 開口情報をコンテキストに追加するためにcreateMeshesをオーバーライド
     const config = this.getConfig();
     const log = this._getLogger();
 
     if (!wallElements || wallElements.length === 0) {
-      // 要素がない場合はdebugレベルで出力（頻繁に呼ばれるため）
       log.debug(`No ${config.elementName} elements provided.`);
       return [];
     }
 
-    // 開口の逆引きインデックスを事前構築（STB 2.1.0形式対応: O(n²) → O(n)）
+    // STB 2.1.0形式では開口側に id_member があるため、壁IDの逆引き表を先に作る。
     const openingsByWallId = this._buildOpeningIndex(openingElements);
 
     const meshes = [];
@@ -75,8 +74,8 @@ export class WallGenerator extends BaseElementGenerator {
         elementType,
         isJsonInput,
         log,
-        openingElements, // 開口情報を追加
-        openingsByWallId, // 逆引きインデックス
+        openingElements,
+        openingsByWallId,
       };
 
       try {
@@ -99,7 +98,6 @@ export class WallGenerator extends BaseElementGenerator {
 
   /**
    * 開口要素の壁ID逆引きインデックスを構築
-   * STB 2.1.0形式で id_member を使用する際の O(n²) ループを回避
    * @param {Map<string, Object>|null} openingElements - 開口情報マップ
    * @returns {Map<string, Array<[string, Object]>>} 壁ID → [openId, opening][] のマップ
    */
@@ -121,6 +119,14 @@ export class WallGenerator extends BaseElementGenerator {
 
   /**
    * 単一壁メッシュを作成（BaseElementGeneratorの抽象メソッドを実装）
+   *
+   * ST-Bridge 2.0.2 の定義に従い、壁の表示座標は次の順で求める。
+   * 1. StbNodeIdOrder の各節点に StbWallOffset を適用して周辺基準点を得る。
+   * 2. オフセット後の第1基準点を壁ローカル原点とする。
+   * 3. 第1基準点→第2基準点を壁ローカルX方向、全体Z上向きを壁ローカルY方向とする。
+   * 4. 壁外形は4点をバウンディングボックス化せず、順序付き基準点そのものを投影して作る。
+   * 5. StbOpen.position_X/Y は同じ第1基準点原点から直接配置する。
+   *
    * @param {Object} wall - 壁要素
    * @param {Object} context - コンテキスト
    * @returns {THREE.Mesh|null} メッシュまたはnull
@@ -129,7 +135,6 @@ export class WallGenerator extends BaseElementGenerator {
     const { nodes, sections, elementType, isJsonInput, log, openingElements, openingsByWallId } =
       context;
 
-    // 1. ノードIDリストの取得（壁は通常4点）
     const nodeIds = wall.node_ids;
     if (!nodeIds || nodeIds.length < 3) {
       log.warn(
@@ -138,8 +143,8 @@ export class WallGenerator extends BaseElementGenerator {
       return null;
     }
 
-    // 2. 各ノードの座標を取得（オフセット適用）
-    const vertices = [];
+    // 各節点に StbWallOffset を適用した「周辺基準点」を StbNodeIdOrder の順で保持する。
+    const referencePoints = [];
     const offsets = wall.offsets || new Map();
 
     for (const nodeId of nodeIds) {
@@ -149,26 +154,24 @@ export class WallGenerator extends BaseElementGenerator {
         return null;
       }
 
-      // オフセットを適用
       const offset = offsets.get ? offsets.get(nodeId) : offsets[nodeId];
       const offsetX = offset?.offset_X || 0;
       const offsetY = offset?.offset_Y || 0;
       const offsetZ = offset?.offset_Z || 0;
 
-      vertices.push(new THREE.Vector3(node.x + offsetX, node.y + offsetY, node.z + offsetZ));
+      referencePoints.push(
+        new THREE.Vector3(node.x + offsetX, node.y + offsetY, node.z + offsetZ),
+      );
     }
 
-    // 3. 断面データの取得（厚さ）
-    let thickness = 200; // デフォルト厚さ (mm)
-
+    // 断面データの取得（厚さ）
+    let thickness = 200;
     if (sections) {
-      // 型統一: sectionExtractorは数値IDを整数として保存するため変換
       const rawId = wall.id_section;
       const parsedId = parseInt(rawId, 10);
       const sectionId = isNaN(parsedId) ? rawId : parsedId;
       const sectionData = sections.get(sectionId);
       if (sectionData) {
-        // t属性を取得（様々なパターンに対応）
         thickness =
           sectionData.t ||
           sectionData.thickness ||
@@ -178,129 +181,16 @@ export class WallGenerator extends BaseElementGenerator {
       }
     }
 
-    log.debug(`Creating wall ${wall.id}: ${vertices.length} vertices, thickness=${thickness}mm`);
-
-    // 4. 壁の形状を分析（オフセット適用後の座標を使用）
-    // バウンディングボックス方式で計算するため、
-    // ここでの単純な重心計算は削除し、後述のステップ5で正確な中心を計算する
-
-    /* 削除: 重心計算
-    // 頂点の中心を計算
-    const center = new THREE.Vector3();
-    for (const v of vertices) {
-      center.add(v);
-    }
-    center.divideScalar(vertices.length);
-    */
-
-    // 5. 壁の方向と寸法を再計算（バウンディングボックス方式）
-    // 配列コピーやソートを避け、min/maxスキャンで計算（GC負荷削減）
-
-    // Z方向の範囲（高さ）をスキャンで取得
-    let minZ = Infinity;
-    let maxZ = -Infinity;
-    for (const v of vertices) {
-      if (v.z < minZ) minZ = v.z;
-      if (v.z > maxZ) maxZ = v.z;
-    }
-    let wallHeight = maxZ - minZ;
-    if (wallHeight < 1) wallHeight = 1000; // デフォルト高さ(異常値対応)
-
-    // 壁の基準方向（Wall Direction）を決定
-    // 下端付近の点（minZから許容誤差内）から最も離れた2点を探す
-    const tolerance = 10; // 10mm
-    let pStart = vertices[0];
-    let pEnd = vertices[0];
-    let maxDistSq = 0;
-
-    // 下端点を集めつつ、最遠点ペアを同時に探す（配列コピー不要）
-    let hasMultipleBottom = false;
-    for (let i = 0; i < vertices.length; i++) {
-      if (Math.abs(vertices[i].z - minZ) >= tolerance) continue;
-      for (let j = i + 1; j < vertices.length; j++) {
-        if (Math.abs(vertices[j].z - minZ) >= tolerance) continue;
-        hasMultipleBottom = true;
-        const dSq = vertices[i].distanceToSquared(vertices[j]);
-        if (dSq > maxDistSq) {
-          maxDistSq = dSq;
-          pStart = vertices[i];
-          pEnd = vertices[j];
-        }
-      }
+    const frame = this._buildWallReferenceFrame(referencePoints, log, wall.id);
+    if (!frame) {
+      return null;
     }
 
-    if (!hasMultipleBottom && vertices.length >= 2) {
-      // 下端点が1つしかない場合、全点から最遠点を探す（水平成分のみで）
-      for (let i = 0; i < vertices.length; i++) {
-        for (let j = i + 1; j < vertices.length; j++) {
-          const dx = vertices[i].x - vertices[j].x;
-          const dy = vertices[i].y - vertices[j].y;
-          const dSq = dx * dx + dy * dy;
-          if (dSq > maxDistSq) {
-            maxDistSq = dSq;
-            pStart = vertices[i];
-            pEnd = vertices[j];
-          }
-        }
-      }
-    }
+    const { origin, xAxis, extrusionNormal, profilePoints, maxNormalDeviation } = frame;
+    const bounds = this._getProfileBounds(profilePoints);
+    const wallWidth = bounds.maxX - bounds.minX;
+    const wallHeight = bounds.maxY - bounds.minY;
 
-    // 壁の基準ベクトル（水平）- 一時Vector3を再利用
-    const wallDirection = new THREE.Vector3(pEnd.x - pStart.x, pEnd.y - pStart.y, 0);
-    if (wallDirection.lengthSq() > 0.0001) {
-      wallDirection.normalize();
-    } else {
-      wallDirection.set(1, 0, 0); // デフォルトX軸
-    }
-
-    const wallNormal = new THREE.Vector3(-wallDirection.y, wallDirection.x, 0); // crossVectors(dir, (0,0,1)) の結果を直接計算
-
-    // 全頂点をローカル座標軸に投影してバウンディングボックスを計算
-    // dotを直接計算（Vector3アロケーション不要）
-    let minL = Infinity,
-      maxL = -Infinity;
-    let minT = Infinity,
-      maxT = -Infinity;
-
-    for (const v of vertices) {
-      // pStartからの相対ベクトルのdotを直接計算
-      const relX = v.x - pStart.x;
-      const relY = v.y - pStart.y;
-      const relZ = v.z - pStart.z;
-
-      const distL = relX * wallDirection.x + relY * wallDirection.y + relZ * wallDirection.z;
-      const distT = relX * wallNormal.x + relY * wallNormal.y + relZ * wallNormal.z;
-
-      if (distL < minL) minL = distL;
-      if (distL > maxL) maxL = distL;
-      if (distT < minT) minT = distT;
-      if (distT > maxT) maxT = distT;
-    }
-
-    // 壁の幅を決定
-    let wallWidth = maxL - minL;
-
-    // 中心位置を決定（グローバル座標）
-    // ローカルでの中心 = (minL + maxL)/2, (minT + maxT)/2, (minZ + maxZ relative)/2
-    // これをグローバルに戻す
-
-    // Length方向の中心オフセット（pStart基準）
-    const centerL = (minL + maxL) / 2;
-    // Thickness方向の中心オフセット（pStart基準）
-    const centerT = (minT + maxT) / 2;
-    // PStartのZ + 高さの半分
-    const centerZ = minZ + wallHeight / 2;
-
-    const center = new THREE.Vector3()
-      .copy(pStart)
-      .addScaledVector(wallDirection, centerL)
-      .addScaledVector(wallNormal, centerT);
-    center.z = centerZ;
-
-    // もし幅が極端に小さい場合はデフォルト処理（柱のようなケース？）
-    if (wallWidth < 1) wallWidth = 100;
-
-    // 壁の寸法が不正な場合はスキップ
     if (wallWidth < 1 || wallHeight < 1) {
       log.warn(
         `Skipping wall ${wall.id}: Invalid dimensions (width=${wallWidth}, height=${wallHeight})`,
@@ -308,70 +198,178 @@ export class WallGenerator extends BaseElementGenerator {
       return null;
     }
 
-    log.debug(
-      `Wall ${wall.id}: width=${wallWidth.toFixed(0)}, height=${wallHeight.toFixed(0)}, thickness=${thickness}`,
-    );
-
-    // 6. 開口情報を取得
     const openings = this._getOpeningsForWall(wall, openingElements, log, openingsByWallId);
+    const geometry = this._createWallGeometry(profilePoints, thickness, openings, log, wall.id);
 
-    // 7. ジオメトリを作成（開口がある場合はExtrudeGeometry、ない場合はBoxGeometry）
-    let geometry;
-    if (openings.length > 0) {
-      geometry = this._createWallWithOpenings(wallWidth, wallHeight, thickness, openings, log);
-      log.debug(`Wall ${wall.id}: Created geometry with ${openings.length} opening(s)`);
-    } else {
-      geometry = new THREE.BoxGeometry(wallWidth, thickness, wallHeight);
-    }
-
-    if (!this._validateGeometry(geometry, wall, context)) {
+    if (!geometry || !this._validateGeometry(geometry, wall, context)) {
       return null;
     }
 
-    // 8. メッシュ作成
     const mesh = new THREE.Mesh(
       geometry,
       colorManager.getMaterial('diff', { comparisonState: 'matched' }),
     );
 
-    // 9. 配置と回転
-    mesh.position.copy(center);
-
-    // 壁の向きを設定（水平方向に合わせる）
-    const angle = Math.atan2(wallDirection.y, wallDirection.x);
+    // ジオメトリのローカル原点そのものを「オフセット後の第1基準点」とする。
+    // これにより position_X/Y を中心座標やbbox左下へ変換する必要がなくなる。
+    mesh.position.copy(origin);
+    const angle = Math.atan2(xAxis.y, xAxis.x);
     mesh.rotation.z = angle;
 
-    // 10. メタデータ設定
+    // 表示・選択用の中心値は、外形のローカルbbox中心をグローバルへ戻して保持する。
+    const centerLocalX = (bounds.minX + bounds.maxX) / 2;
+    const centerLocalY = (bounds.minY + bounds.maxY) / 2;
+    const center = new THREE.Vector3(
+      origin.x + xAxis.x * centerLocalX,
+      origin.y + xAxis.y * centerLocalX,
+      origin.z + centerLocalY,
+    );
+
     mesh.userData = {
       id: wall.id,
-      elementId: wall.id, // プロパティ表示用に追加
+      elementId: wall.id,
       name: wall.name || `Wall_${wall.id}`,
-      elementType: elementType,
+      elementType,
       stbElementId: wall.id,
       isSTB: !isJsonInput,
       sectionId: wall.id_section,
       wallData: {
-        nodeIds: nodeIds,
-        thickness: thickness,
+        nodeIds,
+        thickness,
         width: wallWidth,
         height: wallHeight,
         center: { x: center.x, y: center.y, z: center.z },
-        direction: { x: wallDirection.x, y: wallDirection.y, z: wallDirection.z },
-        normal: { x: wallNormal.x, y: wallNormal.y, z: wallNormal.z },
+        direction: { x: xAxis.x, y: xAxis.y, z: xAxis.z },
+        normal: {
+          x: extrusionNormal.x,
+          y: extrusionNormal.y,
+          z: extrusionNormal.z,
+        },
+        firstReferencePoint: { x: origin.x, y: origin.y, z: origin.z },
+        // 新しい生成経路では Shape 原点 = 第1基準点なので常に (0, 0)。
+        openingReference: { x: 0, y: 0 },
+        referenceProfile: profilePoints.map((p) => ({ x: p.x, y: p.y })),
+        maxNormalDeviation,
         kind_structure: wall.kind_structure,
         kind_layout: wall.kind_layout,
         kind_wall: wall.kind_wall,
         openIds: wall.open_ids,
-        openings: openings, // 解決された開口データ
+        openings,
       },
     };
 
     log.debug(
-      `Wall ${wall.id}: center=(${center.x.toFixed(0)}, ${center.y.toFixed(0)}, ${center.z.toFixed(0)}), ` +
+      `Wall ${wall.id}: firstReference=(${origin.x.toFixed(0)}, ${origin.y.toFixed(0)}, ${origin.z.toFixed(0)}), ` +
+        `width=${wallWidth.toFixed(0)}, height=${wallHeight.toFixed(0)}, ` +
         `angle=${((angle * 180) / Math.PI).toFixed(1)}deg`,
     );
 
     return mesh;
+  }
+
+  /**
+   * オフセット後の周辺基準点から、ST-Bridge壁部材座標系と2D外形を構築する。
+   *
+   * Shape X = 第1基準点→第2基準点の水平投影方向
+   * Shape Y = 全体Z上向き
+   * Shape原点 = オフセット後の第1基準点
+   *
+   * @param {THREE.Vector3[]} referencePoints - StbNodeIdOrder順のオフセット後基準点
+   * @param {Object|null} log - ロガー
+   * @param {string|number|null} wallId - 壁ID（ログ用）
+   * @returns {{origin:THREE.Vector3,xAxis:THREE.Vector3,extrusionNormal:THREE.Vector3,profilePoints:THREE.Vector2[],maxNormalDeviation:number}|null}
+   */
+  static _buildWallReferenceFrame(referencePoints, log = null, wallId = null) {
+    if (!referencePoints || referencePoints.length < 3) {
+      return null;
+    }
+
+    const origin = referencePoints[0].clone();
+    const second = referencePoints[1];
+    const xAxis = new THREE.Vector3(second.x - origin.x, second.y - origin.y, 0);
+
+    // 仕様上は第1→第2点がX方向。退化データだけは第1点から最も離れた点をフォールバックにする。
+    if (xAxis.lengthSq() <= 1e-8) {
+      let maxDistSq = 0;
+      let fallback = null;
+      for (let i = 2; i < referencePoints.length; i++) {
+        const dx = referencePoints[i].x - origin.x;
+        const dy = referencePoints[i].y - origin.y;
+        const distSq = dx * dx + dy * dy;
+        if (distSq > maxDistSq) {
+          maxDistSq = distSq;
+          fallback = referencePoints[i];
+        }
+      }
+
+      if (!fallback || maxDistSq <= 1e-8) {
+        log?.warn?.(`Skipping wall ${wallId ?? ''}: first and second reference points are degenerate`);
+        return null;
+      }
+
+      xAxis.set(fallback.x - origin.x, fallback.y - origin.y, 0);
+      log?.warn?.(
+        `Wall ${wallId ?? ''}: first-to-second reference direction is degenerate; using fallback direction`,
+      );
+    }
+    xAxis.normalize();
+
+    // メッシュのローカル+Y方向。壁厚は±方向へ対称に出すため、押出方向の符号自体は形状に影響しない。
+    const extrusionNormal = new THREE.Vector3(-xAxis.y, xAxis.x, 0);
+
+    const profilePoints = [];
+    let maxNormalDeviation = 0;
+
+    for (const point of referencePoints) {
+      const dx = point.x - origin.x;
+      const dy = point.y - origin.y;
+      const dz = point.z - origin.z;
+
+      const localX = dx * xAxis.x + dy * xAxis.y;
+      const localY = dz;
+      const normalOffset = dx * extrusionNormal.x + dy * extrusionNormal.y;
+
+      profilePoints.push(new THREE.Vector2(localX, localY));
+      maxNormalDeviation = Math.max(maxNormalDeviation, Math.abs(normalOffset));
+    }
+
+    // ExtrudeGeometryは平面輪郭を前提とする。通常の壁では0になる。
+    // 点ごとの面外offsetが混在する場合も第1基準点の壁面へ投影し、仕様原点は維持する。
+    if (maxNormalDeviation > 1e-6) {
+      log?.warn?.(
+        `Wall ${wallId ?? ''}: reference points are not coplanar in wall-normal direction ` +
+          `(max deviation=${maxNormalDeviation.toFixed(3)}mm); projecting to first-reference wall plane`,
+      );
+    }
+
+    return {
+      origin,
+      xAxis,
+      extrusionNormal,
+      profilePoints,
+      maxNormalDeviation,
+    };
+  }
+
+  /**
+   * 2D壁輪郭のbboxを取得する。bboxは寸法・中心メタデータにだけ用い、壁外形生成には用いない。
+   * @param {THREE.Vector2[]} profilePoints - 壁ローカル輪郭
+   * @returns {{minX:number,maxX:number,minY:number,maxY:number}}
+   */
+  static _getProfileBounds(profilePoints) {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    for (const point of profilePoints) {
+      minX = Math.min(minX, point.x);
+      maxX = Math.max(maxX, point.x);
+      minY = Math.min(minY, point.y);
+      maxY = Math.max(maxY, point.y);
+    }
+
+    return { minX, maxX, minY, maxY };
   }
 
   /**
@@ -389,19 +387,11 @@ export class WallGenerator extends BaseElementGenerator {
       return openings;
     }
 
-    /**
-     * 開口データからpositionX/Yを取得（STB 2.0.2/2.1.0両対応）
-     * STB 2.0.2では position_X/Y または offset_X/Y
-     * STB 2.1.0では position_X/Y
-     */
     const getOpeningPosition = (opening) => ({
       positionX: opening.position_X ?? opening.offset_X ?? 0,
       positionY: opening.position_Y ?? opening.offset_Y ?? 0,
     });
 
-    /**
-     * 開口をリストに追加するヘルパー
-     */
     const addOpening = (openId, opening) => {
       const pos = getOpeningPosition(opening);
       openings.push({
@@ -418,7 +408,6 @@ export class WallGenerator extends BaseElementGenerator {
       );
     };
 
-    // STB 2.0.2形式: wall.open_ids から開口を取得（O(1) per opening via Map.get）
     if (wall.open_ids && wall.open_ids.length > 0) {
       for (const openId of wall.open_ids) {
         const opening = openingElements.get(openId);
@@ -429,7 +418,6 @@ export class WallGenerator extends BaseElementGenerator {
         }
       }
     } else if (openingsByWallId) {
-      // STB 2.1.0形式: 事前構築済みインデックスから O(1) で取得
       const wallOpenings = openingsByWallId.get(String(wall.id));
       if (wallOpenings) {
         for (const [openId, opening] of wallOpenings) {
@@ -437,7 +425,6 @@ export class WallGenerator extends BaseElementGenerator {
         }
       }
     } else {
-      // フォールバック: 逆引きインデックスがない場合は線形探索
       for (const [openId, opening] of openingElements) {
         if (opening.kind_member === 'WALL' && String(opening.id_member) === String(wall.id)) {
           addOpening(openId, opening);
@@ -449,93 +436,138 @@ export class WallGenerator extends BaseElementGenerator {
   }
 
   /**
-   * 開口付きの壁ジオメトリを作成（ExtrudeGeometry使用）
-   * @param {number} wallWidth - 壁幅
-   * @param {number} wallHeight - 壁高さ
-   * @param {number} thickness - 壁厚さ
-   * @param {Array<Object>} openings - 開口情報配列
-   * @param {Object} log - ロガー
-   * @returns {THREE.BufferGeometry} 生成されたジオメトリ
+   * StbOpenを第1基準点原点の壁ローカル輪郭へ変換する。
+   * positionX/positionY は開口始点、length_X/length_Y はそのローカルX/Y寸法、
+   * rotate は壁ローカルX軸からの角度（度）として扱う。
+   *
+   * @param {Object} opening - 正規化済み開口情報
+   * @returns {THREE.Vector2[]} 開口4隅（始点から反時計回り）
    */
-  static _createWallWithOpenings(wallWidth, wallHeight, thickness, openings, log) {
-    // 壁の外形（ローカル座標系: 中心が原点）
+  static _calculateOpeningProfilePoints(opening) {
+    const x = Number(opening.positionX) || 0;
+    const y = Number(opening.positionY) || 0;
+    const width = Number(opening.width) || 0;
+    const height = Number(opening.height) || 0;
+    const angle = THREE.MathUtils.degToRad(Number(opening.rotate) || 0);
+
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const ux = new THREE.Vector2(cos, sin);
+    const uy = new THREE.Vector2(-sin, cos);
+
+    const p0 = new THREE.Vector2(x, y);
+    const p1 = p0.clone().addScaledVector(ux, width);
+    const p2 = p1.clone().addScaledVector(uy, height);
+    const p3 = p0.clone().addScaledVector(uy, height);
+
+    return [p0, p1, p2, p3];
+  }
+
+  /**
+   * ST-Bridgeの第1基準点を壁ローカルShapeへ変換する旧互換ヘルパー。
+   * 新しい通常経路では Shape 原点そのものが第1基準点なので (0,0) を使用する。
+   * @param {THREE.Vector3} firstReferencePoint - 第1基準点
+   * @param {THREE.Vector3} center - 旧中心原点
+   * @param {THREE.Vector3} wallDirection - 壁X軸
+   * @returns {{x:number,y:number}}
+   */
+  static _calculateOpeningReference(firstReferencePoint, center, wallDirection) {
+    const dx = firstReferencePoint.x - center.x;
+    const dy = firstReferencePoint.y - center.y;
+
+    return {
+      x: dx * wallDirection.x + dy * wallDirection.y,
+      y: firstReferencePoint.z - center.z,
+    };
+  }
+
+  /**
+   * 軸平行開口の旧互換境界計算ヘルパー。
+   * @param {Object} opening - 開口情報
+   * @param {{x:number,y:number}} openingReference - Shape上の第1基準点
+   * @returns {{left:number,bottom:number,right:number,top:number}}
+   */
+  static _calculateOpeningBounds(opening, openingReference) {
+    const left = openingReference.x + opening.positionX;
+    const bottom = openingReference.y + opening.positionY;
+
+    return {
+      left,
+      bottom,
+      right: left + opening.width,
+      top: bottom + opening.height,
+    };
+  }
+
+  /**
+   * 壁外形と開口を同一の「第1基準点原点」Shape座標で生成する。
+   * @param {THREE.Vector2[]} profilePoints - StbWallOffset適用後の周辺基準点輪郭
+   * @param {number} thickness - 壁厚
+   * @param {Array<Object>} openings - 開口情報
+   * @param {Object} log - ロガー
+   * @param {string|number|null} wallId - 壁ID
+   * @returns {THREE.BufferGeometry|null}
+   */
+  static _createWallGeometry(profilePoints, thickness, openings, log, wallId = null) {
+    if (!profilePoints || profilePoints.length < 3) {
+      return null;
+    }
+
     const wallShape = new THREE.Shape();
-    const halfWidth = wallWidth / 2;
-    const halfHeight = wallHeight / 2;
+    wallShape.moveTo(profilePoints[0].x, profilePoints[0].y);
+    for (let i = 1; i < profilePoints.length; i++) {
+      wallShape.lineTo(profilePoints[i].x, profilePoints[i].y);
+    }
+    wallShape.lineTo(profilePoints[0].x, profilePoints[0].y);
 
-    // 壁の外形を定義（反時計回り - THREE.jsのShapeの標準）
-    // Shape座標: X=壁の幅方向, Y=壁の高さ方向
-    // 後でrotateX(-90deg)で、Y→Zに変換される
-    wallShape.moveTo(-halfWidth, -halfHeight);
-    wallShape.lineTo(-halfWidth, halfHeight);
-    wallShape.lineTo(halfWidth, halfHeight);
-    wallShape.lineTo(halfWidth, -halfHeight);
-    wallShape.lineTo(-halfWidth, -halfHeight);
+    const profileBounds = this._getProfileBounds(profilePoints);
 
-    // 開口を穴として追加
     for (const opening of openings) {
-      // STBの開口位置は壁の左下端（position_X=0が壁左端）からの距離
-      // position_Yは壁下端からの高さ
-      const openingLeft = opening.positionX - halfWidth;
-      const openingBottom = opening.positionY - halfHeight;
-      const openingRight = openingLeft + opening.width;
-      const openingTop = openingBottom + opening.height;
-
-      // 開口が壁の範囲内にあることを確認
-      if (
-        openingRight > halfWidth ||
-        openingTop > halfHeight ||
-        openingLeft < -halfWidth ||
-        openingBottom < -halfHeight
-      ) {
-        log.warn(`Opening ${opening.id} extends beyond wall bounds, clamping`);
-      }
-
-      // クランプ処理
-      const clampedLeft = Math.max(openingLeft, -halfWidth + 1);
-      const clampedRight = Math.min(openingRight, halfWidth - 1);
-      const clampedBottom = Math.max(openingBottom, -halfHeight + 1);
-      const clampedTop = Math.min(openingTop, halfHeight - 1);
-
-      // 有効な開口サイズか確認
-      if (clampedRight - clampedLeft < 10 || clampedTop - clampedBottom < 10) {
-        log.warn(`Opening ${opening.id} too small after clamping, skipping`);
+      if (!(opening.width > 0) || !(opening.height > 0)) {
+        log.warn(`Wall ${wallId ?? ''}: Opening ${opening.id} has invalid size, skipping`);
         continue;
       }
 
-      // 穴を追加（時計回り - THREE.jsのShapeでは外形が反時計回り、穴は時計回り）
+      const points = this._calculateOpeningProfilePoints(opening);
+      const openingBounds = this._getProfileBounds(points);
+
+      // STBデータは本来壁内に開口が収まる。ここでは形状を勝手にclampせず、
+      // 仕様値をそのまま描画し、bboxを越える場合だけ診断ログを残す。
+      if (
+        openingBounds.minX < profileBounds.minX - 1e-6 ||
+        openingBounds.maxX > profileBounds.maxX + 1e-6 ||
+        openingBounds.minY < profileBounds.minY - 1e-6 ||
+        openingBounds.maxY > profileBounds.maxY + 1e-6
+      ) {
+        log.warn(
+          `Wall ${wallId ?? ''}: Opening ${opening.id} extends beyond wall profile bounds; ` +
+            'rendering ST-Bridge coordinates without clamping',
+        );
+      }
+
       const hole = new THREE.Path();
-      hole.moveTo(clampedLeft, clampedBottom);
-      hole.lineTo(clampedRight, clampedBottom);
-      hole.lineTo(clampedRight, clampedTop);
-      hole.lineTo(clampedLeft, clampedTop);
-      hole.lineTo(clampedLeft, clampedBottom);
+      hole.moveTo(points[0].x, points[0].y);
+      for (let i = 1; i < points.length; i++) {
+        hole.lineTo(points[i].x, points[i].y);
+      }
+      hole.lineTo(points[0].x, points[0].y);
       wallShape.holes.push(hole);
     }
 
-    // 押し出し設定（Y方向に押し出し）
-    const extrudeSettings = {
+    const geometry = new THREE.ExtrudeGeometry(wallShape, {
       depth: thickness,
       bevelEnabled: false,
-    };
+    });
 
-    const geometry = new THREE.ExtrudeGeometry(wallShape, extrudeSettings);
-
-    // BoxGeometryと同じ座標系にするため回転と位置調整
-    // ExtrudeGeometryはXY平面上にShapeを作成しZ方向に押し出す
-    // しかし壁はXZ平面上にあるべきなので、-90度回転
-    geometry.rotateX(-Math.PI / 2);
-
-    // 押し出しはプラスY方向に行われるが、中心配置したいので移動
-    geometry.translate(0, -thickness / 2, 0);
+    // Shape X→壁ローカルX、Shape Y→全体Zとなるよう +90°回転する。
+    // 押出方向はローカル-Yへ向くため、壁厚中央がY=0になるよう +t/2 移動する。
+    geometry.rotateX(Math.PI / 2);
+    geometry.translate(0, thickness / 2, 0);
 
     return geometry;
   }
 }
 
-// デバッグ・開発支援
 if (typeof window !== 'undefined') {
   window.WallGenerator = WallGenerator;
 }
-
-export default WallGenerator;

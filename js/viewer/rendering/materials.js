@@ -11,7 +11,7 @@
  */
 
 import * as THREE from 'three';
-import { renderer } from '../core/core.js';
+import { clippingStateManager } from '../clipping/ClippingStateManager.js';
 import { getCurrentColorMode, COLOR_MODES } from '../../colorModes/colorModeState.js';
 import { getSchemaError } from '../../common-stb/validation/schemaErrorStore.js';
 import {
@@ -19,10 +19,13 @@ import {
   getElementValidation,
 } from '../../common-stb/validation/validationManager.js';
 import { IMPORTANCE_LEVELS } from '../../constants/importanceLevels.js';
+import { RenderableLifecycleEvents } from '../../constants/renderableLifecycleEvents.js';
 import { SRC_COMPONENT_COLORS } from '../../config/colorConfig.js';
+import { eventBus } from '../../data/events/eventBus.js';
 import { colorManager } from './colorManager.js';
 import { scheduleRender } from '../../utils/renderScheduler.js';
 import { createLogger } from '../../utils/logger.js';
+import { processObjectsInBatches } from '../../utils/elementGroupBatchRunner.js';
 
 const log = createLogger('viewer:rendering:materials');
 
@@ -236,7 +239,6 @@ export function createImportanceOutlineMaterial(importance) {
   if (!importance || !IMPORTANCE_VISUAL_STYLES[importance]) {
     return null;
   }
-
   const style = IMPORTANCE_VISUAL_STYLES[importance];
 
   // 幅が0の場合はアウトラインを作成しない
@@ -249,10 +251,12 @@ export function createImportanceOutlineMaterial(importance) {
     side: THREE.BackSide,
     transparent: true,
     opacity: Math.min(style.opacity, 0.8), // アウトラインは少し薄く
+    // SectionBox中に生成されても復元先は常にSectionBox外のlocal空状態。
+    clippingPlanes: clippingStateManager.getMaterialPlanes({ clippingExempt: true }),
   });
 
-  // クリッピング平面を設定
-  outlineMaterial.clippingPlanes = renderer?.clippingPlanes || [];
+  // active SectionBox 6面の適用と復元baselineの追跡をSSOTへ委譲する。
+  clippingStateManager.applyToMaterial(outlineMaterial);
 
   return outlineMaterial;
 }
@@ -333,6 +337,31 @@ class ImportanceMaterialCache {
 
 // グローバルキャッシュインスタンス
 const importanceMaterialCache = new ImportanceMaterialCache();
+let importanceBatchApplyDepth = 0;
+let importanceMaterialsChangedQueued = false;
+let importanceMaterialsChangedGeneration = 0;
+
+function emitImportanceMaterialsChanged() {
+  eventBus.emit(RenderableLifecycleEvents.MATERIALS_CHANGED, {
+    modeName: 'ImportanceColorMode',
+  });
+}
+
+/**
+ * 同一call stack内の同期Importance適用を1回の完了通知へまとめる。
+ * 非同期batch中はbatch全体のonCompleteが通知責務を持つため抑止する。
+ */
+function queueImportanceMaterialsChanged() {
+  if (importanceBatchApplyDepth > 0 || importanceMaterialsChangedQueued) return;
+  importanceMaterialsChangedQueued = true;
+  const generation = ++importanceMaterialsChangedGeneration;
+  globalThis.queueMicrotask(() => {
+    if (generation !== importanceMaterialsChangedGeneration) return;
+    importanceMaterialsChangedQueued = false;
+    if (importanceBatchApplyDepth > 0) return;
+    emitImportanceMaterialsChanged();
+  });
+}
 
 /**
  * 重要度別マテリアルを生成
@@ -409,6 +438,7 @@ export function applyImportanceColorMode(object, options = {}) {
       if (material) {
         object.material = material;
         object.material.needsUpdate = true;
+        queueImportanceMaterialsChanged();
       }
     }
   } catch (error) {
@@ -429,37 +459,37 @@ export function clearImportanceMaterialCache() {
  * バッチ処理で複数オブジェクトに重要度マテリアルを適用
  * @param {THREE.Object3D[]} objects - 処理対象オブジェクト配列
  * @param {Object} options - オプション設定
+ * @param {Function} [options.onComplete] 全バッチ完了後の追加コールバック
  */
 export function applyImportanceColorModeBatch(objects, options = {}) {
   const batchSize = options.batchSize || 100; // バッチサイズ
   const delay = options.delay || 10; // バッチ間の遅延（ms）
 
-  let currentIndex = 0;
+  // 既に予約済みの同期通知はこのbatch完了通知へ吸収する。
+  importanceMaterialsChangedGeneration++;
+  importanceMaterialsChangedQueued = false;
+  importanceBatchApplyDepth++;
 
-  const processBatch = () => {
-    const endIndex = Math.min(currentIndex + batchSize, objects.length);
-
-    for (let i = currentIndex; i < endIndex; i++) {
-      const object = objects[i];
-      if (object.isMesh) {
-        applyImportanceColorMode(object, options);
-      }
-    }
-
-    currentIndex = endIndex;
-
-    if (currentIndex < objects.length) {
-      // 次のバッチを遅延実行
-      setTimeout(processBatch, delay);
-    } else {
-      // 全バッチ完了時の処理
-      // 再描画をリクエスト
+  processObjectsInBatches(objects, {
+    batchSize,
+    processObject: (object) => {
+      if (object.isMesh) applyImportanceColorMode(object, options);
+    },
+    // 重要度モードは従来どおり指定ミリ秒のタイマーで処理を分割する。
+    scheduleNext: (nextBatch) => setTimeout(nextBatch, delay),
+    onComplete: () => {
       scheduleRender();
-    }
-  };
-
-  // 最初のバッチを実行
-  processBatch();
+      try {
+        // callback内でImportance materialを再適用しても、このbatchの最終通知へ吸収する。
+        options.onComplete?.();
+      } finally {
+        importanceBatchApplyDepth = Math.max(0, importanceBatchApplyDepth - 1);
+        if (importanceBatchApplyDepth === 0) {
+          emitImportanceMaterialsChanged();
+        }
+      }
+    },
+  });
 }
 
 /**

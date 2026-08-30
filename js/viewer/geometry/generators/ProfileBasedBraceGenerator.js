@@ -18,7 +18,13 @@
 import * as THREE from 'three';
 import { createExtrudeGeometry } from '../core/ThreeJSConverter.js';
 import { colorManager } from '../../rendering/colorManager.js';
-import { ElementGeometryUtils } from '../ElementGeometryUtils.js';
+import { getNodePositions } from '../core/ElementNodeResolver.js';
+import { getSectionData } from '../core/ElementSectionResolver.js';
+import {
+  calculateHorizontalElementPlacement,
+  getHorizontalElementOffsets,
+} from '../core/ElementPlacementResolver.js';
+import { createProfileFromSectionData } from '../core/SectionProfileFactory.js';
 import { BaseElementGenerator } from '../core/BaseElementGenerator.js';
 import { MeshMetadataBuilder } from '../core/MeshMetadataBuilder.js';
 
@@ -74,8 +80,8 @@ export class ProfileBasedBraceGenerator extends BaseElementGenerator {
   static _createSingleMesh(brace, context) {
     const { nodes, sections, elementType, isJsonInput, log } = context;
 
-    // 1. ノード位置の取得（ElementGeometryUtils使用）
-    const nodePositions = ElementGeometryUtils.getNodePositions(brace, nodes, {
+    // 1. ノード位置の取得
+    const nodePositions = getNodePositions(brace, nodes, {
       nodeType: '2node-horizontal',
       isJsonInput: isJsonInput,
       node1KeyStart: 'id_node_start',
@@ -86,8 +92,8 @@ export class ProfileBasedBraceGenerator extends BaseElementGenerator {
       return null;
     }
 
-    // 2. 断面データの取得（ElementGeometryUtils使用）
-    const sectionData = ElementGeometryUtils.getSectionData(brace, sections, isJsonInput);
+    // 2. 断面データの取得
+    const sectionData = getSectionData(brace, sections, isJsonInput);
 
     if (!this._validateSectionData(sectionData, brace, context)) {
       return null;
@@ -98,12 +104,12 @@ export class ProfileBasedBraceGenerator extends BaseElementGenerator {
 
     log.debug(`Creating brace ${brace.id}: section_type=${sectionType}`);
 
-    // 4. オフセットと回転角度の取得（ElementGeometryUtils使用）
-    const offsets = ElementGeometryUtils.getHorizontalElementOffsets(brace);
+    // 4. オフセットと回転角度の取得
+    const offsets = getHorizontalElementOffsets(brace);
 
-    // 5. 配置計算（ElementGeometryUtils使用）
+    // 5. 配置計算
     // ブレースは中心配置
-    const placement = ElementGeometryUtils.calculateHorizontalElementPlacement(
+    const placement = calculateHorizontalElementPlacement(
       nodePositions.startNode,
       nodePositions.endNode,
       {
@@ -119,8 +125,8 @@ export class ProfileBasedBraceGenerator extends BaseElementGenerator {
       return null;
     }
 
-    // 6. プロファイル生成（ElementGeometryUtils使用）
-    const profileResult = ElementGeometryUtils.createProfile(sectionData, sectionType, brace);
+    // 6. プロファイル生成
+    const profileResult = createProfileFromSectionData(sectionData, sectionType, brace, log);
 
     if (!this._validateProfile(profileResult, brace, context)) {
       return null;

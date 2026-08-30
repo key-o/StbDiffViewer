@@ -14,6 +14,7 @@ import {
   exemptFromClipping,
 } from './SectionBoxHandles.js';
 import { StencilCapManager } from './StencilCapManager.js';
+import { createBoxClippingPlanes } from './clippingPlaneFactory.js';
 import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('viewer:sectionBox');
@@ -53,6 +54,13 @@ export class SectionBox {
     // クリッピング平面（6面）
     this._clipPlanes = [];
 
+    // セクションボックス起動前のクリッピング状態を保持する。
+    // スタンシル断面生成時は renderer のグローバルクリッピングを使わず、
+    // 通常要素の material.clippingPlanes に6面を設定する必要がある。
+    this._previousRendererClippingPlanes = [];
+    this._previousLocalClippingEnabled = false;
+    this._materialClippingState = new Map();
+
     // スタンシルキャップ
     this._stencilCapManager = new StencilCapManager();
 
@@ -85,6 +93,7 @@ export class SectionBox {
       this.deactivate();
     }
 
+    this._captureClippingState();
     this._box.copy(modelBounds);
     this._initialBox.copy(modelBounds);
     this._active = true;
@@ -126,9 +135,8 @@ export class SectionBox {
     // スタンシルキャップ解除
     this._stencilCapManager.deactivate();
 
-    // クリッピング解除
-    this._renderer.clippingPlanes = [];
-    this._renderer.localClippingEnabled = false;
+    // セクションボックス起動前のグローバル/ローカルクリッピング状態へ戻す
+    this._restoreClippingState();
     this._clipPlanes = [];
 
     log.info('Section box deactivated');
@@ -248,8 +256,8 @@ export class SectionBox {
     const material = new THREE.LineBasicMaterial({
       color: WIREFRAME_COLOR,
       depthTest: false,
-      transparent: true,
-      opacity: 0.7,
+      transparent: false,
+      opacity: 1,
     });
 
     const wireframe = new THREE.LineSegments(edges, material);
@@ -262,21 +270,77 @@ export class SectionBox {
     return wireframe;
   }
 
+  /**
+   * セクションボックス起動前の renderer クリッピング状態を保存する。
+   * material の状態は実際に上書きする際に遅延保存する。
+   */
+  _captureClippingState() {
+    this._previousRendererClippingPlanes = Array.isArray(this._renderer.clippingPlanes)
+      ? [...this._renderer.clippingPlanes]
+      : [];
+    this._previousLocalClippingEnabled = this._renderer.localClippingEnabled === true;
+    this._materialClippingState.clear();
+  }
+
+  /**
+   * 通常描画マテリアルへセクションボックス6面をローカルクリッピングとして適用する。
+   *
+   * renderer.clippingPlanes を使うと、スタンシル書き込み用メッシュにも対象切断面が
+   * 強制適用される。すると「対象面以外の5面だけでクリップして内外を数える」という
+   * スタンシル法の前提が崩れ、柱などの切断面が中空に見える。
+   */
+  _applyLocalClippingPlanes() {
+    if (!this._scene) return;
+
+    this._scene.traverse((object) => {
+      if (!object.material) return;
+      if (
+        object.userData?.isSectionBox ||
+        object.userData?.isSectionBoxHandle ||
+        object.userData?.isStencilCap
+      ) {
+        return;
+      }
+
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of materials) {
+        if (!(material instanceof THREE.Material)) continue;
+
+        if (!this._materialClippingState.has(material)) {
+          this._materialClippingState.set(material, {
+            clippingPlanes: material.clippingPlanes,
+          });
+        }
+
+        material.clippingPlanes = this._clipPlanes;
+        material.needsUpdate = true;
+      }
+    });
+  }
+
+  /**
+   * セクションボックス起動前のクリッピング状態へ戻す。
+   */
+  _restoreClippingState() {
+    for (const [material, state] of this._materialClippingState.entries()) {
+      material.clippingPlanes = state.clippingPlanes;
+      material.needsUpdate = true;
+    }
+    this._materialClippingState.clear();
+
+    this._renderer.clippingPlanes = [...this._previousRendererClippingPlanes];
+    this._renderer.localClippingEnabled = this._previousLocalClippingEnabled;
+    this._previousRendererClippingPlanes = [];
+  }
+
   _updateClippingPlanes() {
-    const min = this._box.min;
-    const max = this._box.max;
+    this._clipPlanes = createBoxClippingPlanes(this._box);
 
-    this._clipPlanes = [
-      new THREE.Plane(new THREE.Vector3(1, 0, 0), -min.x),
-      new THREE.Plane(new THREE.Vector3(-1, 0, 0), max.x),
-      new THREE.Plane(new THREE.Vector3(0, 1, 0), -min.y),
-      new THREE.Plane(new THREE.Vector3(0, -1, 0), max.y),
-      new THREE.Plane(new THREE.Vector3(0, 0, 1), -min.z),
-      new THREE.Plane(new THREE.Vector3(0, 0, -1), max.z),
-    ];
-
-    this._renderer.clippingPlanes = this._clipPlanes;
+    // グローバル平面はスタンシルキャップにも強制適用されるため使用しない。
+    // 通常要素にはローカル平面として6面を設定し、スタンシル側では対象面を除く5面だけを使う。
+    this._renderer.clippingPlanes = [];
     this._renderer.localClippingEnabled = true;
+    this._applyLocalClippingPlanes();
   }
 
   _disposeGroupContents() {
@@ -382,8 +446,18 @@ export class SectionBox {
       return;
     }
 
-    // ホバー検出
     if (!this._active) return;
+    this._updateHoveredHandle(camera);
+
+    // ハンドルスケール更新
+    updateHandleScale(this._handles, camera);
+  }
+
+  /**
+   * 現在のポインタ位置に応じてホバー表示を更新する
+   * @param {THREE.Camera} camera
+   */
+  _updateHoveredHandle(camera) {
     this._raycaster.setFromCamera(this._mouse, camera);
     const intersects = this._raycaster.intersectObjects(this._handles);
 
@@ -394,19 +468,16 @@ export class SectionBox {
           setHandleState(this._hoveredHandle, 'default');
         }
         this._hoveredHandle = hovered;
-        setHandleState(this._hoveredHandle, 'hover');
-        this._domElement.style.cursor = 'grab';
       }
+      setHandleState(this._hoveredHandle, 'hover');
+      this._domElement.style.cursor = 'grab';
     } else {
       if (this._hoveredHandle) {
         setHandleState(this._hoveredHandle, 'default');
         this._hoveredHandle = null;
-        this._domElement.style.cursor = '';
       }
+      this._domElement.style.cursor = '';
     }
-
-    // ハンドルスケール更新
-    updateHandleScale(this._handles, camera);
   }
 
   /**
@@ -508,7 +579,13 @@ export class SectionBox {
       this._controls.enabled = true;
     }
 
-    this._domElement.style.cursor = '';
+    const camera = this._getCurrentCamera();
+    if (camera) {
+      this._updateMouseNDC(_event);
+      this._updateHoveredHandle(camera);
+    } else {
+      this._domElement.style.cursor = '';
+    }
 
     // ドラッグ完了後にスタンシルキャップを更新（ドラッグ中は省略）
     this._refreshStencilCaps();

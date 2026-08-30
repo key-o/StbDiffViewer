@@ -12,71 +12,28 @@ import { createLogger } from '../../utils/logger.js';
 import { getMaterialForElementWithMode } from './materials.js';
 import { LineBatcher, getHitElementFromBatch } from './geometryBatcher.js';
 import { getViewerState } from '../stateProvider.js';
+import {
+  attachElementDataToLabelInternal,
+  createLabelSpriteInternal,
+  disposeAndClearGroup,
+  generateLabelTextInternal,
+  getSharedNodeSphereGeometry,
+  isValidPointCoords,
+  setElementsLabelProvider,
+} from './elementsShared.js';
 
 const log = createLogger('viewer:batchedElements');
 
 // ============================================
-// ラベル処理プロバイダー（依存性注入）
+// ラベル処理プロバイダー（elementsSharedと共通）
 // ============================================
 
 /**
- * @typedef {Object} LabelProvider
- * @property {function(Object, string): string} generateLabelText - ラベルテキスト生成
- * @property {function(THREE.Sprite, Object): void} attachElementDataToLabel - 要素データをラベルに付与
- * @property {function(string, THREE.Vector3, THREE.Group, string, Object=): THREE.Sprite|null} createLabelSprite - ラベルスプライト作成
- */
-
-/** @type {LabelProvider|null} */
-let labelProvider = null;
-
-/**
- * ラベルプロバイダーを設定（依存性注入）
- * @param {LabelProvider} provider - ラベルプロバイダー
+ * 後方互換API。通常描画・Batch描画で同じProviderを共有する。
+ * @param {Object|null} provider
  */
 export function setLabelProvider(provider) {
-  labelProvider = provider;
-}
-
-/**
- * ラベルスプライトを作成（プロバイダー経由）
- * @param {string} text - ラベルテキスト
- * @param {THREE.Vector3} position - 位置
- * @param {THREE.Group} group - グループ
- * @param {string} elementType - 要素タイプ
- * @param {Object} [meta] - メタ情報
- * @returns {THREE.Sprite|null} ラベルスプライト
- */
-function createLabelSpriteInternal(text, position, group, elementType, meta) {
-  if (labelProvider && labelProvider.createLabelSprite) {
-    return labelProvider.createLabelSprite(text, position, group, elementType, meta);
-  }
-  // プロバイダー未設定時はnull（初期化タイミングによる正常な状態）
-  return null;
-}
-
-/**
- * ラベルテキストを生成（プロバイダー経由）
- * @param {Object} element - 要素データ
- * @param {string} elementType - 要素タイプ
- * @returns {string} ラベルテキスト
- */
-function generateLabelTextInternal(element, elementType) {
-  if (labelProvider && labelProvider.generateLabelText) {
-    return labelProvider.generateLabelText(element, elementType);
-  }
-  // フォールバック: 要素名またはID
-  return element.name || element.id || '';
-}
-
-/**
- * 要素データをラベルに付与（プロバイダー経由）
- * @param {THREE.Sprite} sprite - ラベルスプライト
- * @param {Object} element - 要素データ
- */
-function attachElementDataToLabelInternal(sprite, element) {
-  if (labelProvider && labelProvider.attachElementDataToLabel) {
-    labelProvider.attachElementDataToLabel(sprite, element);
-  }
+  setElementsLabelProvider(provider);
 }
 
 /**
@@ -119,7 +76,7 @@ export function drawLineElementsBatched(
   labelToggle,
   modelBounds,
 ) {
-  group.clear();
+  disposeAndClearGroup(group);
   const createdLabels = [];
 
   log.info(`Drawing batched line elements for ${elementType}:`, {
@@ -128,7 +85,6 @@ export function drawLineElementsBatched(
     onlyB: comparisonResult.onlyB.length,
   });
 
-  // カテゴリごとにバッチャーを作成
   const matchedBatchers = new Map();
   const onlyABatcher = new LineBatcher();
   const onlyBBatcher = new LineBatcher();
@@ -141,7 +97,6 @@ export function drawLineElementsBatched(
     return matchedBatchers.get(key);
   };
 
-  // Matched要素を処理
   comparisonResult.matched.forEach((item) => {
     const {
       dataA,
@@ -156,7 +111,7 @@ export function drawLineElementsBatched(
     const startCoords = dataA.startCoords;
     const endCoords = dataA.endCoords;
 
-    if (!isValidCoords(startCoords) || !isValidCoords(endCoords)) {
+    if (!isValidPointCoords(startCoords) || !isValidPointCoords(endCoords)) {
       return;
     }
 
@@ -182,7 +137,6 @@ export function drawLineElementsBatched(
     modelBounds.expandByPoint(startVec);
     modelBounds.expandByPoint(endVec);
 
-    // ラベル作成（バッチ処理でも個別に作成）
     if (labelToggle && (dataA.id || dataB.id)) {
       const label = createBatchedLabel(
         startVec,
@@ -197,11 +151,10 @@ export function drawLineElementsBatched(
     }
   });
 
-  // OnlyA要素を処理
   comparisonResult.onlyA.forEach((item) => {
     const { startCoords, endCoords, id, element, importance } = item;
 
-    if (!isValidCoords(startCoords) || !isValidCoords(endCoords)) {
+    if (!isValidPointCoords(startCoords) || !isValidPointCoords(endCoords)) {
       return;
     }
 
@@ -234,11 +187,10 @@ export function drawLineElementsBatched(
     }
   });
 
-  // OnlyB要素を処理
   comparisonResult.onlyB.forEach((item) => {
     const { startCoords, endCoords, id, element, importance } = item;
 
-    if (!isValidCoords(startCoords) || !isValidCoords(endCoords)) {
+    if (!isValidPointCoords(startCoords) || !isValidPointCoords(endCoords)) {
       return;
     }
 
@@ -271,7 +223,6 @@ export function drawLineElementsBatched(
     }
   });
 
-  // バッチをビルドしてグループに追加
   for (const [diffStatus, batcher] of matchedBatchers.entries()) {
     if (batcher.count === 0) continue;
     const material = getMaterialForElementWithMode(
@@ -314,37 +265,13 @@ export function drawLineElementsBatched(
     ),
     onlyASegments: onlyABatcher.count,
     onlyBSegments: onlyBBatcher.count,
-    totalDrawCalls: 3, // matched, onlyA, onlyB
+    totalDrawCalls: 3,
     labelsCreated: createdLabels.length,
   });
 
   return createdLabels;
 }
 
-/**
- * 座標が有効かどうかを確認
- *
- * @param {Object} coords - 座標オブジェクト
- * @returns {boolean}
- */
-function isValidCoords(coords) {
-  return (
-    coords && Number.isFinite(coords.x) && Number.isFinite(coords.y) && Number.isFinite(coords.z)
-  );
-}
-
-/**
- * バッチ処理用のラベルを作成（matched要素用）
- *
- * @param {THREE.Vector3} startVec - 始点
- * @param {THREE.Vector3} endVec - 終点
- * @param {Object} dataA - モデルAのデータ
- * @param {Object} dataB - モデルBのデータ
- * @param {string} modelSource - モデルソース
- * @param {string} elementType - 要素タイプ
- * @param {THREE.Group} group - 描画グループ
- * @returns {THREE.Sprite|null}
- */
 function createBatchedLabel(startVec, endVec, dataA, dataB, modelSource, elementType, group) {
   const midPoint = new THREE.Vector3().addVectors(startVec, endVec).multiplyScalar(0.5);
 
@@ -373,19 +300,6 @@ function createBatchedLabel(startVec, endVec, dataA, dataB, modelSource, element
   return sprite;
 }
 
-/**
- * 単一モデル要素用のラベルを作成
- *
- * @param {THREE.Vector3} startVec - 始点
- * @param {THREE.Vector3} endVec - 終点
- * @param {string} id - 要素ID
- * @param {Object} element - 要素データ
- * @param {string} modelSource - モデルソース（'A' or 'B'）
- * @param {string} elementType - 要素タイプ
- * @param {THREE.Group} group - 描画グループ
- * @param {number} offsetAmount - ラベルオフセット量
- * @returns {THREE.Sprite|null}
- */
 function createSingleModelLabel(
   startVec,
   endVec,
@@ -428,57 +342,18 @@ function createSingleModelLabel(
   return sprite;
 }
 
-/**
- * バッチ処理されたオブジェクトのレイキャスト結果から要素情報を取得
- *
- * @param {THREE.Intersection} intersection - レイキャスト結果
- * @returns {Object|null} 要素情報
- */
 export function getElementFromBatchedIntersection(intersection) {
   return getHitElementFromBatch(intersection);
 }
 
-/**
- * 共有球体ジオメトリ（全節点で再利用）
- * @type {THREE.SphereGeometry|null}
- */
-let sharedSphereGeometry = null;
-
-/**
- * 共有球体ジオメトリを取得（遅延初期化）
- * @returns {THREE.SphereGeometry}
- */
-function getSharedSphereGeometry() {
-  if (!sharedSphereGeometry) {
-    sharedSphereGeometry = new THREE.SphereGeometry(50, 12, 8);
-  }
-  return sharedSphereGeometry;
-}
-
-/**
- * InstancedMesh を使用して節点をバッチ描画
- *
- * 従来の drawNodes では各節点ごとに個別の Mesh を作成していましたが、
- * この関数では InstancedMesh を使用することで、ドローコールを大幅に削減します。
- *
- * @param {Object} comparisonResult - 比較結果 (matched, onlyA, onlyB)
- * @param {Object} materials - マテリアル（未使用、互換性のため）
- * @param {THREE.Group} group - 描画グループ
- * @param {boolean} labelToggle - ラベル表示の有無
- * @param {THREE.Box3} modelBounds - モデル境界
- * @returns {Array<THREE.Sprite>} 作成されたラベル
- */
 export function drawNodesBatched(comparisonResult, materials, group, labelToggle, modelBounds) {
-  group.clear();
+  disposeAndClearGroup(group);
   const createdLabels = [];
 
   const onlyANodes = [];
   const onlyBNodes = [];
-
-  // matchType ごとにグループ分け（マテリアルが異なる可能性があるため）
   const matchedByType = new Map();
 
-  // Matched要素を処理
   comparisonResult.matched.forEach((item) => {
     const {
       dataA,
@@ -494,7 +369,7 @@ export function drawNodesBatched(comparisonResult, materials, group, labelToggle
     const idA = dataA.id;
     const idB = dataB.id;
 
-    if (!isValidCoords(coords)) {
+    if (!isValidPointCoords(coords)) {
       log.warn(`Skipping matched node due to invalid coords: A=${idA}, B=${idB}`);
       return;
     }
@@ -502,7 +377,6 @@ export function drawNodesBatched(comparisonResult, materials, group, labelToggle
     const pos = new THREE.Vector3(coords.x, coords.y, coords.z);
     modelBounds.expandByPoint(pos);
 
-    // matchType ごとにグループ化
     const typeKey = diffStatus || matchType || 'exact';
     if (!matchedByType.has(typeKey)) {
       matchedByType.set(typeKey, []);
@@ -531,11 +405,10 @@ export function drawNodesBatched(comparisonResult, materials, group, labelToggle
     }
   });
 
-  // OnlyA要素を処理
   comparisonResult.onlyA.forEach((item) => {
     const { coords, id, importance } = item;
 
-    if (!isValidCoords(coords)) {
+    if (!isValidPointCoords(coords)) {
       log.warn(`Skipping onlyA node due to invalid coords: ID=${id}`);
       return;
     }
@@ -560,11 +433,10 @@ export function drawNodesBatched(comparisonResult, materials, group, labelToggle
     }
   });
 
-  // OnlyB要素を処理
   comparisonResult.onlyB.forEach((item) => {
     const { coords, id, importance } = item;
 
-    if (!isValidCoords(coords)) {
+    if (!isValidPointCoords(coords)) {
       log.warn(`Skipping onlyB node due to invalid coords: ID=${id}`);
       return;
     }
@@ -589,10 +461,8 @@ export function drawNodesBatched(comparisonResult, materials, group, labelToggle
     }
   });
 
-  // 共有ジオメトリを取得
-  const sphereGeometry = getSharedSphereGeometry();
+  const sphereGeometry = getSharedNodeSphereGeometry();
 
-  // Matched ノードの InstancedMesh を作成（matchType ごと）
   matchedByType.forEach((nodes, statusKey) => {
     if (nodes.length === 0) return;
     const firstNode = nodes[0];
@@ -647,7 +517,6 @@ export function drawNodesBatched(comparisonResult, materials, group, labelToggle
     group.add(instancedMesh);
   });
 
-  // OnlyA ノードの InstancedMesh を作成
   if (onlyANodes.length > 0) {
     const material = getMaterialForElementWithMode('Node', 'onlyA', false, false, null);
 
@@ -680,7 +549,6 @@ export function drawNodesBatched(comparisonResult, materials, group, labelToggle
     group.add(instancedMesh);
   }
 
-  // OnlyB ノードの InstancedMesh を作成
   if (onlyBNodes.length > 0) {
     const material = getMaterialForElementWithMode('Node', 'onlyB', false, false, null);
 

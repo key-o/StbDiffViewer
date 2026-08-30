@@ -5,6 +5,7 @@
  */
 
 import * as THREE from 'three';
+import { buildCanvasFont } from '../utils/typography.js';
 import { convertDxfSpecialChars } from './dxfTextRenderer.js';
 
 /**
@@ -487,7 +488,7 @@ function createDimensionTextSprite(config) {
   ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
   // テキスト描画
-  ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+  ctx.font = buildCanvasFont(fontSize, { weight: 'bold' });
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 

@@ -19,6 +19,9 @@ import { createLogger } from '../../utils/logger.js';
 import { OrbitLikeControlsShim, MinimalControls } from '../controls/orbitLikeControlsShim.js';
 import { getFrustumCuller } from '../rendering/FrustumCuller.js';
 import { getLabelVisibilityCuller } from '../annotations/labelVisibilityCuller.js';
+import { resizeOrthographicFrustum } from './orthographicProjection.js';
+import { getCanvasDisplaySize } from './viewportMetrics.js';
+import { AnimationLoopController, ViewportResizeController } from './runtimeLifecycle.js';
 
 const log = createLogger('viewer/core/core');
 
@@ -62,7 +65,11 @@ let renderRequested = true;
 // 複数のカメラ（Perspective/Orthographic）を切り替え可能にする
 // デフォルトはPerspectiveCamera（3Dモード）
 export let activeCamera = null; // 初期化後にcameraを代入
-let viewportResizeObserver = null;
+let viewportResizeController = null;
+let animationScene = null;
+let animationCameraOverride = null;
+let cullingFrameCounter = 0;
+const CULLING_INTERVAL = 3;
 
 if (typeof window !== 'undefined') {
   // ブラウザ環境での初期化
@@ -143,7 +150,12 @@ export function setActiveCamera(newCamera) {
  * @param {Object} newControls - 新しいコントロール
  */
 export function setActiveControls(newControls) {
+  detachControlsChangeListener(controls);
   controls = newControls;
+  attachControlsChangeListener(controls);
+  if (typeof window !== 'undefined') {
+    window.controls = controls;
+  }
   requestRender();
 }
 
@@ -151,27 +163,27 @@ export function requestRender() {
   renderRequested = true;
 }
 
-/**
- * キャンバスのCSS表示サイズを取得する。
- * WebGLの描画バッファサイズは、windowではなく実際に表示されるcanvasサイズへ同期する。
- * @param {HTMLCanvasElement} canvas
- * @returns {{width: number, height: number}}
- */
-export function getCanvasDisplaySize(canvas) {
-  const rect = canvas.getBoundingClientRect?.();
-  const width = canvas.clientWidth || rect?.width || window.innerWidth || 1;
-  const height = canvas.clientHeight || rect?.height || window.innerHeight || 1;
-
-  return {
-    width: Math.max(1, Math.round(width)),
-    height: Math.max(1, Math.round(height)),
-  };
+function attachControlsChangeListener(targetControls) {
+  if (targetControls && typeof targetControls.addEventListener === 'function') {
+    targetControls.addEventListener('change', requestRender);
+  }
 }
 
+function detachControlsChangeListener(targetControls) {
+  if (targetControls && typeof targetControls.removeEventListener === 'function') {
+    targetControls.removeEventListener('change', requestRender);
+  }
+}
+
+// 後方互換性のためcore.jsからも公開するが、実装はviewportMetrics.jsに一元化する。
+export { getCanvasDisplaySize };
+
 // --- ライト設定 ---
-const light = new THREE.DirectionalLight(0xffffff, 1);
-light.position.set(1, 1, 1).normalize();
-scene.add(light);
+// 以前は同方向のDirectionalLightを2灯（1.0 + 0.8）追加していたため、
+// 見た目を変えずに1灯へ統合する。
+export const directionalLight = new THREE.DirectionalLight(0xffffff, 1.8);
+directionalLight.position.set(1, 1, 1).normalize();
+scene.add(directionalLight);
 const ambientLight = new THREE.AmbientLight(0xcccccc, 0.5);
 scene.add(ambientLight);
 
@@ -201,6 +213,12 @@ SUPPORTED_ELEMENTS.forEach((type) => {
  */
 export async function initRenderer() {
   try {
+    // 再初期化時に旧Controls/loopの副作用を残さない。
+    const restartAnimationLoop = animationLoopController.isRunning();
+    if (restartAnimationLoop) animationLoopController.stop();
+    detachControlsChangeListener(controls);
+    controls?.dispose?.();
+
     const canvas = document.getElementById('three-canvas');
     if (!canvas) {
       log.error("ID 'three-canvas'のキャンバス要素が見つかりません。");
@@ -262,9 +280,8 @@ export async function initRenderer() {
       RIGHT: THREE.MOUSE.PAN,
     };
 
-    if (controls && typeof controls.addEventListener === 'function') {
-      controls.addEventListener('change', requestRender);
-    }
+    attachControlsChangeListener(controls);
+    if (restartAnimationLoop) animationLoopController.start();
 
     requestRender();
 
@@ -343,73 +360,80 @@ export function setXRFrameHandler(handler) {
 }
 
 // --- アニメーションループ ---
-/**
- * アニメーションループを開始
- * @param {Object} controls - カメラコントロール
- * @param {THREE.Scene} scene - レンダリングするシーン
- * @param {THREE.Camera} [camera] - 使用するカメラ（省略時はactiveCameraを使用）
- */
-export function animate(controls, scene, camera) {
-  // フラスタムカリング用のカウンター（毎フレームではなく一定間隔で実行）
-  let cullingFrameCounter = 0;
-  const CULLING_INTERVAL = 3; // 3フレームごとにカリング実行
+let _clock = new THREE.Clock();
 
-  // 共通のフレーム処理（requestAnimationFrame / setAnimationLoop 両対応）
-  const _frameUpdate = (_timestamp, _xrFrame) => {
-    if (!renderer) return;
-    let shouldRender = renderRequested || _xrSessionActive;
-    // XRセッション中はコントロール更新をスキップ（ヘッドトラッキングが制御）
-    if (!skipControlsUpdate && !_xrSessionActive) {
-      const dt = _clock.getDelta();
-      const currentControls = controls;
-      if (currentControls && typeof currentControls.update === 'function') {
-        const controlsChanged = currentControls.update(dt);
-        shouldRender = shouldRender || controlsChanged === true;
-      }
+function frameUpdate(_timestamp, xrFrame) {
+  if (!renderer) return;
+
+  let shouldRender = renderRequested || _xrSessionActive;
+  if (!skipControlsUpdate && !_xrSessionActive) {
+    const dt = _clock.getDelta();
+    const currentControls = controls;
+    if (currentControls && typeof currentControls.update === 'function') {
+      const controlsChanged = currentControls.update(dt);
+      shouldRender = shouldRender || controlsChanged === true;
     }
-    const renderCamera = camera || activeCamera;
-
-    if (frustumCullingEnabled) {
-      cullingFrameCounter++;
-      if (cullingFrameCounter >= CULLING_INTERVAL) {
-        cullingFrameCounter = 0;
-        const culler = getFrustumCuller(renderCamera);
-        culler.cullElementGroups(elementGroups);
-        shouldRender = true;
-      }
-    }
-
-    if (_xrSessionActive && _xrFrame && _xrFrameHandler) {
-      try {
-        _xrFrameHandler(_xrFrame);
-      } catch (e) {
-        log.warn('XRフレームハンドラ実行中にエラーが発生しました:', e);
-      }
-    }
-
-    if (shouldRender) {
-      if (labelVisibilityCullingProvider) {
-        const labels = labelVisibilityCullingProvider.getLabels();
-        getLabelVisibilityCuller().cullLabels(labels, renderCamera);
-      }
-      renderer.render(scene, renderCamera);
-      renderRequested = false;
-    }
-  };
-
-  // アニメーション開始（多重開始防止のため、1回目の呼び出しでループセット）
-  if (!_animating) {
-    _animating = true;
-    _clock = new THREE.Clock();
-    requestRender();
-    // setAnimationLoop を使用（WebXRセッション時に自動でXRフレームループに切替わる）
-    renderer.setAnimationLoop(_frameUpdate);
   }
+
+  const renderCamera = animationCameraOverride || activeCamera;
+  const renderScene = animationScene || scene;
+  if (!renderCamera || !renderScene) return;
+
+  if (frustumCullingEnabled) {
+    cullingFrameCounter++;
+    if (cullingFrameCounter >= CULLING_INTERVAL) {
+      cullingFrameCounter = 0;
+      const culler = getFrustumCuller(renderCamera);
+      culler.cullElementGroups(elementGroups);
+      shouldRender = true;
+    }
+  }
+
+  if (_xrSessionActive && xrFrame && _xrFrameHandler) {
+    try {
+      _xrFrameHandler(xrFrame);
+    } catch (e) {
+      log.warn('XRフレームハンドラ実行中にエラーが発生しました:', e);
+    }
+  }
+
+  if (!shouldRender) return;
+
+  if (labelVisibilityCullingProvider) {
+    const labels = labelVisibilityCullingProvider.getLabels();
+    getLabelVisibilityCuller().cullLabels(labels, renderCamera);
+  }
+  renderer.render(renderScene, renderCamera);
+  renderRequested = false;
 }
 
-// ループ状態
-let _animating = false;
-let _clock = new THREE.Clock();
+const animationLoopController = new AnimationLoopController({
+  getRenderer: () => renderer,
+  frameHandler: frameUpdate,
+});
+
+/**
+ * アニメーションループを開始する。
+ * 2回目以降の呼び出しではloopを重複登録せず、scene/camera/controls参照だけを更新する。
+ * @param {Object} nextControls - カメラコントロール
+ * @param {THREE.Scene} nextScene - レンダリングするシーン
+ * @param {THREE.Camera} [nextCamera] - 固定カメラ。省略時は毎frame activeCameraを参照する
+ */
+export function animate(nextControls = controls, nextScene = scene, nextCamera = null) {
+  if (nextControls !== controls) {
+    setActiveControls(nextControls);
+  }
+  animationScene = nextScene || scene;
+  animationCameraOverride = nextCamera || null;
+
+  if (!animationLoopController.isRunning()) {
+    _clock = new THREE.Clock();
+    cullingFrameCounter = 0;
+  }
+
+  requestRender();
+  animationLoopController.start();
+}
 
 // --- ウィンドウリサイズ処理 ---
 /**
@@ -423,20 +447,15 @@ export function updateViewportSize() {
   const { width: w, height: h } = getCanvasDisplaySize(canvas);
   const aspect = w / h;
 
-  // PerspectiveCamera の更新
+  // PerspectiveCamera の更新。既存3DビューのFOV/位置は変更しない。
   if (camera && camera.aspect !== undefined) {
     camera.aspect = aspect;
     camera.updateProjectionMatrix();
   }
 
-  // OrthographicCamera の更新（frustumサイズを維持してアスペクト比を調整）
+  // OrthographicCamera は共通Projectionへ委譲し、現在の表示高さを維持してaspectだけ更新する。
   if (orthographicCamera) {
-    const frustumSize = orthographicCamera.top * 2; // 現在のfrustumサイズを取得
-    orthographicCamera.left = (-frustumSize * aspect) / 2;
-    orthographicCamera.right = (frustumSize * aspect) / 2;
-    orthographicCamera.top = frustumSize / 2;
-    orthographicCamera.bottom = -frustumSize / 2;
-    orthographicCamera.updateProjectionMatrix();
+    resizeOrthographicFrustum(orthographicCamera, aspect);
   }
 
   renderer.setSize(w, h, false);
@@ -449,24 +468,42 @@ export function updateViewportSize() {
  * @param {THREE.Camera} _defaultCamera - デフォルトカメラ（後方互換性のため）
  */
 export function setupViewportResizeHandler(_defaultCamera) {
-  const syncViewport = () => {
-    // XRプレゼンテーション中はサイズ変更不可（セッション終了時に再同期する）
-    if (_xrSessionActive || renderer?.xr?.isPresenting) return;
-    updateViewportSize();
-  };
-
-  window.addEventListener('resize', () => requestAnimationFrame(syncViewport), false);
-
-  if (typeof ResizeObserver !== 'undefined' && renderer?.domElement && !viewportResizeObserver) {
-    viewportResizeObserver = new ResizeObserver(() => requestAnimationFrame(syncViewport));
-    viewportResizeObserver.observe(renderer.domElement);
+  if (!viewportResizeController) {
+    viewportResizeController = new ViewportResizeController({
+      getCanvas: () => renderer?.domElement || null,
+      isBlocked: () => _xrSessionActive || renderer?.xr?.isPresenting === true,
+      onResize: updateViewportSize,
+    });
   }
+  viewportResizeController.start();
 }
 
-// --- Lights ---
-// export const ambientLight = new THREE.AmbientLight(0xffffff, 0.5); // 必要なら追加
-// scene.add(ambientLight);
-// ★★★ directionalLight を作成し、エクスポート ★★★
-export const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-directionalLight.position.set(1, 1, 1).normalize();
-scene.add(directionalLight); // シーンに追加
+/**
+ * Viewer runtimeが登録した副作用を解除する。
+ * テスト、SPA再初期化、将来の複数Viewer化で同じlistener/loopを残さないための明示的な終了点。
+ * @param {{disposeRenderer?: boolean}} [options]
+ */
+export function disposeViewerRuntime(options = {}) {
+  const { disposeRenderer = false } = options;
+
+  animationLoopController.stop();
+  viewportResizeController?.dispose();
+  viewportResizeController = null;
+
+  detachControlsChangeListener(controls);
+  controls?.dispose?.();
+  if (typeof window !== 'undefined' && window.controls === controls) {
+    delete window.controls;
+  }
+  controls = null;
+
+  if (disposeRenderer && renderer) {
+    renderer.dispose?.();
+    renderer = null;
+  }
+
+  animationScene = null;
+  animationCameraOverride = null;
+  cullingFrameCounter = 0;
+  renderRequested = true;
+}

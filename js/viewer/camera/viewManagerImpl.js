@@ -6,8 +6,12 @@
  */
 
 import * as THREE from 'three';
-import { controls } from '../core/core.js';
-import { getActiveCamera } from '../core/core.js';
+import { controls, renderer, getActiveCamera } from '../core/core.js';
+import { getCanvasAspect } from '../core/viewportMetrics.js';
+import {
+  fitOrthographicToBounds,
+  setOrthographicViewHeight,
+} from '../core/orthographicProjection.js';
 import { reaffirmControlsForCurrentMode } from './cameraManagerImpl.js';
 import { createLogger } from '../../utils/logger.js';
 
@@ -76,7 +80,8 @@ export function setView(viewType, modelBounds = null, enableTransition = false) 
     return false;
   }
 
-  // モデルの中心と距離を計算
+  // モデルの中心と距離を計算。
+  // PerspectiveCamera側の既存位置決定ロジックは変更しない。
   const center = new THREE.Vector3(0, 0, 0);
   let distance = 20000; // デフォルト20m
 
@@ -89,7 +94,7 @@ export function setView(viewType, modelBounds = null, enableTransition = false) 
     const size = new THREE.Vector3();
     modelBounds.getSize(size);
     const maxDimension = Math.max(size.x, size.y, size.z);
-    distance = maxDimension * 1.5; // モデルサイズの1.5倍
+    distance = maxDimension * 1.5; // 既存3Dビューと同じカメラ距離
   } else {
     log.warn('[ViewManager] Model bounds not available, using defaults');
   }
@@ -122,12 +127,13 @@ export function setView(viewType, modelBounds = null, enableTransition = false) 
       up = new THREE.Vector3(0, 0, 1); // Z軸が上
       break;
 
-    case VIEW_DIRECTIONS.ISOMETRIC:
+    case VIEW_DIRECTIONS.ISOMETRIC: {
       // 等角投影: 斜め上から
       const iso = distance / Math.sqrt(3);
       position = new THREE.Vector3(center.x + iso, center.y - iso, center.z + iso);
       up = new THREE.Vector3(0, 0, 1); // Z軸が上
       break;
+    }
 
     case VIEW_DIRECTIONS.BACK:
       // 背面図: Y+方向から見る
@@ -274,17 +280,18 @@ export function setView(viewType, modelBounds = null, enableTransition = false) 
       return false;
   }
 
-  // OrthographicCameraの場合、frustumサイズを調整（カメラ移動前に設定）
+  // 正投影の表示範囲は共通Projectionだけが決定する。
+  // カメラ位置は既存3Dビューと同じdistanceを使うが、図面の縮尺は
+  // 非表示軸を含む3D最大寸法ではなく、ビュー面への投影範囲から算定する。
   if (camera.isOrthographicCamera) {
-    const aspect = window.innerWidth / window.innerHeight;
-    const frustumHeight = distance;
-    const frustumWidth = frustumHeight * aspect;
+    const aspect = getCanvasAspect(renderer?.domElement);
+    const fittedHeight = modelBounds
+      ? fitOrthographicToBounds(camera, modelBounds, position, center, up, aspect)
+      : null;
 
-    camera.left = -frustumWidth / 2;
-    camera.right = frustumWidth / 2;
-    camera.top = frustumHeight / 2;
-    camera.bottom = -frustumHeight / 2;
-    camera.zoom = 1.0; // ズームをリセット
+    if (!fittedHeight) {
+      setOrthographicViewHeight(camera, distance, aspect, { resetZoom: true });
+    }
   }
 
   // upベクトルを設定

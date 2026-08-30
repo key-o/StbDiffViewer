@@ -80,7 +80,7 @@
  * ラベルオプション
  * @typedef {Object} LabelOptions
  * @property {number} [fontSize=16] - フォントサイズ
- * @property {string} [fontFamily='Arial'] - フォントファミリー
+ * @property {string} [fontFamily] - フォントファミリー。省略時は共通タイポグラフィ設定を使用
  * @property {string} [color='rgba(0, 0, 0, 1)'] - テキスト色
  * @property {number} [padding=6] - パディング
  */

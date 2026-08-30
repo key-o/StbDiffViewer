@@ -14,7 +14,13 @@
 
 import * as THREE from 'three';
 import { colorManager } from '../../rendering/colorManager.js';
-import { ElementGeometryUtils } from '../ElementGeometryUtils.js';
+import { getNodePositions } from '../core/ElementNodeResolver.js';
+import { getSectionData } from '../core/ElementSectionResolver.js';
+import {
+  calculateSingleNodePlacement,
+  getOffsetAndRotation,
+} from '../core/ElementPlacementResolver.js';
+import { MeshMetadataBuilder } from '../core/MeshMetadataBuilder.js';
 import { BaseElementGenerator } from '../core/BaseElementGenerator.js';
 
 /**
@@ -69,8 +75,8 @@ export class FootingGenerator extends BaseElementGenerator {
   static _createSingleMesh(footing, context) {
     const { nodes, sections, elementType, isJsonInput, log } = context;
 
-    // 1. ノード位置の取得（ElementGeometryUtils使用）
-    const nodePositions = ElementGeometryUtils.getNodePositions(footing, nodes, {
+    // 1. ノード位置の取得
+    const nodePositions = getNodePositions(footing, nodes, {
       nodeType: '1node',
       isJsonInput: isJsonInput,
       node1Key: 'id_node',
@@ -80,8 +86,8 @@ export class FootingGenerator extends BaseElementGenerator {
       return null;
     }
 
-    // 2. 断面データの取得（ElementGeometryUtils使用）
-    const sectionData = ElementGeometryUtils.getSectionData(footing, sections, isJsonInput);
+    // 2. 断面データの取得
+    const sectionData = getSectionData(footing, sections, isJsonInput);
 
     if (!this._validateSectionData(sectionData, footing, context)) {
       return null;
@@ -107,21 +113,14 @@ export class FootingGenerator extends BaseElementGenerator {
     // 4. level_bottom の取得
     const levelBottom = footing.level_bottom || 0;
 
-    // 5. オフセットと回転の取得（ElementGeometryUtils使用）
-    const offsetAndRotation = ElementGeometryUtils.getOffsetAndRotation(footing, {
-      nodeType: '1node',
-    });
+    // 5. オフセットと回転の取得
+    const offsetAndRotation = getOffsetAndRotation(footing);
 
-    // 6. 配置計算（1ノード要素専用ロジック - ElementGeometryUtils使用）
-    const placement = ElementGeometryUtils.calculateSingleNodePlacement(
-      nodePositions.node,
-      levelBottom,
-      depth,
-      {
-        offset: offsetAndRotation.startOffset,
-        rotation: (offsetAndRotation.rollAngle * Math.PI) / 180, // 度→ラジアン変換
-      },
-    );
+    // 6. 配置計算（1ノード要素専用ロジック）
+    const placement = calculateSingleNodePlacement(nodePositions.node, levelBottom, depth, {
+      offset: offsetAndRotation.startOffset,
+      rotation: (offsetAndRotation.rollAngle * Math.PI) / 180, // 度→ラジアン変換
+    });
 
     log.debug(
       `Footing ${footing.id}: position=(${placement.position.x.toFixed(
@@ -137,20 +136,22 @@ export class FootingGenerator extends BaseElementGenerator {
       return null;
     }
 
-    // 8. メッシュ作成（ElementGeometryUtils使用）
-    const mesh = ElementGeometryUtils.createMeshWithMetadata(
+    // 8. メッシュ作成
+    const mesh = new THREE.Mesh(
       geometry,
       colorManager.getMaterial('diff', { comparisonState: 'matched' }),
-      footing,
-      {
-        elementType: elementType,
-        isJsonInput: isJsonInput,
-        length: depth,
-        sectionType: 'RECTANGLE',
-        profileMeta: { profileSource: 'BoxGeometry', profileType: 'RECTANGLE' },
-        sectionData: sectionData,
-      },
     );
+    mesh.userData = MeshMetadataBuilder.build({
+      element: footing,
+      elementType,
+      placement: { length: depth },
+      sectionType: 'RECTANGLE',
+      profileResult: {
+        meta: { profileSource: 'BoxGeometry', profileType: 'RECTANGLE' },
+      },
+      sectionData,
+      isJsonInput,
+    });
 
     // 9. 配置を適用
     mesh.position.copy(placement.position);
@@ -165,9 +166,6 @@ export class FootingGenerator extends BaseElementGenerator {
       bottomZ: placement.bottomZ,
       topZ: placement.topZ,
     };
-
-    // 11. 配置基準線を添付（オプション - 基礎では省略可能）
-    // ElementGeometryUtils.attachPlacementLine(...);
 
     return mesh;
   }

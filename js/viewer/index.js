@@ -33,6 +33,7 @@ import {
   requestRender,
   setupViewportResizeHandler,
   setSkipControlsUpdate,
+  setActiveControls,
   getActiveCamera,
   setFrustumCullingEnabled,
   isFrustumCullingEnabled,
@@ -41,6 +42,8 @@ import {
   isXRSessionActive,
 } from './core/core.js';
 import { SUPPORTED_ELEMENTS } from '../constants/elementTypes.js';
+import { ViewEvents } from '../constants/eventTypes.js';
+import { eventBus } from '../data/events/eventBus.js';
 import {
   ELEMENT_MATERIAL_SIDE,
   getMaterialSideForElement,
@@ -76,16 +79,33 @@ import {
   fitCameraToBox,
   computeModelBoundingBox,
 } from './camera/cameraFitter.js';
-import { setView, VIEW_DIRECTIONS } from './camera/viewManagerImpl.js';
+import { setView as setViewImpl, VIEW_DIRECTIONS } from './camera/viewManagerImpl.js';
 import {
   clearClippingPlanes,
   applyClipPlanes,
   updateMaterialClippingPlanes,
 } from './clipping/clippingManager.js';
 import { SectionBox } from './clipping/SectionBox.js';
+import { LifecycleSectionBox } from './clipping/LifecycleSectionBox.js';
+import {
+  createAxisRangeClippingPlanes,
+  createBoxClippingPlanes,
+} from './clipping/clippingPlaneFactory.js';
 import { setElementInfoProviders } from './services/elementInfoAdapter.js';
 import { setClippingStateProvider } from './clipping/clippingManager.js';
 import { setViewerStateProvider } from './stateProvider.js';
+
+/**
+ * Viewer公開API経由のビュー方向変更を一元化する。
+ * ViewCube / 図面方向ボタンなど呼び出し元に依存せず、成功時は同じイベントを通知する。
+ */
+function setView(viewType, modelBounds = null, enableTransition = false) {
+  const changed = setViewImpl(viewType, modelBounds, enableTransition);
+  if (changed) {
+    eventBus.emit(ViewEvents.VIEW_DIRECTION_CHANGED, { viewType });
+  }
+  return changed;
+}
 
 // ============================================
 // シーン・コア
@@ -107,6 +127,7 @@ export {
   requestRender,
   setupViewportResizeHandler,
   setSkipControlsUpdate,
+  setActiveControls,
   getActiveCamera,
   // パフォーマンス最適化: フラスタムカリング
   setFrustumCullingEnabled,
@@ -138,6 +159,9 @@ export {
   applyClipPlanes,
   updateMaterialClippingPlanes,
   SectionBox,
+  LifecycleSectionBox,
+  createAxisRangeClippingPlanes,
+  createBoxClippingPlanes,
   adjustCameraToFitModel,
   focusOnSelected,
   fitCameraToModel,
@@ -191,6 +215,9 @@ export {
   getImportanceRenderingStats,
 } from './rendering/materials.js';
 
+// Renderable再生成ライフサイクル
+export { finalizeRenderableBatch } from './rendering/renderableLifecycle.js';
+
 // 表示モード管理
 export { default as displayModeManager } from './rendering/displayModeManager.js';
 export { default as labelDisplayManager } from './rendering/labelDisplayManager.js';
@@ -202,6 +229,17 @@ export {
   getLoadDisplayManager,
   LOAD_DISPLAY_MODE,
 } from './rendering/loadDisplayManager.js';
+
+// 3D配筋表示管理（Rebar Display）
+export { getRebarDisplayManager } from './rendering/rebarDisplayManager.js';
+export {
+  createColumnRebarMeshes,
+  createBeamRebarMeshes,
+  createRebarPieceMeshes,
+  createColumnHoopMeshes,
+  createBeamStirrupMeshes,
+  disposeRebarMeshes,
+} from './geometry/generators/RebarGenerator.js';
 
 // アウトライン
 export { initializeOutlineSystem } from './rendering/outlines.js';
@@ -221,7 +259,7 @@ export {
   GeometryGeneratorFactory,
   geometryGeneratorFactory,
 } from './geometry/GeometryGeneratorFactory.js';
-export { ElementGeometryUtils } from './geometry/ElementGeometryUtils.js';
+export { getNodePositions } from './geometry/core/ElementNodeResolver.js';
 
 // STB構造パーサー
 export {

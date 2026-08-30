@@ -7,6 +7,7 @@
 
 import * as THREE from 'three';
 import { scheduleRender } from '../../utils/renderScheduler.js';
+import { buildCanvasFont } from '../../utils/typography.js';
 
 const MEASUREMENT_ELEMENT_TYPE = 'Measurement';
 const DIM_COLOR = 0x2255cc;
@@ -173,7 +174,7 @@ function _createDimSprite(text, position, distance, id) {
   const padding = 8;
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  ctx.font = `bold ${fontSize}px sans-serif`;
+  ctx.font = buildCanvasFont(fontSize, { weight: 'bold' });
   const textW = Math.ceil(ctx.measureText(text).width) + padding * 2;
   const textH = fontSize + padding * 2;
   canvas.width = textW;
@@ -181,7 +182,7 @@ function _createDimSprite(text, position, distance, id) {
   canvas.height = textH;
   ctx.fillStyle = 'rgba(34,85,204,0.85)';
   ctx.fillRect(0, 0, textW, textH);
-  ctx.font = `bold ${fontSize}px sans-serif`;
+  ctx.font = buildCanvasFont(fontSize, { weight: 'bold' });
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#ffffff';

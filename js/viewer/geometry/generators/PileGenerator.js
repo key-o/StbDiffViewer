@@ -24,7 +24,13 @@ import {
   createMultiSectionGeometry,
 } from '../core/TaperedGeometryBuilder.js';
 import { colorManager } from '../../rendering/colorManager.js';
-import { ElementGeometryUtils } from '../ElementGeometryUtils.js';
+import { getNodePositions } from '../core/ElementNodeResolver.js';
+import { getSectionData } from '../core/ElementSectionResolver.js';
+import {
+  calculateDualNodePlacement,
+  getOffsetAndRotation,
+} from '../core/ElementPlacementResolver.js';
+import { createProfileFromSectionData } from '../core/SectionProfileFactory.js';
 import { isExtendedPile } from '../../../common-stb/import/data/dimensionNormalizer.js';
 import { BaseElementGenerator } from '../core/BaseElementGenerator.js';
 import { MeshMetadataBuilder } from '../core/MeshMetadataBuilder.js';
@@ -82,7 +88,7 @@ export class PileGenerator extends BaseElementGenerator {
     const { nodes, sections, elementType, isJsonInput, log } = context;
 
     // 1. 断面データの取得（1-node format時に長さ情報が必要なため先に取得）
-    const sectionData = ElementGeometryUtils.getSectionData(pile, sections, isJsonInput);
+    const sectionData = getSectionData(pile, sections, isJsonInput);
 
     if (!this._validateSectionData(sectionData, pile, context)) {
       return null;
@@ -103,23 +109,17 @@ export class PileGenerator extends BaseElementGenerator {
       `Creating pile ${pile.id}: section_type=${sectionType}, kind=${pile.kind}, pile_type=${dims.pile_type || 'Straight'}`,
     );
 
-    // 4. オフセットと回転の取得（ElementGeometryUtils使用）
-    const offsetAndRotation = ElementGeometryUtils.getOffsetAndRotation(pile, {
-      nodeType: '2node-vertical',
-    });
+    // 4. オフセットと回転の取得
+    const offsetAndRotation = getOffsetAndRotation(pile);
 
-    // 5. 配置計算（ElementGeometryUtils使用）
+    // 5. 配置計算
     // 注: 1ノード形式では_getNodePositionsでオフセットを既に適用済み
-    const placement = ElementGeometryUtils.calculateDualNodePlacement(
-      nodePositions.bottomNode,
-      nodePositions.topNode,
-      {
-        // オフセットが既に適用されている場合はスキップ（二重適用防止）
-        startOffset: nodePositions.offsetsApplied ? { x: 0, y: 0 } : offsetAndRotation.startOffset,
-        endOffset: nodePositions.offsetsApplied ? { x: 0, y: 0 } : offsetAndRotation.endOffset,
-        rollAngle: offsetAndRotation.rollAngle,
-      },
-    );
+    const placement = calculateDualNodePlacement(nodePositions.bottomNode, nodePositions.topNode, {
+      // オフセットが既に適用されている場合はスキップ（二重適用防止）
+      startOffset: nodePositions.offsetsApplied ? { x: 0, y: 0 } : offsetAndRotation.startOffset,
+      endOffset: nodePositions.offsetsApplied ? { x: 0, y: 0 } : offsetAndRotation.endOffset,
+      rollAngle: offsetAndRotation.rollAngle,
+    });
 
     if (!this._validatePlacement(placement, pile, context)) {
       return null;
@@ -141,7 +141,7 @@ export class PileGenerator extends BaseElementGenerator {
       };
     } else {
       // 通常杭: 単一断面の押し出しジオメトリ
-      const profileResult = ElementGeometryUtils.createProfile(sectionData, sectionType, pile);
+      const profileResult = createProfileFromSectionData(sectionData, sectionType, pile, log);
 
       if (!this._validateProfile(profileResult, pile, context)) {
         return null;
@@ -239,7 +239,7 @@ export class PileGenerator extends BaseElementGenerator {
     }
 
     // 2-node format (id_node_bottom + id_node_top)
-    const result = ElementGeometryUtils.getNodePositions(pile, nodes, {
+    const result = getNodePositions(pile, nodes, {
       nodeType: '2node-vertical',
       isJsonInput: isJsonInput,
       node1KeyStart: 'id_node_bottom',

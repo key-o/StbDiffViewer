@@ -19,7 +19,13 @@ import * as THREE from 'three';
 import { createExtrudeGeometry } from '../core/ThreeJSConverter.js';
 import { createMultiSectionGeometry } from '../core/TaperedGeometryBuilder.js';
 import { colorManager } from '../../rendering/colorManager.js';
-import { ElementGeometryUtils } from '../ElementGeometryUtils.js';
+import { getNodePositions } from '../core/ElementNodeResolver.js';
+import { getSectionData, getSectionHeight } from '../core/ElementSectionResolver.js';
+import {
+  calculateHorizontalElementPlacement,
+  getHorizontalElementOffsets,
+} from '../core/ElementPlacementResolver.js';
+import { createProfileFromSectionData } from '../core/SectionProfileFactory.js';
 import { BaseElementGenerator } from '../core/BaseElementGenerator.js';
 import { MeshMetadataBuilder } from '../core/MeshMetadataBuilder.js';
 
@@ -75,8 +81,8 @@ export class ProfileBasedBeamGenerator extends BaseElementGenerator {
   static _createSingleMesh(beam, context) {
     const { nodes, sections, steelSections, elementType, isJsonInput, log } = context;
 
-    // 1. ノード位置の取得（ElementGeometryUtils使用）
-    const nodePositions = ElementGeometryUtils.getNodePositions(beam, nodes, {
+    // 1. ノード位置の取得
+    const nodePositions = getNodePositions(beam, nodes, {
       nodeType: '2node-horizontal',
       isJsonInput: isJsonInput,
       node1KeyStart: 'id_node_start',
@@ -87,8 +93,8 @@ export class ProfileBasedBeamGenerator extends BaseElementGenerator {
       return null;
     }
 
-    // 2. 断面データの取得（ElementGeometryUtils使用）
-    const sectionData = ElementGeometryUtils.getSectionData(beam, sections, isJsonInput);
+    // 2. 断面データの取得
+    const sectionData = getSectionData(beam, sections, isJsonInput);
 
     if (!this._validateSectionData(sectionData, beam, context)) {
       return null;
@@ -114,15 +120,15 @@ export class ProfileBasedBeamGenerator extends BaseElementGenerator {
       `Creating beam ${beam.id}: section_type=${sectionType}, mode=${sectionData.mode || 'single'}`,
     );
 
-    // 4. オフセットと回転角度の取得（ElementGeometryUtils使用）
-    const offsets = ElementGeometryUtils.getHorizontalElementOffsets(beam);
+    // 4. オフセットと回転角度の取得
+    const offsets = getHorizontalElementOffsets(beam);
 
     // 5. 断面高さの取得（天端基準用）
     // SRC造の場合、RC部分の高さを配置基準に使う
     const sectionHeight =
       sectionData.isSRC && sectionData.concreteProfile?.height
         ? sectionData.concreteProfile.height
-        : ElementGeometryUtils.getSectionHeight(sectionData, sectionType);
+        : getSectionHeight(sectionData, sectionType);
 
     // 6. 断面モードの判定
     const mode = sectionData.mode || 'single';
@@ -136,10 +142,11 @@ export class ProfileBasedBeamGenerator extends BaseElementGenerator {
       // ===== 単一断面処理 =====
       // SRC造の場合は鉄骨用の断面データとタイプでプロファイルを生成
       const profileSectionData = steelSectionData || sectionData;
-      const profileResult = ElementGeometryUtils.createProfile(
+      const profileResult = createProfileFromSectionData(
         profileSectionData,
         sectionType,
         beam,
+        log,
       );
 
       if (!this._validateProfile(profileResult, beam, context)) {
@@ -149,7 +156,7 @@ export class ProfileBasedBeamGenerator extends BaseElementGenerator {
       profileMeta = profileResult.meta;
 
       // 配置計算（長さを取得するため）
-      const tempPlacement = ElementGeometryUtils.calculateHorizontalElementPlacement(
+      const tempPlacement = calculateHorizontalElementPlacement(
         nodePositions.startNode,
         nodePositions.endNode,
         {
@@ -170,7 +177,7 @@ export class ProfileBasedBeamGenerator extends BaseElementGenerator {
     } else {
       // ===== 多断面処理 =====
       // 長さ計算用の配置計算
-      const tempPlacement = ElementGeometryUtils.calculateHorizontalElementPlacement(
+      const tempPlacement = calculateHorizontalElementPlacement(
         nodePositions.startNode,
         nodePositions.endNode,
         {
@@ -207,8 +214,8 @@ export class ProfileBasedBeamGenerator extends BaseElementGenerator {
       geometry.rotateZ(rollAngleRad);
     }
 
-    // 8. 配置計算（ElementGeometryUtils使用）
-    const placement = ElementGeometryUtils.calculateHorizontalElementPlacement(
+    // 8. 配置計算
+    const placement = calculateHorizontalElementPlacement(
       nodePositions.startNode,
       nodePositions.endNode,
       {
@@ -243,10 +250,7 @@ export class ProfileBasedBeamGenerator extends BaseElementGenerator {
       ) {
         const level = sectionData.steelFigureOffset.level;
         const steelDims = sectionData.steelProfile?.dimensions || sectionData.dimensions;
-        const steelHeight = ElementGeometryUtils.getSectionHeight(
-          { dimensions: steelDims },
-          sectionType,
-        );
+        const steelHeight = getSectionHeight({ dimensions: steelDims }, sectionType);
         const rcHeight = sectionData.concreteProfile?.height || sectionHeight;
         steelHeightAdjustment = (rcHeight - steelHeight) / 2 - level;
         log.debug(
@@ -375,10 +379,11 @@ export class ProfileBasedBeamGenerator extends BaseElementGenerator {
     };
 
     // RC部分のプロファイルを生成
-    const rcProfileResult = ElementGeometryUtils.createProfile(
+    const rcProfileResult = createProfileFromSectionData(
       rcSectionData,
       concreteProfile.profileType,
       beam,
+      log,
     );
 
     if (!rcProfileResult || !rcProfileResult.shape) {
@@ -506,9 +511,9 @@ export class ProfileBasedBeamGenerator extends BaseElementGenerator {
           `dims=${JSON.stringify(tempSectionData.dimensions || {}).substring(0, 100)}`,
       );
 
-      // プロファイルを作成（ElementGeometryUtils使用）
+      // プロファイルを作成
       const sectionType = this._resolveGeometryProfileType(tempSectionData);
-      const prof = ElementGeometryUtils.createProfile(tempSectionData, sectionType, beam);
+      const prof = createProfileFromSectionData(tempSectionData, sectionType, beam, log);
 
       if (!prof || !prof.shape || !prof.shape.extractPoints) {
         log.warn(`Beam ${beam.id}: Failed to create profile for section ${shapeName} (pos=${pos})`);
@@ -531,7 +536,7 @@ export class ProfileBasedBeamGenerator extends BaseElementGenerator {
         y: v.y - currentMaxY,
       }));
 
-      const tempSectionHeight = ElementGeometryUtils.getSectionHeight(tempSectionData, sectionType);
+      const tempSectionHeight = getSectionHeight(tempSectionData, sectionType);
       log.debug(
         `  → Profile created: vertices=${vertices.length}, ` +
           `sectionHeight=${tempSectionHeight?.toFixed(1) || 'N/A'}mm, ` +

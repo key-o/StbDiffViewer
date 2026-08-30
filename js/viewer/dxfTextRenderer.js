@@ -6,6 +6,7 @@
 
 import * as THREE from 'three';
 import { createLogger } from '../utils/logger.js';
+import { buildCanvasFont } from '../utils/typography.js';
 import { transformCoordinates } from './dxfCoordinates.js';
 
 const log = createLogger('DXFTextRenderer');
@@ -328,11 +329,12 @@ export function createTextSprite(config) {
   const fontSize = 48;
   const padding = 10;
   const lineHeight = fontSize * 1.2;
+  const canvasFont = buildCanvasFont(fontSize);
 
   // 最長行の幅を計算
   const tempCanvas = document.createElement('canvas');
   const tempCtx = tempCanvas.getContext('2d');
-  tempCtx.font = `${fontSize}px Arial, sans-serif`;
+  tempCtx.font = canvasFont;
 
   let maxWidth = 0;
   for (const line of lines) {
@@ -357,7 +359,7 @@ export function createTextSprite(config) {
   ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
   // テキスト描画
-  ctx.font = `${fontSize}px Arial, sans-serif`;
+  ctx.font = canvasFont;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 

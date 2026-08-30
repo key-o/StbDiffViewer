@@ -231,15 +231,17 @@ export class SlabGenerator extends BaseElementGenerator {
         indices.push(n, n + i, n + i + 1);
       }
     }
-    // 側面
+    // 側面。上面/下面だけでなく側面も外向き法線になるよう winding を揃える。
+    // StencilCap は FrontSide / BackSide の差分で断面を求めるため、
+    // 側面が内向きだと水平スラブだけ winding が不整合になり、cap が面全体へ漏れる。
     for (let i = 0; i < n; i++) {
       const next = (i + 1) % n;
       if (isCounterClockwise) {
-        indices.push(i, next, n + next);
-        indices.push(i, n + next, n + i);
-      } else {
         indices.push(i, n + next, next);
         indices.push(i, n + i, n + next);
+      } else {
+        indices.push(i, next, n + next);
+        indices.push(i, n + next, n + i);
       }
     }
 
