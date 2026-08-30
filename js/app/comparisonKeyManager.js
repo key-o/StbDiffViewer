@@ -12,7 +12,6 @@ import {
   DEFAULT_SECTION_MATCH_CRITERION,
   STORY_AXIS_MATCH_CRITERION,
   DEFAULT_STORY_AXIS_MATCH_CRITERION,
-  isFloorCanonicalizingSectionCriterion,
 } from '../config/comparisonKeyConfig.js';
 import { setCrossSoftwareConfig } from '../config/crossSoftwareConfig.js';
 // UI層への依存を解消: constants/から直接インポート
@@ -26,12 +25,13 @@ const log = createLogger('app:comparisonKeyManager');
 const STORAGE_KEY = 'comparison-key-type';
 const SECTION_CRITERION_STORAGE_KEY = 'section-match-criterion';
 const STORY_AXIS_CRITERION_STORAGE_KEY = 'story-axis-match-criterion';
+const CROSS_SOFTWARE_MODE_STORAGE_KEY = 'cross-software-mode';
 
 /**
  * 比較キータイプ管理クラス
  * シングルトンパターンで実装
  */
-class ComparisonKeyManager {
+export class ComparisonKeyManager {
   constructor() {
     // 現在のキータイプ
     this.currentKeyType = this.loadFromStorage();
@@ -42,6 +42,11 @@ class ComparisonKeyManager {
     // 現在の通り芯・階の判定基準（名前 or 幾何位置）
     this.currentStoryAxisMatchCriterion = this.loadStoryAxisCriterionFromStorage();
 
+    // 断面対応付け基準とは独立した、断面定義の階名正準化設定
+    this.currentCrossSoftwareMode =
+      storageHelper.get(CROSS_SOFTWARE_MODE_STORAGE_KEY, false) === true;
+    setCrossSoftwareConfig({ enabled: this.currentCrossSoftwareMode });
+
     // 変更通知用のリスナー
     this.changeListeners = new Set();
 
@@ -51,8 +56,7 @@ class ComparisonKeyManager {
     // 通り芯・階の判定基準の変更通知用リスナー
     this.storyAxisCriterionChangeListeners = new Set();
 
-    // 低レイヤーの crossSoftwareConfig（elementComparison が参照）を初期同期する
-    this.syncCrossSoftwareConfig();
+    this.crossSoftwareModeChangeListeners = new Set();
   }
 
   /**
@@ -104,19 +108,6 @@ class ComparisonKeyManager {
   }
 
   /**
-   * 低レイヤーの crossSoftwareConfig を現在の断面一致基準に同期する。
-   * elementComparison（Layer3）は manager（Layer2）を参照できないため、
-   * config（Layer0）の boolean を真実源として橋渡しする。
-   * 断面一致基準が NAME_FLOOR_CANONICAL（異ソフト間）のとき有効化する。
-   * @private
-   */
-  syncCrossSoftwareConfig() {
-    setCrossSoftwareConfig({
-      enabled: isFloorCanonicalizingSectionCriterion(this.currentSectionMatchCriterion),
-    });
-  }
-
-  /**
    * 現在の比較キータイプを取得
    * @returns {string} 比較キータイプ
    */
@@ -150,8 +141,6 @@ class ComparisonKeyManager {
 
     this.currentSectionMatchCriterion = criterion;
     storageHelper.set(SECTION_CRITERION_STORAGE_KEY, criterion);
-    // 再比較（notify で駆動）より先に crossSoftwareConfig を同期しておく
-    this.syncCrossSoftwareConfig();
     this.notifySectionCriterionChange(criterion, oldCriterion);
 
     return true;
@@ -202,6 +191,54 @@ class ComparisonKeyManager {
    */
   getStoryAxisMatchCriterion() {
     return this.currentStoryAxisMatchCriterion;
+  }
+
+  /**
+   * 異ソフト間の階名正準化が有効かどうかを取得する。
+   * @returns {boolean}
+   */
+  getCrossSoftwareMode() {
+    return this.currentCrossSoftwareMode;
+  }
+
+  /**
+   * 異ソフト間の階名正準化を、断面の対応付け基準とは独立して設定する。
+   * @param {boolean} enabled
+   * @returns {boolean} 設定成功フラグ
+   */
+  setCrossSoftwareMode(enabled) {
+    if (typeof enabled !== 'boolean') return false;
+    const oldEnabled = this.currentCrossSoftwareMode;
+    if (oldEnabled === enabled) return true;
+
+    this.currentCrossSoftwareMode = enabled;
+    storageHelper.set(CROSS_SOFTWARE_MODE_STORAGE_KEY, enabled);
+    setCrossSoftwareConfig({ enabled });
+    this.notifyCrossSoftwareModeChange(enabled, oldEnabled);
+    return true;
+  }
+
+  onCrossSoftwareModeChange(callback) {
+    if (typeof callback === 'function') this.crossSoftwareModeChangeListeners.add(callback);
+  }
+
+  offCrossSoftwareModeChange(callback) {
+    this.crossSoftwareModeChangeListeners.delete(callback);
+  }
+
+  notifyCrossSoftwareModeChange(enabled, oldEnabled) {
+    document.dispatchEvent(
+      new CustomEvent(COMPARISON_KEY_EVENTS.CROSS_SOFTWARE_MODE_CHANGED, {
+        detail: { enabled, oldEnabled },
+      }),
+    );
+    this.crossSoftwareModeChangeListeners.forEach((callback) => {
+      try {
+        callback(enabled, oldEnabled);
+      } catch (error) {
+        log.error('[ComparisonKeyManager] Error in cross software mode listener:', error);
+      }
+    });
   }
 
   /**
@@ -363,6 +400,7 @@ class ComparisonKeyManager {
     this.setKeyType(DEFAULT_COMPARISON_KEY_TYPE);
     this.setSectionMatchCriterion(DEFAULT_SECTION_MATCH_CRITERION);
     this.setStoryAxisMatchCriterion(DEFAULT_STORY_AXIS_MATCH_CRITERION);
+    this.setCrossSoftwareMode(false);
   }
 
   /**
@@ -374,10 +412,12 @@ class ComparisonKeyManager {
       currentKeyType: this.currentKeyType,
       currentSectionMatchCriterion: this.currentSectionMatchCriterion,
       currentStoryAxisMatchCriterion: this.currentStoryAxisMatchCriterion,
+      currentCrossSoftwareMode: this.currentCrossSoftwareMode,
       isPositionBased: this.isPositionBased(),
       isGuidBased: this.isGuidBased(),
       listenerCount: this.changeListeners.size,
       sectionCriterionListenerCount: this.sectionCriterionChangeListeners.size,
+      crossSoftwareModeListenerCount: this.crossSoftwareModeChangeListeners.size,
     };
   }
 }

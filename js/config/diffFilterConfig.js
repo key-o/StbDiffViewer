@@ -191,7 +191,7 @@ export const DIFF_CATEGORIES = [
  * フィルタプリセット定義
  * @type {Array<Object>}
  */
-export const DIFF_FILTER_PRESETS = [
+const DIFF_FILTER_PRESETS = [
   {
     id: 'all',
     name: {
@@ -356,15 +356,6 @@ function getCategoryById(id) {
 }
 
 /**
- * プリセットIDからプリセット定義を取得
- * @param {string} id - プリセットID
- * @returns {Object|undefined} プリセット定義
- */
-function getPresetById(id) {
-  return DIFF_FILTER_PRESETS.find((preset) => preset.id === id);
-}
-
-/**
  * カテゴリIDからラベルを取得
  * @param {string} id - カテゴリID
  * @param {string} [locale='ja'] - 言語コード
@@ -374,18 +365,6 @@ export function getCategoryLabel(id, locale = 'ja') {
   const category = getCategoryById(id);
   if (!category) return undefined;
   return category.label[locale] || category.label.ja;
-}
-
-/**
- * プリセットIDからプリセット名を取得
- * @param {string} id - プリセットID
- * @param {string} [locale='ja'] - 言語コード
- * @returns {string|undefined} プリセット名
- */
-export function getPresetName(id, locale = 'ja') {
-  const preset = getPresetById(id);
-  if (!preset) return undefined;
-  return preset.name[locale] || preset.name.ja;
 }
 
 /**
@@ -442,81 +421,3 @@ export const DIFF_STATUS_NAMES = Object.fromEntries(
  * @constant {Array<string>}
  */
 export const DIFF_STATUS_VALUES = DIFF_CATEGORIES.map((cat) => cat.id);
-
-// ============================================================================
-// バリデーション
-// ============================================================================
-
-/**
- * カテゴリ定義を検証
- * @param {Object} category - カテゴリ定義
- * @returns {boolean} 有効かどうか
- * @throws {Error} 無効な場合
- */
-function validateCategory(category) {
-  const required = ['id', 'label', 'colorKey', 'group', 'order'];
-  for (const field of required) {
-    if (category[field] === undefined) {
-      throw new Error(`Missing required field in category: ${field}`);
-    }
-  }
-  if (!category.label.ja) {
-    throw new Error(`Missing Japanese label for category: ${category.id}`);
-  }
-  if (typeof category.colorKey !== 'string') {
-    throw new Error(`Invalid colorKey for category ${category.id}: ${category.colorKey}`);
-  }
-  return true;
-}
-
-/**
- * プリセット定義を検証
- * @param {Object} preset - プリセット定義
- * @returns {boolean} 有効かどうか
- * @throws {Error} 無効な場合
- */
-function validatePreset(preset) {
-  const required = ['id', 'name', 'categories'];
-  for (const field of required) {
-    if (preset[field] === undefined) {
-      throw new Error(`Missing required field in preset: ${field}`);
-    }
-  }
-  if (!preset.name.ja) {
-    throw new Error(`Missing Japanese name for preset: ${preset.id}`);
-  }
-  if (!Array.isArray(preset.categories)) {
-    throw new Error(`Categories must be an array for preset: ${preset.id}`);
-  }
-  // カテゴリIDの存在確認
-  const validIds = DIFF_CATEGORIES.map((c) => c.id);
-  for (const catId of preset.categories) {
-    if (!validIds.includes(catId)) {
-      throw new Error(`Invalid category ID in preset ${preset.id}: ${catId}`);
-    }
-  }
-  return true;
-}
-
-// ============================================================================
-// デフォルトエクスポート
-// ============================================================================
-
-export default {
-  DIFF_CATEGORIES,
-  DIFF_FILTER_PRESETS,
-  DIFF_FILTER_UI_CONFIG,
-  // ヘルパー関数
-  getCategoryById,
-  getPresetById,
-  getCategoryLabel,
-  getPresetName,
-  getPresetsForFilter,
-  // 後方互換エイリアス
-  DIFF_STATUS,
-  DIFF_STATUS_NAMES,
-  DIFF_STATUS_VALUES,
-  // バリデーション
-  validateCategory,
-  validatePreset,
-};

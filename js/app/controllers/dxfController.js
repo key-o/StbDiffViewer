@@ -7,7 +7,7 @@
  * @module app/controllers/dxfController
  */
 
-import { updatePlacementPositionOptions, updateStbExportStatus } from '../dxfLoader.js';
+import { updatePlacementPositionOptions, updateStbExportStatus } from './dxfLoader.js';
 
 /**
  * DXFコントローラー

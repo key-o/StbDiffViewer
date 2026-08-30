@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createLogger } from '../utils/logger.js';
-import { ElementGeometryUtils } from '../viewer/index.js';
+import { getNodePositions } from '../viewer/index.js';
 import { getDefaultScene } from './geometryInspector.js';
 import { getState } from '../data/state/globalState.js';
 
@@ -285,7 +285,7 @@ function resolveExpectedEndpoints(mesh, ctx, nodeMaps) {
     node1KeyEnd: config.endKey,
   };
   const nodeMap = ctx.isJson ? null : pickNodeMap(mesh, nodeMaps);
-  const nodeData = ElementGeometryUtils.getNodePositions(ctx.data, nodeMap, nodeConfig);
+  const nodeData = getNodePositions(ctx.data, nodeMap, nodeConfig);
   if (!nodeData?.valid || !nodeData.startNode || !nodeData.endNode) {
     return null;
   }

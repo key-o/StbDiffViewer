@@ -15,6 +15,7 @@ import {
   setupViewportResizeHandler,
   createOrUpdateGridHelper,
   getActiveCamera,
+  colorManager,
 } from '../../viewer/index.js';
 import {
   setupInteractionListeners,
@@ -48,7 +49,7 @@ import { initializeGlobalMessenger } from '../moduleMessaging.js';
 import { initializeImportanceManager, getImportanceManager } from '../importanceManager.js';
 import { notify } from '../controllers/notificationController.js';
 import { normalizeSectionData } from '../sectionEquivalenceEngine.js';
-import { setupDiffSummaryEventListeners } from '../../ui/panels/diffSummary.js';
+import { setupDiffSummaryEventListeners } from '../../ui/panels/diffSummary/index.js';
 import { setRenderFunction } from '../../utils/renderScheduler.js';
 import { initKeyboardShortcuts } from '../../viewer/interaction/keyboard-shortcuts.js';
 import { initializeViewCube } from '../../ui/viewer3d/viewCube/ViewCube.js';
@@ -65,6 +66,7 @@ import {
   deleteMeasurement,
 } from '../../viewer/measurement/measurementManager.js';
 import { initMeasurementUI } from '../../ui/measurement/measurementUIController.js';
+import { connectElementColorPreferences } from '../elementColorPreferencesBridge.js';
 
 const log = createLogger('appInitializationHelpers');
 
@@ -105,6 +107,7 @@ export function registerAppGlobals(scheduleRender) {
  * @param {boolean} rendererInitialized - レンダラー初期化フラグ
  */
 export function initializeApplicationServices(rendererInitialized) {
+  connectElementColorPreferences(colorManager);
   setState('rendering.rendererInitialized', rendererInitialized);
   setState('rendering.scene', scene);
   setState('elementGroups', elementGroups);

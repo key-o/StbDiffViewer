@@ -5,14 +5,13 @@
 import { createLogger } from '../../utils/logger.js';
 import {
   orthographicCamera,
-  setLabelProvider,
   setElementsLabelProvider,
   setElementInfoProviders,
   setClippingStateProvider,
   setLabelVisibilityCullingProvider,
   setViewerStateProvider,
 } from '../../viewer/index.js';
-import { setDxfExporterProviders } from '../../export/index.js';
+import { setDxfExporterProviders } from '../../export/dxf/stb-to-dxf/index.js';
 import { getActiveCamera } from '../../viewer/index.js';
 
 const log = createLogger('moduleInitializer');
@@ -43,9 +42,7 @@ export async function initializeRequiredModules(elementGroups) {
       attachElementDataToLabel,
       createLabelSprite,
     };
-    // batchedElements.js用
-    setLabelProvider(labelProvider);
-    // elements.js用
+    // 通常描画・Batch描画で共通のProviderを1回だけ注入する。
     setElementsLabelProvider(labelProvider);
     log.info('ラベルプロバイダーがviewer層に注入されました');
   } catch (error) {
@@ -58,20 +55,6 @@ export async function initializeRequiredModules(elementGroups) {
     log.info('ラベルカリングプロバイダーがviewer層に注入されました');
   } catch (error) {
     log.warn('ラベルカリングプロバイダーの初期化に失敗しました:', error);
-  }
-
-  // JSON Schemaを初期化
-  try {
-    const { initializeJsonSchemas } =
-      await import('../../common-stb/import/parser/jsonSchemaLoader.js');
-    const success = await initializeJsonSchemas();
-    if (success) {
-      log.info('起動時にJSON Schemaが初期化されました');
-    } else {
-      log.warn('起動時のJSON Schema初期化に失敗しました');
-    }
-  } catch (error) {
-    log.warn('JSON Schemaモジュールの読み込みまたは初期化に失敗しました:', error);
   }
 
   let globalStateModule;

@@ -14,6 +14,7 @@ export const EXPORTABLE_ELEMENT_TYPES = [
   'Brace',
   'Slab',
   'Wall',
+  'Open',
   'Footing',
   'StripFooting',
   'Pile',
@@ -30,6 +31,7 @@ export const ELEMENT_TYPE_COLORS = {
   Brace: 5, // 青
   Slab: 4, // シアン
   Wall: 6, // マゼンタ
+  Open: 2, // 黄色（開口）
   Footing: 8, // グレー
   StripFooting: 8, // グレー
   Pile: 8, // グレー

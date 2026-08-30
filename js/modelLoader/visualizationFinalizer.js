@@ -17,7 +17,6 @@ const logger = createLogger('modelLoader:finalizer');
 
 import { getLoaderInitViewModes, getLoaderUpdateModelVisibility } from './loaderDependencies.js';
 import { createOrUpdateGridHelper, setView, VIEW_DIRECTIONS } from '../viewer/index.js';
-import { setColorMode, COLOR_MODES } from '../colorModes/index.js';
 import { eventBus } from '../data/events/eventBus.js';
 import { ModelEvents, AxisEvents, FinalizationEvents } from '../constants/eventTypes.js';
 
@@ -43,10 +42,6 @@ export async function finalizeVisualization(finalizationData, scheduleRender, _c
   eventBus.emit(FinalizationEvents.SET_GLOBAL_STATE, { nodeLabels, stories, axesData });
   eventBus.emit(FinalizationEvents.UPDATE_SELECTORS);
 
-  // Set appropriate color mode BEFORE initializing view modes
-  const hasBothModels = !!modelADocument && !!modelBDocument;
-  setColorMode(hasBothModels ? COLOR_MODES.DIFF : COLOR_MODES.ELEMENT);
-
   // Initialize view modes
   const initViewModes = getLoaderInitViewModes();
   const updateModelVisibility = getLoaderUpdateModelVisibility();
@@ -70,6 +65,11 @@ export async function finalizeVisualization(finalizationData, scheduleRender, _c
   logger.info('Axes redrawn with final model bounds');
 
   updateModelVisibility(scheduleRender);
+
+  // 3D配筋などのオーバーレイ表示の作り直しは購読側（app層）へ委ねる
+  eventBus.emit(FinalizationEvents.COMPLETED, {
+    hasBothModels: !!modelADocument && !!modelBDocument,
+  });
 
   if (initViewModesResult?.errors?.length > 0) {
     logger.warn('Initial display mode redraw completed with errors:', initViewModesResult.errors);

@@ -41,6 +41,8 @@ export const COMPARISON_KEY_EVENTS = {
   SECTION_MATCH_CRITERION_CHANGED: 'comparisonKey:sectionMatchCriterionChanged',
   /** 通り芯・階の判定基準が変更された */
   STORY_AXIS_MATCH_CRITERION_CHANGED: 'comparisonKey:storyAxisMatchCriterionChanged',
+  /** 異ソフト間の階名正準化設定が変更された */
+  CROSS_SOFTWARE_MODE_CHANGED: 'comparisonKey:crossSoftwareModeChanged',
 };
 
 /**
@@ -345,6 +347,8 @@ export const FinalizationEvents = {
   SET_GLOBAL_STATE: 'finalization:setGlobalState',
   /** セレクターとラベルを更新 */
   UPDATE_SELECTORS: 'finalization:updateSelectors',
+  /** 可視化の最終処理が完了した（オーバーレイ表示の再生成用） */
+  COMPLETED: 'finalization:completed',
 };
 
 /**
@@ -364,6 +368,8 @@ export const InteractionEvents = {
   INIT_CONTEXT_MENU: 'interaction:initContextMenu',
   /** フローティングウィンドウを開く（windowId 指定） */
   OPEN_WINDOW: 'interaction:openWindow',
+  /** 梁貫通孔配置可能範囲図を開く（elementType/elementId/modelSource 指定） */
+  OPEN_BEAM_OPENING_DIAGRAM: 'interaction:openBeamOpeningDiagram',
   /** 選択要素にセクションボックスを適用 */
   ACTIVATE_SECTION_BOX_FOR_SELECTION: 'interaction:activateSectionBoxForSelection',
   /** 節点ピックモード中に3Dで節点がクリックされた */

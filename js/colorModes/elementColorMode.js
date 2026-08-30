@@ -80,10 +80,8 @@ function updateElementMaterials() {
  * 部材別色設定をデフォルトにリセット
  */
 export function resetElementColors() {
-  // ColorManagerを使用して色をリセット
-  Object.entries(DEFAULT_ELEMENT_COLORS).forEach(([type, color]) => {
-    colorManager.setElementColor(type, color);
-  });
+  // 一括リセットにより、変更通知と設定保存を1回にまとめる
+  colorManager.resetElementColors();
 
   // UIの色設定コントロールを更新（色ボックスの値を更新）
   const colorInputs = document.querySelectorAll('.element-color-input');

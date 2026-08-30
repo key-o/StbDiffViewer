@@ -22,7 +22,7 @@ import {
 } from '../../ui/panels/sectionTreeView.js';
 import { initializeComparisonKeySelector } from '../../ui/panels/comparisonKeySelector.js';
 import { initializeToleranceSettings } from '../../ui/panels/toleranceSettings.js';
-import { initDxfLoaderUI, initDxfLoaderEventListeners } from '../dxfLoader.js';
+import { initDxfLoaderUI, initDxfLoaderEventListeners } from '../controllers/dxfLoader.js';
 import { setupVersionPanelEventListeners } from '../../ui/panels/versionPanel.js';
 import { initClipping2DEventListeners } from '../../ui/viewer3d/clipping2DImpl.js';
 import { initSectionBoxEventListeners } from '../../ui/viewer3d/sectionBox.js';
@@ -37,6 +37,8 @@ import {
   initColumnSectionListPanel,
   initBeamSectionListPanel,
 } from '../../ui/panels/sectionList/index.js';
+import { initializeBeamOpeningDiagramPanel } from '../../ui/panels/beamOpeningDiagram/BeamOpeningDiagramPanel.js';
+import { initializeAnchorageCheckPanel } from '../../ui/panels/anchorageCheckPanel.js';
 
 const log = createLogger('uiInitializationHelpers');
 
@@ -80,6 +82,12 @@ export function initializeSharedPanels() {
     }
     if (typeof elementInfo.initAddMemberForm === 'function') {
       elementInfo.initAddMemberForm();
+    }
+    if (typeof elementInfo.initOpenBuilderForm === 'function') {
+      elementInfo.initOpenBuilderForm();
+    }
+    if (typeof elementInfo.initJointBuilderForm === 'function') {
+      elementInfo.initJointBuilderForm();
     }
     log.info('要素情報サービスが注入されました');
   });
@@ -148,6 +156,8 @@ export function initializeComparisonControls() {
 export function initializeSectionListPanels() {
   initializeOptionalPanel(initColumnSectionListPanel, 'RC柱断面リストパネル');
   initializeOptionalPanel(initBeamSectionListPanel, 'RC梁断面リストパネル');
+  initializeOptionalPanel(initializeBeamOpeningDiagramPanel, '梁貫通孔配置図パネル');
+  initializeOptionalPanel(initializeAnchorageCheckPanel, '定着・カットオフチェックパネル');
 }
 
 function handleTreeSelection(

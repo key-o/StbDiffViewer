@@ -9,11 +9,20 @@
  */
 
 import { UI_TIMING } from '../config/uiTimingConfig.js';
+import { RenderableLifecycleEvents } from '../constants/renderableLifecycleEvents.js';
+import { eventBus } from '../data/events/eventBus.js';
 import { elementGroups, getMaterialForElementWithMode } from '../viewer/index.js';
 import { scheduleRender } from '../utils/renderScheduler.js';
 import { createLogger } from '../utils/logger.js';
-import { normalizeModelSourceToComparisonState } from './modelSourceMapping.js';
+import {
+  buildMaterialOptionsFromUserData,
+  normalizeModelSourceToComparisonState,
+} from './modelSourceMapping.js';
 import { styleClonedAsModelBOverlay } from '../constants/overlayStyle.js';
+import {
+  collectElementGroupObjects,
+  processObjectsInBatches,
+} from '../utils/elementGroupBatchRunner.js';
 
 const log = createLogger('colorModes:applyColorMode');
 
@@ -41,96 +50,75 @@ export function applyColorModeToAllObjects(modeName) {
   }
 
   // 全オブジェクトを収集
-  const allObjects = [];
-  const groups = Array.isArray(elementGroups) ? elementGroups : Object.values(elementGroups);
-
-  groups.forEach((group) => {
-    group.traverse((object) => {
-      if ((object.isMesh || object.isLine) && object.userData && object.userData.elementType) {
-        allObjects.push(object);
-      }
-    });
-  });
+  const allObjects = collectElementGroupObjects(
+    elementGroups,
+    (object) => (object.isMesh || object.isLine) && object.userData && object.userData.elementType,
+  );
 
   // マテリアルを適用（現在のカラーモードに基づいて自動選択される）
   const CHUNK_SIZE = 200;
-  {
-    let index = 0;
+  processObjectsInBatches(allObjects, {
+    batchSize: CHUNK_SIZE,
+    processObject: (object) => {
+      const elementType = object.userData.elementType;
 
-    function processChunk() {
-      const end = Math.min(index + CHUNK_SIZE, allObjects.length);
+      if (elementType === 'Axis' || elementType === 'Story') {
+        return;
+      }
 
-      for (; index < end; index++) {
-        const object = allObjects[index];
-        const elementType = object.userData.elementType;
+      // このチャンク処理はフレームをまたいで進行するため、途中で再描画により
+      // group.clear() されたオブジェクト（parent=null）に追いつくことがある。
+      // 既にシーンから外れたオブジェクトへのマテリアル再適用・dispose は
+      // 無駄かつオーバーレイclone材質の二重disposeを招くのでスキップする。
+      if (!object.parent) {
+        return;
+      }
 
-        if (elementType === 'Axis' || elementType === 'Story') {
-          continue;
-        }
+      const modelSource = object.userData.modelSource || 'matched';
+      const comparisonState = normalizeModelSourceToComparisonState(modelSource);
+      const isLine = object.isLine || object.userData.isLine || false;
+      const isPoly = object.userData.isPoly || false;
+      const elementId = object.userData.elementId || null;
+      const toleranceState = object.userData.toleranceState || null;
+      const materialOptions = buildMaterialOptionsFromUserData(object.userData);
 
-        // このチャンク処理はフレームをまたいで進行するため、途中で再描画により
-        // group.clear() されたオブジェクト（parent=null）に追いつくことがある。
-        // 既にシーンから外れたオブジェクトへのマテリアル再適用・dispose は
-        // 無駄かつオーバーレイclone材質の二重disposeを招くのでスキップする。
-        if (!object.parent) {
-          continue;
-        }
+      const newMaterial = getMaterialForElementWithMode(
+        elementType,
+        comparisonState,
+        isLine,
+        isPoly,
+        elementId,
+        toleranceState,
+        materialOptions,
+      );
 
-        const modelSource = object.userData.modelSource || 'matched';
-        const comparisonState = normalizeModelSourceToComparisonState(modelSource);
-        const isLine = object.isLine || object.userData.isLine || false;
-        const isPoly = object.userData.isPoly || false;
-        const elementId = object.userData.elementId || null;
-        const toleranceState = object.userData.toleranceState || null;
-        const materialOptions = {
-          isTransparent: object.userData.isSRCConcrete === true,
-          srcComponentType: object.userData.srcComponentType || null,
-          modelSource: object.userData.modelSource || null,
-          diffStatus: object.userData.diffStatus || null,
-          positionState: object.userData.positionState || null,
-          attributeState: object.userData.attributeState || null,
-        };
-
-        const newMaterial = getMaterialForElementWithMode(
-          elementType,
-          comparisonState,
-          isLine,
-          isPoly,
-          elementId,
-          toleranceState,
-          materialOptions,
-        );
-
-        if (newMaterial) {
-          if (object.userData.isOverlayModelB) {
-            // モデルBオーバーレイは半透明を維持する。共有マテリアルをそのまま
-            // 割り当てると不透明になってしまうため、clone して半透明化する。
-            // 旧オーバーレイclone材質はGPUリソース解放のため破棄する。
-            const prev = object.material;
-            object.material = styleClonedAsModelBOverlay(
-              Array.isArray(newMaterial) ? newMaterial.map((m) => m.clone()) : newMaterial.clone(),
-            );
-            if (prev && prev !== newMaterial) {
-              if (Array.isArray(prev)) {
-                prev.forEach((m) => m && m.dispose && m.dispose());
-              } else if (prev.dispose) {
-                prev.dispose();
-              }
+      if (newMaterial) {
+        if (object.userData.isOverlayModelB) {
+          // モデルBオーバーレイは半透明を維持する。共有マテリアルをそのまま
+          // 割り当てると不透明になってしまうため、clone して半透明化する。
+          // 旧オーバーレイclone材質はGPUリソース解放のため破棄する。
+          const prev = object.material;
+          object.material = styleClonedAsModelBOverlay(
+            Array.isArray(newMaterial) ? newMaterial.map((m) => m.clone()) : newMaterial.clone(),
+          );
+          if (prev && prev !== newMaterial) {
+            if (Array.isArray(prev)) {
+              prev.forEach((m) => m && m.dispose && m.dispose());
+            } else if (prev.dispose) {
+              prev.dispose();
             }
-          } else {
-            object.material = newMaterial;
           }
+        } else {
+          object.material = newMaterial;
         }
       }
-
-      if (index < allObjects.length) {
-        scheduleRender();
-        requestAnimationFrame(processChunk);
-      } else {
-        requestColorModeRedraw();
-      }
-    }
-
-    processChunk();
-  }
+    },
+    // 通常色モードは従来どおりフレーム単位で処理を分割する。
+    scheduleNext: (nextBatch) => requestAnimationFrame(nextBatch),
+    onBatchComplete: scheduleRender,
+    onComplete: () => {
+      requestColorModeRedraw();
+      eventBus.emit(RenderableLifecycleEvents.MATERIALS_CHANGED, { modeName });
+    },
+  });
 }

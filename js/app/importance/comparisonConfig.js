@@ -16,6 +16,7 @@ import {
 import { createLogger } from '../../utils/logger.js';
 import { setMvdImportanceLevel, rebuildEffectiveImportanceSettings } from './mvdModeManager.js';
 import { notifySettingsChanged } from './settingsManager.js';
+import { readElementAttribute } from '../../data/accessors/elementAttributeAccessor.js';
 
 const log = createLogger('app:importance:comparison');
 
@@ -55,15 +56,6 @@ export function getElementImportance(manager, element, elementType = null) {
 
   const resolvedType = type.startsWith('Stb') ? type : `Stb${type}`;
 
-  const getElementAttributeValue = (target, attrName) => {
-    if (!target) return undefined;
-    if (typeof target.getAttribute === 'function') {
-      const value = target.getAttribute(attrName);
-      return value === null ? undefined : value;
-    }
-    return target[attrName];
-  };
-
   const elementDef = getElementDefinition(resolvedType);
   const schemaAttributes = new Set(
     elementDef?.attributes ? Array.from(elementDef.attributes.keys()) : [],
@@ -92,7 +84,10 @@ export function getElementImportance(manager, element, elementType = null) {
       continue;
     }
 
-    const value = getElementAttributeValue(element, attrName);
+    const value = readElementAttribute(element, attrName, {
+      missingValue: undefined,
+      coerceToString: false,
+    });
     const isMissing = value === undefined || value === null || value === '';
     if (isMissing && checkOptions.checkRequired) {
       hasTargetViolation = true;

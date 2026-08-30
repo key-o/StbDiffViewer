@@ -23,6 +23,7 @@ import { scheduleRender } from '../utils/renderScheduler.js';
 import { createLogger } from '../utils/logger.js';
 import { ViewEvents } from '../data/events/index.js';
 import { getCurrentColorMode, COLOR_MODES } from './colorModeState.js';
+import { collectElementGroupObjects } from '../utils/elementGroupBatchRunner.js';
 
 const log = createLogger('colorModes:importanceColorMode');
 const IMPORTANCE_DISPLAY_FILTERS = {
@@ -56,20 +57,16 @@ export function applyImportanceVisibilityFilterToAll() {
 
   let totalElements = 0;
   let visibleElements = 0;
-  const groups = Array.isArray(elementGroups) ? elementGroups : Object.values(elementGroups);
+  const meshes = collectElementGroupObjects(elementGroups, (object) => object.isMesh);
 
-  groups.forEach((group) => {
-    if (!group?.traverse) return;
-    group.traverse((object) => {
-      if (!object.isMesh) return;
-      totalElements++;
-      const category = getImportanceCategoryForObject(object);
-      const shouldBeVisible = shouldImportanceCategoryBeVisible(category);
-      object.visible = shouldBeVisible;
-      if (shouldBeVisible) {
-        visibleElements++;
-      }
-    });
+  meshes.forEach((object) => {
+    totalElements++;
+    const category = getImportanceCategoryForObject(object);
+    const shouldBeVisible = shouldImportanceCategoryBeVisible(category);
+    object.visible = shouldBeVisible;
+    if (shouldBeVisible) {
+      visibleElements++;
+    }
   });
 
   updateImportanceVisibilitySummary(totalElements, visibleElements);
@@ -337,7 +334,6 @@ export function applyImportanceColorModeToAll() {
   }
 
   // 蜈ｨ繧ｪ繝悶ず繧ｧ繧ｯ繝医ｒ蜿朱寔
-  const allObjects = [];
   const groups = Array.isArray(elementGroups) ? elementGroups : Object.values(elementGroups);
 
   // 繧ｰ繝ｫ繝ｼ繝励′遨ｺ縺ｮ蝣ｴ蜷医・隴ｦ蜻翫ｒ蜃ｺ縺励※邨ゆｺ・
@@ -348,15 +344,7 @@ export function applyImportanceColorModeToAll() {
     return;
   }
 
-  groups.forEach((group) => {
-    if (group && group.traverse) {
-      group.traverse((object) => {
-        if (object.isMesh) {
-          allObjects.push(object);
-        }
-      });
-    }
-  });
+  const allObjects = collectElementGroupObjects(elementGroups, (object) => object.isMesh);
 
   // 繧ｪ繝悶ず繧ｧ繧ｯ繝域焚縺ｫ蠢懊§縺ｦ蜃ｦ逅・婿豕輔ｒ驕ｸ謚・
   const objectCount = allObjects.length;
@@ -397,14 +385,7 @@ export function showImportancePerformanceStats() {
   const stats = getImportanceRenderingStats();
   const elementGroups = getState('elementGroups');
 
-  let totalObjects = 0;
-  if (elementGroups) {
-    elementGroups.forEach((group) => {
-      group.traverse((object) => {
-        if (object.isMesh) totalObjects++;
-      });
-    });
-  }
+  const totalObjects = collectElementGroupObjects(elementGroups, (object) => object.isMesh).length;
 
   const perfInfo = {
     totalObjects,

@@ -1,5 +1,7 @@
 /**
  * @fileoverview モデル由来情報と差分表示状態の変換ヘルパー
+ *
+ * @module colorModes/modelSourceMapping
  */
 
 /**
@@ -22,4 +24,23 @@ export function normalizeModelSourceToComparisonState(modelSource) {
     default:
       return modelSource;
   }
+}
+
+/**
+ * 3Dオブジェクトの userData から getMaterialForElementWithMode 用の
+ * マテリアルオプションを構築する。
+ * 一括適用（applyColorModeToAllObjects）とロード後の再適用
+ * （modelLoaderMaterialUpdate）で同一の内容を渡すために共有する。
+ * @param {Object} userData - THREE.Object3D の userData
+ * @returns {{isTransparent: boolean, srcComponentType: *, modelSource: *, diffStatus: *, positionState: *, attributeState: *}}
+ */
+export function buildMaterialOptionsFromUserData(userData) {
+  return {
+    isTransparent: userData.isSRCConcrete === true,
+    srcComponentType: userData.srcComponentType || null,
+    modelSource: userData.modelSource || null,
+    diffStatus: userData.diffStatus || null,
+    positionState: userData.positionState || null,
+    attributeState: userData.attributeState || null,
+  };
 }

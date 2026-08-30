@@ -92,21 +92,9 @@ export const COMPARISON_KEY_TYPE_DESCRIPTIONS = {
 };
 
 /**
- * 断面一致基準: 部材ペアの「断面が一致している」とみなす条件。
- * COMPARISON_KEY_TYPE（要素の配置対応）とは独立した軸で、断面の対応キー生成と
- * 等価（型差分）判定の双方を切り替える。
- *
- * 適用レイヤー: 対応キー（resolveSectionKeyPart）と内容シグネチャ（resolveSectionContentSignature）の両方。
- *
- * 拠り所により3系統に分類される:
- * - A. 配置要素に紐づく: PLACEMENT_INHERIT / PLACEMENT_FIRST_NODE_STORY
- * - B. GUIDに紐づく: GUID
- * - C. 断面要素で独立: SECTION_ID / NAME / NAME_FLOOR_CANONICAL / GEOMETRY_SHAPE / ALL_ATTRIBUTES
- *
- * 既定 PLACEMENT_INHERIT は配置対応の結果を断面同定に流用し、断面差を型差分として提示する。
- * NAME_FLOOR_CANONICAL は名称ベース比較の異ソフト間対応版で、選択時は低レイヤーの
- * crossSoftwareConfig を有効化し断面定義ツリーの階正準化・開口除外を駆動する
- * （isFloorCanonicalizingSectionCriterion 参照）。
+ * 断面の対応付け基準。
+ * COMPARISON_KEY_TYPE で対応した配置要素について、参照断面を同一の断面として
+ * 対応付けるためのキーだけを定義する。対応後の形状・全構成属性の一致判定とは独立する。
  * @enum {string}
  */
 export const SECTION_MATCH_CRITERION = {
@@ -115,28 +103,19 @@ export const SECTION_MATCH_CRITERION = {
    * 断面を同一とみなす。断面差は配置一致後の型差分として提示する。
    */
   PLACEMENT_INHERIT: 'placement_inherit',
-  /**
-   * 配置対応を継承＋第一Node所属階: 配置対応の継承に加え、配置要素の第一Node
-   * （線材=始点/下端、面材=頂点列先頭、点=自身）が所属する階名を一致条件へ加える。
-   * 階名の表記差ではなくStbStory所属で対応を絞りたい場合に用いる。
-   */
-  PLACEMENT_FIRST_NODE_STORY: 'placement_first_node_story',
-  /** 断面GUID: 断面要素の guid 属性で対応付け（guid が無い断面は配置のみで対応）。 */
-  GUID: 'section_guid',
-  /** 断面id: id_section（断面参照ID）で対応付け。同一ソフト・同一モデル向け。 */
-  SECTION_ID: 'section_id',
   /** 断面名称: 断面 name（符号）で対応付け。全要素種別に適用。 */
   NAME: 'name',
   /**
-   * 名称＋階正準化（異ソフト間）: 断面 name（符号）で対応付けつつ、断面定義ツリーの
-   * 階(floor)をStbStory標高で正準化し階名の表記差（1 / 1FL / Z01 等）を吸収する。
-   * 別ソフトが出力した同一建物の比較向け（旧・異ソフト間比較モード）。
+   * 断面名称＋StbSecのFloor: 断面 name（符号）と断面要素自身の floor 属性で対応付ける。
    */
-  NAME_FLOOR_CANONICAL: 'name_floor_canonical',
-  /** 同一ジオメトリ形状: 形状シグネチャ（梁/大梁=GSS、その他=構成シグネチャ）で対応付け。名称差は無視。 */
-  GEOMETRY_SHAPE: 'geometry_shape',
-  /** 全属性: 断面の全構成属性（構成シグネチャ）で対応付け。名称・寸法・材質・鉄筋差はすべて別断面扱い。 */
-  ALL_ATTRIBUTES: 'all_attributes',
+  NAME_SECTION_FLOOR: 'name_section_floor',
+  /**
+   * 断面名称＋配置部材の所属階名: 断面 name（符号）と、配置要素の第一Nodeが
+   * StbStoryで所属する階名で対応付ける。
+   */
+  NAME_MEMBER_STORY: 'name_member_story',
+  /** 断面GUID: 断面要素の guid 属性で対応付け（guid が無い断面は配置のみで対応）。 */
+  GUID: 'section_guid',
 };
 
 /**
@@ -151,13 +130,10 @@ export const DEFAULT_SECTION_MATCH_CRITERION = SECTION_MATCH_CRITERION.PLACEMENT
  */
 export const SECTION_MATCH_CRITERION_LABELS = {
   [SECTION_MATCH_CRITERION.PLACEMENT_INHERIT]: '配置対応を継承',
-  [SECTION_MATCH_CRITERION.PLACEMENT_FIRST_NODE_STORY]: '配置対応を継承＋第一Node所属階',
-  [SECTION_MATCH_CRITERION.GUID]: '断面GUID',
-  [SECTION_MATCH_CRITERION.SECTION_ID]: '断面id',
   [SECTION_MATCH_CRITERION.NAME]: '断面名称',
-  [SECTION_MATCH_CRITERION.NAME_FLOOR_CANONICAL]: '名称＋階正準化（異ソフト間）',
-  [SECTION_MATCH_CRITERION.GEOMETRY_SHAPE]: '同一ジオメトリ形状',
-  [SECTION_MATCH_CRITERION.ALL_ATTRIBUTES]: '全属性',
+  [SECTION_MATCH_CRITERION.NAME_SECTION_FLOOR]: '断面名称＋StbSecのFloor',
+  [SECTION_MATCH_CRITERION.NAME_MEMBER_STORY]: '断面名称＋配置部材の所属階名',
+  [SECTION_MATCH_CRITERION.GUID]: '断面GUID',
 };
 
 /**
@@ -167,31 +143,24 @@ export const SECTION_MATCH_CRITERION_LABELS = {
 export const SECTION_MATCH_CRITERION_DESCRIPTIONS = {
   [SECTION_MATCH_CRITERION.PLACEMENT_INHERIT]:
     '配置要素の対応（上段の判定基準）が取れたペアの断面を同一とみなします（断面差は型差分として表示）',
-  [SECTION_MATCH_CRITERION.PLACEMENT_FIRST_NODE_STORY]:
-    '配置対応の継承に加え、配置要素の第一Nodeが所属する階名も一致条件に加えます（階名の表記差ではなくStbStory所属で対応を絞る）',
-  [SECTION_MATCH_CRITERION.GUID]:
-    '断面要素のGUIDを基準に対応付けます（GUIDが無い断面は配置のみで対応。異ソフト間では一致しません）',
-  [SECTION_MATCH_CRITERION.SECTION_ID]:
-    '断面参照ID(id_section)を基準に対応付けます（同一ソフト・同一モデルの比較向け）',
   [SECTION_MATCH_CRITERION.NAME]:
-    'すべての要素種別で断面名称（符号）を基準に対応付けます（同符号・別形状は型差分として検出）',
-  [SECTION_MATCH_CRITERION.NAME_FLOOR_CANONICAL]:
-    '別ソフトが出力した同一建物の比較向け。断面名称（符号）で対応付けつつ、断面定義を' +
-    'StbStoryの標高で正準化した階で突合し、階名の表記差（1 / 1FL / Z01 等）を吸収します',
-  [SECTION_MATCH_CRITERION.GEOMETRY_SHAPE]:
-    'すべての要素種別で、生成される3D立体の外形（GSS）を基準に対応付けます（名称・鉄筋・材質は無視し立体形状の一致で判定）',
-  [SECTION_MATCH_CRITERION.ALL_ATTRIBUTES]:
-    '断面の全構成属性（種別・寸法・材質・強度・鉄筋等）が一致する場合のみ同一断面とみなします',
+    '断面名称（符号）を基準に対応付けます（片側だけ名称が無い場合は未対応になります）',
+  [SECTION_MATCH_CRITERION.NAME_SECTION_FLOOR]:
+    '断面名称（符号）とStbSecのfloor属性を基準に対応付けます（片側だけ必要値が無い場合は未対応になります）',
+  [SECTION_MATCH_CRITERION.NAME_MEMBER_STORY]:
+    '断面名称（符号）と配置要素の第一Nodeが所属するStbStoryの階名を基準に対応付けます（片側だけ必要値が無い場合は未対応になります）',
+  [SECTION_MATCH_CRITERION.GUID]:
+    '断面要素のGUIDを基準に対応付けます（片側だけGUIDが無い場合は未対応。異ソフト間では通常一致しません）',
 };
 
 /**
  * 断面一致基準がノード所属階ルックアップ（buildNodeStoryAxisLookup）を必要とするか。
- * PLACEMENT_FIRST_NODE_STORY は第一Nodeの所属階名をキー成分に使うため true。
+ * NAME_MEMBER_STORY は第一Nodeの所属階名をキー成分に使うため true。
  * @param {string} criterion - SECTION_MATCH_CRITERION の値
  * @returns {boolean}
  */
 export function sectionCriterionNeedsStoryLookup(criterion) {
-  return criterion === SECTION_MATCH_CRITERION.PLACEMENT_FIRST_NODE_STORY;
+  return criterion === SECTION_MATCH_CRITERION.NAME_MEMBER_STORY;
 }
 
 /**
@@ -233,17 +202,6 @@ export const STORY_AXIS_MATCH_CRITERION_DESCRIPTIONS = {
   [STORY_AXIS_MATCH_CRITERION.GEOMETRY]:
     '階は標高、通り芯は原点と距離から算出した実座標を基準に対応付けます（名称の表記差を無視。別ソフト間の同一建物比較向け）',
 };
-
-/**
- * 断面一致基準が「階正準化（異ソフト間吸収）」を行うかどうか。
- * elementComparison / stbDefinitionComparator の canonicalizeFloors 導出に用いる
- * 低レイヤー crossSoftwareConfig の同期条件（manager.syncCrossSoftwareConfig）。
- * @param {string} criterion - SECTION_MATCH_CRITERION の値
- * @returns {boolean}
- */
-export function isFloorCanonicalizingSectionCriterion(criterion) {
-  return criterion === SECTION_MATCH_CRITERION.NAME_FLOOR_CANONICAL;
-}
 
 /**
  * 配置要素比較モード: 線状要素とポリゴン要素の配置位置比較の詳細度

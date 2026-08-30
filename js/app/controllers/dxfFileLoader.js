@@ -4,8 +4,8 @@
  * DXFファイルの読み込み、パース、エンコーディング検出、レンダリングオプション計算を担当します。
  */
 
-import { createLogger } from '../utils/logger.js';
-import { parseDxf, extractEntities, getLayers, calculateBounds } from '../parser/dxfParser.js';
+import { createLogger } from '../../utils/logger.js';
+import { parseDxf, extractEntities, getLayers, calculateBounds } from '../../parser/dxfParser.js';
 import {
   renderDxfEntities,
   clearDxfGroup,
@@ -15,10 +15,10 @@ import {
   scene,
   camera,
   controls,
-} from '../viewer/index.js';
-import { setState } from '../data/state/globalState.js';
-import { scheduleRender } from '../utils/renderScheduler.js';
-import { getCurrentStories, getCurrentAxesData, showError } from './dxfLoaderHelpers.js';
+} from '../../viewer/index.js';
+import { setState } from '../../data/state/globalState.js';
+import { scheduleRender } from '../../utils/renderScheduler.js';
+import { getCurrentStories, getCurrentAxesData, showError } from '../dxfLoaderHelpers.js';
 
 const log = createLogger('DXFLoader');
 

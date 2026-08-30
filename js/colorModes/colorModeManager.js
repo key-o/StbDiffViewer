@@ -17,7 +17,14 @@ import { eventBus, ViewEvents } from '../data/events/index.js';
 import { getState } from '../data/state/globalState.js';
 
 // 色付けモード状態（循環依存解消のため分離）
-import { COLOR_MODES, getCurrentColorMode, setCurrentColorModeInternal } from './colorModeState.js';
+import {
+  COLOR_MODES,
+  getCurrentColorMode,
+  getLastUserSelectedColorMode,
+  hasUserSelectedColorMode,
+  markColorModeSelectedByUser,
+  setCurrentColorModeInternal,
+} from './colorModeState.js';
 export { COLOR_MODES, getCurrentColorMode };
 
 // スキーマエラーストア（循環依存解消のため分離）
@@ -47,6 +54,7 @@ const log = createLogger('colorModes:colorModeManager');
 
 // 色モード変更のロック機構（非同期競合防止）
 let isColorModeChanging = false;
+/** @type {{mode: string, userInitiated: boolean}|null} */
 let pendingColorMode = null;
 // eventBusリスナーの重複登録防止（setupColorModeListenersが複数回呼ばれた場合）
 let isRefreshListenerRegistered = false;
@@ -54,15 +62,24 @@ let isRefreshListenerRegistered = false;
 /**
  * 色付けモードを設定
  * @param {string} mode 設定する色付けモード
+ * @param {{userInitiated?: boolean}} [options] 変更元
  */
-export function setColorMode(mode) {
+export function setColorMode(mode, options = {}) {
   if (!Object.values(COLOR_MODES).includes(mode)) {
     return;
   }
 
+  if (options.userInitiated === true) {
+    // ロック中に変更がキューへ入る場合も、ユーザー操作だった事実は失わない。
+    markColorModeSelectedByUser(mode);
+  }
+
   // ロック中の場合は待機キューに追加
   if (isColorModeChanging) {
-    pendingColorMode = mode;
+    // ユーザー要求が待機中なら、後続の自動再適用で上書きしない。
+    if (options.userInitiated === true || pendingColorMode?.userInitiated !== true) {
+      pendingColorMode = { mode, userInitiated: options.userInitiated === true };
+    }
     log.info('[ColorMode] Queued mode change:', mode);
     return;
   }
@@ -115,10 +132,10 @@ function finishColorModeChange() {
 
   // 待機中のモード変更があれば実行
   if (pendingColorMode !== null) {
-    const nextMode = pendingColorMode;
+    const nextRequest = pendingColorMode;
     pendingColorMode = null;
-    log.info('[ColorMode] Processing queued mode:', nextMode);
-    setColorMode(nextMode);
+    log.info('[ColorMode] Processing queued mode:', nextRequest.mode);
+    setColorMode(nextRequest.mode, { userInitiated: nextRequest.userInitiated });
   }
 }
 
@@ -187,7 +204,7 @@ export function setupColorModeListeners() {
       if (!target) {
         return;
       }
-      setColorMode(target.value);
+      setColorMode(target.value, { userInitiated: true });
     });
   } else {
     log.warn('[ColorModeManager] colorModeSelector not found');
@@ -336,6 +353,27 @@ function getModeDisplayName(mode) {
  * @param {Function} reapplyColorModeFn - 色モード再適用関数
  */
 export function applyDefaultColorModeAfterLoad(hasBothModels, hasSingleModel, reapplyColorModeFn) {
+  // ユーザーが明示的に選んだモードは、モデル構成にかかわらず維持する。
+  // 通常の色モード適用経路を通し、新しく生成された要素にも確実に反映する。
+  if (hasUserSelectedColorMode()) {
+    const retainedMode = getLastUserSelectedColorMode() || getCurrentColorMode();
+    setColorMode(retainedMode);
+    const displayName = getModeDisplayName(retainedMode);
+    setTimeout(() => {
+      if (
+        getCurrentColorMode() !== retainedMode ||
+        getLastUserSelectedColorMode() !== retainedMode
+      ) {
+        return;
+      }
+      showColorModeStatus(
+        `ユーザーが選択した「${displayName}」モードを維持しました。`,
+        UI_TIMING.STATUS_MESSAGE_SHORT_DURATION_MS,
+      );
+    }, UI_TIMING.STATUS_MESSAGE_SHOW_DELAY_MS);
+    return;
+  }
+
   // デフォルトの色付けモードを決定
   let targetMode;
   if (hasBothModels) {

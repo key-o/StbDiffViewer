@@ -40,11 +40,16 @@ function extractColumns(xmlDoc) {
     const idSection = el.getAttribute('id_section');
     const name = el.getAttribute('name');
     const kindColumn = el.getAttribute('kind_column');
+    const kindStructure = el.getAttribute('kind_structure');
     const idNodeBottom = el.getAttribute('id_node_bottom');
     const idNodeTop = el.getAttribute('id_node_top');
 
     // POST（間柱）は除外
     if (kindColumn === 'POST') return;
+
+    // RC柱断面リストでは、明示的にRC以外とされた柱を使用実績に含めない。
+    // kind_structure未記載の旧データは後方互換のため従来どおり許容する。
+    if (kindStructure && kindStructure.toUpperCase() !== 'RC') return;
 
     if (id && idSection) {
       columns.push({
@@ -109,7 +114,7 @@ function getStoryIdsForColumn(column, stories) {
 function extractRcColumnSectionDetail(sectionElement) {
   const id = sectionElement.getAttribute('id');
   const name = sectionElement.getAttribute('name');
-  const strengthConcrete = sectionElement.getAttribute('strength_concrete') || 'Fc21';
+  const strengthConcrete = sectionElement.getAttribute('strength_concrete') || null;
 
   const result = {
     id,
@@ -118,9 +123,11 @@ function extractRcColumnSectionDetail(sectionElement) {
       strength: strengthConcrete,
     },
     dimensions: {},
-    mainBar: {},
-    hoop: {},
+    arrangements: [],
+    mainBar: createEmptyMainBar(),
+    hoop: createEmptyHoop(),
     coreBar: null,
+    cover: null,
   };
 
   // 寸法情報を抽出（矩形または円形）
@@ -148,72 +155,176 @@ function extractRcColumnSectionDetail(sectionElement) {
     result.dimensions.diameter = parseFloat(circleFigure.getAttribute('D')) || 0;
   }
 
-  // 配筋情報を抽出（STB v2.0.2: StbSecBarArrangementColumn_RC を検索）
+  // 配筋情報を抽出。Simple形式のSame/NotSameを柱頭・柱脚別に全件保持する。
   const barArrangement = querySelector(sectionElement, 'StbSecBarArrangementColumn_RC');
   if (barArrangement) {
-    // 矩形配筋: STB v2.0.2対応（RectSame/RectNotSame を優先、旧Rectにフォールバック）
-    // SS7生成: StbSecBarColumnRectSame > StbSecBarColumnRectSameSimple
-    let rectBar = null;
-    const rectBarSelectors = [
-      'StbSecBarColumn_RC_RectSame', // v2.0.2
-      'StbSecBarColumn_RC_RectNotSame', // v2.0.2（配列）
-      'StbSecBarColumn_RC_Rect', // 旧バージョン
-      'StbSecBarColumnRectSame', // SS7生成
-    ];
+    const isCircular = result.dimensions.type === 'CIRCLE';
+    const barElements = collectSimpleBarElements(barArrangement, isCircular);
+    result.arrangements = barElements.map(({ element, defaultPosition }) =>
+      isCircular
+        ? extractCircleBarInfo(element, barArrangement, defaultPosition)
+        : extractRectBarInfo(element, barArrangement, defaultPosition),
+    );
 
-    for (const selector of rectBarSelectors) {
-      const element = querySelector(barArrangement, selector);
-      if (element) {
-        // NotSameは配列の先頭を使用
-        if (selector === 'StbSecBarColumn_RC_RectNotSame') {
-          const elements = querySelectorAll(barArrangement, selector);
-          rectBar = elements[0];
-        } else if (selector === 'StbSecBarColumnRectSame') {
-          // SS7生成: 属性は子要素 StbSecBarColumnRectSameSimple に存在する
-          rectBar = querySelector(element, 'StbSecBarColumnRectSameSimple') || element;
-        } else {
-          rectBar = element;
-        }
-        break;
-      }
-    }
-
-    if (rectBar) {
-      extractRectBarInfo(rectBar, result);
-    }
-
-    // 円形配筋: STB v2.0.2対応（CircleSame/CircleNotSame を優先、旧Circleにフォールバック）
-    // SS7生成: StbSecBarColumnCircleSame > StbSecBarColumnCircleSameSimple
-    let circleBar = null;
-    const circleBarSelectors = [
-      'StbSecBarColumn_RC_CircleSame', // v2.0.2
-      'StbSecBarColumn_RC_CircleNotSame', // v2.0.2（配列）
-      'StbSecBarColumn_RC_Circle', // 旧バージョン
-      'StbSecBarColumnCircleSame', // SS7生成
-    ];
-
-    for (const selector of circleBarSelectors) {
-      const element = querySelector(barArrangement, selector);
-      if (element) {
-        if (selector === 'StbSecBarColumn_RC_CircleNotSame') {
-          const elements = querySelectorAll(barArrangement, selector);
-          circleBar = elements[0];
-        } else if (selector === 'StbSecBarColumnCircleSame') {
-          // SS7生成: 属性は子要素 StbSecBarColumnCircleSameSimple に存在する
-          circleBar = querySelector(element, 'StbSecBarColumnCircleSameSimple') || element;
-        } else {
-          circleBar = element;
-        }
-        break;
-      }
-    }
-
-    if (circleBar) {
-      extractCircleBarInfo(circleBar, result);
+    const preferred = selectPreferredArrangement(result.arrangements);
+    if (preferred) {
+      result.mainBar = preferred.mainBar;
+      result.hoop = preferred.hoop;
+      result.coreBar = preferred.coreBar;
+      result.cover = preferred.cover;
     }
   }
 
   return result;
+}
+
+function createEmptyMainBar() {
+  return {
+    countX: 0,
+    countY: 0,
+    countTotal: 0,
+    count: 0,
+    dia: null,
+    diaSub: null,
+    grade: null,
+    gradeSub: null,
+    mainDirection: 'X',
+    layers: [],
+    firstLayerExtraGroups: [],
+    secondLayer: null,
+    centerStartX: null,
+    centerEndX: null,
+    centerStartY: null,
+    centerEndY: null,
+    dtX: null,
+    dtY: null,
+    dt: null,
+  };
+}
+
+function createEmptyHoop() {
+  return {
+    dia: null,
+    pitch: 0,
+    grade: null,
+    countX: 0,
+    countY: 0,
+  };
+}
+
+function readAttribute(element, fallbackElement, ...names) {
+  for (const source of [element, fallbackElement]) {
+    if (!source) continue;
+    for (const name of names) {
+      const value = source.getAttribute(name);
+      if (value !== null && value !== '') return value;
+    }
+  }
+  return null;
+}
+
+function readNumber(element, fallbackElement, ...names) {
+  const value = readAttribute(element, fallbackElement, ...names);
+  if (value === null) return null;
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readInteger(element, fallbackElement, ...names) {
+  const value = readAttribute(element, fallbackElement, ...names);
+  if (value === null) return 0;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeBarPosition(value, defaultPosition) {
+  const normalized = String(value || defaultPosition || 'SAME').toUpperCase();
+  if (normalized === 'TOP') return 'TOP';
+  if (normalized === 'BOTTOM' || normalized === 'BASE') return 'BOTTOM';
+  return 'SAME';
+}
+
+function collectSimpleBarElements(barArrangement, isCircular) {
+  const legacySame = isCircular
+    ? ['StbSecBarColumn_RC_CircleSame', 'StbSecBarColumn_RC_Circle']
+    : ['StbSecBarColumn_RC_RectSame', 'StbSecBarColumn_RC_Rect'];
+  const legacyNotSame = isCircular
+    ? ['StbSecBarColumn_RC_CircleNotSame']
+    : ['StbSecBarColumn_RC_RectNotSame'];
+  const modernWrappers = isCircular
+    ? [
+        ['StbSecBarColumnCircleSame', 'StbSecBarColumnCircleSameSimple', 'SAME'],
+        ['StbSecBarColumnCircleNotSame', 'StbSecBarColumnCircleNotSameSimple', null],
+      ]
+    : [
+        ['StbSecBarColumnRectSame', 'StbSecBarColumnRectSameSimple', 'SAME'],
+        ['StbSecBarColumnRectNotSame', 'StbSecBarColumnRectNotSameSimple', null],
+      ];
+
+  const collected = [];
+  const seen = new Set();
+  const add = (element, defaultPosition) => {
+    if (!element || seen.has(element)) return;
+    seen.add(element);
+    collected.push({ element, defaultPosition });
+  };
+
+  legacySame.forEach((selector) => {
+    querySelectorAll(barArrangement, selector).forEach((element) => add(element, 'SAME'));
+  });
+  legacyNotSame.forEach((selector) => {
+    querySelectorAll(barArrangement, selector).forEach((element) => add(element, null));
+  });
+  modernWrappers.forEach(([wrapperSelector, simpleSelector, defaultPosition]) => {
+    querySelectorAll(barArrangement, wrapperSelector).forEach((wrapper) => {
+      const simpleElements = querySelectorAll(wrapper, simpleSelector);
+      if (simpleElements.length > 0) {
+        simpleElements.forEach((element) => add(element, defaultPosition));
+      } else if (readAttribute(wrapper, null, 'D_main', 'N_X', 'N_main')) {
+        add(wrapper, defaultPosition);
+      }
+    });
+  });
+
+  return collected;
+}
+
+function selectPreferredArrangement(arrangements) {
+  const priority = ['BOTTOM', 'SAME', 'TOP'];
+  for (const position of priority) {
+    const arrangement = arrangements.find((candidate) => candidate.position === position);
+    if (arrangement) return arrangement;
+  }
+  return arrangements[0] || null;
+}
+
+function extractCoreBar(barElement, fallbackElement) {
+  const total = readInteger(barElement, fallbackElement, 'N_axial', 'N_core', 'N_main_core');
+  if (total <= 0) return null;
+
+  const dia = readAttribute(barElement, fallbackElement, 'D_axial', 'D_core', 'D_main_core');
+  const grade = readAttribute(barElement, fallbackElement, 'strength_axial', 'strength_core');
+  return {
+    total,
+    dia: dia ? dia.toUpperCase() : null,
+    grade,
+    placementEstimated: true,
+  };
+}
+
+function extractCover(barElement, fallbackElement, isCircular) {
+  if (isCircular) {
+    return readNumber(barElement, fallbackElement, 'depth_cover');
+  }
+
+  const values = [
+    readNumber(barElement, fallbackElement, 'depth_cover_start_X'),
+    readNumber(barElement, fallbackElement, 'depth_cover_end_X'),
+    readNumber(barElement, fallbackElement, 'depth_cover_start_Y'),
+    readNumber(barElement, fallbackElement, 'depth_cover_end_Y'),
+  ].filter((value) => value !== null);
+  if (values.length === 0) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 /**
@@ -221,123 +332,114 @@ function extractRcColumnSectionDetail(sectionElement) {
  * @param {Element} rectBar - StbSecBarColumn_RC_Rect/RectSame/RectNotSame要素
  * @param {Object} result - 結果オブジェクト
  */
-function extractRectBarInfo(rectBar, result) {
+function extractRectBarInfo(rectBar, barArrangement, defaultPosition) {
   // 主筋本数（X方向）- フォールバック（v2.0.2 → v1.x → SS7生成 → 旧版）
   const nMainX =
     parseInt(
-      rectBar.getAttribute('N_main_X_1st') || // v2.0.2
-        rectBar.getAttribute('N_main_X') || // v1.x
-        rectBar.getAttribute('N_X') || // SS7生成
-        rectBar.getAttribute('count_main_X'), // 旧版
+      readAttribute(rectBar, barArrangement, 'N_main_X_1st', 'N_main_X', 'N_X', 'count_main_X'),
     ) || 0;
 
   // 主筋本数（Y方向）- フォールバック（v2.0.2 → v1.x → SS7生成 → 旧版）
   const nMainY =
     parseInt(
-      rectBar.getAttribute('N_main_Y_1st') || // v2.0.2
-        rectBar.getAttribute('N_main_Y') || // v1.x
-        rectBar.getAttribute('N_Y') || // SS7生成
-        rectBar.getAttribute('count_main_Y'), // 旧版
+      readAttribute(rectBar, barArrangement, 'N_main_Y_1st', 'N_main_Y', 'N_Y', 'count_main_Y'),
     ) || 0;
 
   // 主筋径
-  const dMain = rectBar.getAttribute('D_main') || rectBar.getAttribute('dia_main') || 'D25';
-  const gradeMain =
-    rectBar.getAttribute('strength_main') || rectBar.getAttribute('grade_main') || 'SD345';
+  const dMain = readAttribute(rectBar, barArrangement, 'D_main', 'dia_main');
+  const dSub = readAttribute(rectBar, barArrangement, 'D_sub');
+  const gradeMain = readAttribute(rectBar, barArrangement, 'strength_main', 'grade_main');
+  const gradeSub = readAttribute(rectBar, barArrangement, 'strength_sub');
+  const mainDirection =
+    readAttribute(rectBar, barArrangement, 'main_direction')?.toUpperCase() === 'Y' ? 'Y' : 'X';
+  const countTotalAttribute = readInteger(rectBar, barArrangement, 'N_main_total');
+  const countTotal =
+    countTotalAttribute || (nMainX > 0 && nMainY > 0 ? 2 * (nMainX + nMainY) - 4 : 0);
+  const centerStartX = readNumber(rectBar, barArrangement, 'center_start_X');
+  const centerEndX = readNumber(rectBar, barArrangement, 'center_end_X');
+  const centerStartY = readNumber(rectBar, barArrangement, 'center_start_Y');
+  const centerEndY = readNumber(rectBar, barArrangement, 'center_end_Y');
+  const legacyDtX = readNumber(rectBar, barArrangement, 'D1_X', 'center_X');
+  const legacyDtY = readNumber(rectBar, barArrangement, 'D1_Y', 'center_Y');
+  const dtX = legacyDtX ?? averageDefined(centerStartX, centerEndX);
+  const dtY = legacyDtY ?? averageDefined(centerStartY, centerEndY);
+  const layers = extractBarLayers(rectBar, barArrangement, dMain, gradeMain, nMainX, nMainY);
+  const secondLayerData = layers.find((layer) => layer.step === 2) || null;
+  const secondLayer = secondLayerData
+    ? {
+        ...secondLayerData.groups[0],
+        groups: secondLayerData.groups,
+        countTotal: secondLayerData.groups.reduce(
+          (sum, group) => sum + estimatePerimeterBarCount(group.countX, group.countY),
+          0,
+        ),
+        centerInterval: readNumber(rectBar, barArrangement, 'center_interval'),
+        clearInterval: readNumber(rectBar, barArrangement, 'interval'),
+        placementEstimated:
+          readNumber(rectBar, barArrangement, 'center_interval', 'interval') === null,
+      }
+    : null;
 
-  result.mainBar = {
+  const mainBar = {
     countX: nMainX,
     countY: nMainY,
-    dia: dMain.toUpperCase(),
+    countTotal,
+    count: countTotal,
+    dia: dMain ? dMain.toUpperCase() : null,
+    diaSub: dSub ? dSub.toUpperCase() : null,
     grade: gradeMain,
+    gradeSub,
+    mainDirection,
+    centerStartX,
+    centerEndX,
+    centerStartY,
+    centerEndY,
+    dtX,
+    dtY,
+    dt: null,
+    layers,
+    firstLayerExtraGroups: layers[0]?.groups.slice(1) || [],
+    secondLayer,
   };
 
-  // 1段目dt（かぶり＋帯筋＋主筋半径）
-  const dtX = parseFloat(rectBar.getAttribute('D1_X') || rectBar.getAttribute('center_X')) || 0;
-  const dtY = parseFloat(rectBar.getAttribute('D1_Y') || rectBar.getAttribute('center_Y')) || 0;
-  result.mainBar.dtX = dtX;
-  result.mainBar.dtY = dtY;
-
-  // 芯鉄筋（中子筋）
-  // N_core_X/Y（旧形式）→ N_axial（v2.0.2合計本数）の順でフォールバック
-  let nCoreX =
-    parseInt(rectBar.getAttribute('N_core_X') || rectBar.getAttribute('count_2nd_X')) || 0;
-  let nCoreY =
-    parseInt(rectBar.getAttribute('N_core_Y') || rectBar.getAttribute('count_2nd_Y')) || 0;
-
-  // N_axial（方向分離なし合計本数）の場合、X/Yに均等分配
-  if (nCoreX === 0 && nCoreY === 0) {
-    const nAxial = parseInt(rectBar.getAttribute('N_axial')) || 0;
-    if (nAxial > 0) {
-      // 各辺に均等分配（4辺に分ける）
-      const perSide = Math.floor(nAxial / 4);
-      const remainder = nAxial % 4;
-      // X方向辺（左右の辺）に perSide 本ずつ、Y方向辺（上下の辺）にも perSide 本ずつ
-      // 余りはX/Yに交互に分配
-      nCoreX = perSide * 2 + (remainder >= 2 ? 1 : 0) + (remainder >= 4 ? 1 : 0);
-      nCoreY = perSide * 2 + (remainder >= 1 ? 1 : 0) + (remainder >= 3 ? 1 : 0);
-    }
-  }
-
-  const dCore =
-    rectBar.getAttribute('D_core') ||
-    rectBar.getAttribute('D_axial') ||
-    rectBar.getAttribute('dia_2nd');
-  const corePosition =
-    parseFloat(rectBar.getAttribute('pos_core') || rectBar.getAttribute('pitch_2nd_X')) || 0;
-
-  if (nCoreX > 0 || nCoreY > 0) {
-    result.coreBar = {
-      countX: nCoreX,
-      countY: nCoreY,
-      dia: dCore ? dCore.toUpperCase() : dMain.toUpperCase(),
-      position: corePosition,
-    };
-  }
-
   // 帯筋径 - D_bandを最優先（v2.0.2）
-  const dStirrup =
-    rectBar.getAttribute('D_band') || // v2.0.2（最優先）
-    rectBar.getAttribute('D_stirrup') ||
-    rectBar.getAttribute('D_hoop') ||
-    rectBar.getAttribute('dia_band') ||
-    'D10';
+  const dStirrup = readAttribute(
+    rectBar,
+    barArrangement,
+    'D_band',
+    'D_stirrup',
+    'D_hoop',
+    'dia_band',
+  );
 
   // 帯筋ピッチ - pitch_bandを最優先（v2.0.2）
   const pitchStirrup =
-    parseFloat(
-      rectBar.getAttribute('pitch_band') || // v2.0.2（最優先）
-        rectBar.getAttribute('pitch_stirrup') ||
-        rectBar.getAttribute('pitch_hoop') || // SS7生成
-        rectBar.getAttribute('pitch'),
-    ) || 100;
+    readNumber(rectBar, barArrangement, 'pitch_band', 'pitch_stirrup', 'pitch_hoop', 'pitch') ?? 0;
 
   // 帯筋強度 - strength_bandを最優先（v2.0.2）
-  const gradeStirrup =
-    rectBar.getAttribute('strength_band') || // v2.0.2（最優先）
-    rectBar.getAttribute('grade_band') ||
-    rectBar.getAttribute('strength_stirrup') ||
-    rectBar.getAttribute('strength_hoop') || // SS7生成
-    rectBar.getAttribute('grade_stirrup') ||
-    'SD295';
+  const gradeStirrup = readAttribute(
+    rectBar,
+    barArrangement,
+    'strength_band',
+    'grade_band',
+    'strength_stirrup',
+    'strength_hoop',
+    'grade_stirrup',
+  );
 
   // 帯筋のX/Y方向本数を取得
   const nBandX =
     parseInt(
-      rectBar.getAttribute('N_hoop_X') || // STB 2.1.0
-        rectBar.getAttribute('N_band_direction_X') || // STB 2.0.2
-        rectBar.getAttribute('N_band_X'), // 旧版フォールバック
+      readAttribute(rectBar, barArrangement, 'N_hoop_X', 'N_band_direction_X', 'N_band_X'),
     ) || 0;
 
   const nBandY =
     parseInt(
-      rectBar.getAttribute('N_hoop_Y') || // STB 2.1.0
-        rectBar.getAttribute('N_band_direction_Y') || // STB 2.0.2
-        rectBar.getAttribute('N_band_Y'), // 旧版フォールバック
+      readAttribute(rectBar, barArrangement, 'N_hoop_Y', 'N_band_direction_Y', 'N_band_Y'),
     ) || 0;
 
-  result.hoop = {
-    dia: dStirrup.toUpperCase(),
+  const hoop = {
+    dia: dStirrup ? dStirrup.toUpperCase() : null,
     pitch: pitchStirrup,
     grade: gradeStirrup,
     countX: nBandX,
@@ -345,14 +447,65 @@ function extractRectBarInfo(rectBar, result) {
   };
 
   // 2種類の帯筋がある場合
-  const dStirrup2 = rectBar.getAttribute('D_stirrup_2') || rectBar.getAttribute('D_hoop_2');
-  const pitchStirrup2 = parseFloat(
-    rectBar.getAttribute('pitch_2') || rectBar.getAttribute('pitch_band_2'),
-  );
+  const dStirrup2 = readAttribute(rectBar, barArrangement, 'D_stirrup_2', 'D_hoop_2');
+  const pitchStirrup2 = readNumber(rectBar, barArrangement, 'pitch_2', 'pitch_band_2');
   if (dStirrup2 && pitchStirrup2) {
-    result.hoop.dia2 = dStirrup2.toUpperCase();
-    result.hoop.pitch2 = pitchStirrup2;
+    hoop.dia2 = dStirrup2.toUpperCase();
+    hoop.pitch2 = pitchStirrup2;
   }
+
+  return {
+    position: normalizeBarPosition(rectBar.getAttribute('pos'), defaultPosition),
+    mainBar,
+    hoop,
+    coreBar: extractCoreBar(rectBar, barArrangement),
+    cover: extractCover(rectBar, barArrangement, false),
+  };
+}
+
+function extractBarLayers(rectBar, barArrangement, dMain, gradeMain, nMainX, nMainY) {
+  const alternateDia = readAttribute(rectBar, barArrangement, 'D_2nd_main');
+  const alternateGrade = readAttribute(rectBar, barArrangement, 'strength_2nd_main');
+  const firstAlternateX = readInteger(rectBar, barArrangement, 'N_2nd_main_X_1st');
+  const firstAlternateY = readInteger(rectBar, barArrangement, 'N_2nd_main_Y_1st');
+  const mainCountX = readInteger(rectBar, barArrangement, 'N_main_X_2nd');
+  const mainCountY = readInteger(rectBar, barArrangement, 'N_main_Y_2nd');
+  const alternateCountX = readInteger(rectBar, barArrangement, 'N_2nd_main_X_2nd');
+  const alternateCountY = readInteger(rectBar, barArrangement, 'N_2nd_main_Y_2nd');
+  const group = (countX, countY, dia, grade) => ({
+    countX,
+    countY,
+    dia: dia?.toUpperCase() || null,
+    grade: grade || null,
+  });
+  const layers = [];
+  const firstGroups = [];
+  if (nMainX > 0 || nMainY > 0) firstGroups.push(group(nMainX, nMainY, dMain, gradeMain));
+  if (firstAlternateX > 0 || firstAlternateY > 0) {
+    firstGroups.push(group(firstAlternateX, firstAlternateY, alternateDia, alternateGrade));
+  }
+  if (firstGroups.length > 0) layers.push({ step: 1, groups: firstGroups });
+
+  const secondGroups = [];
+  if (mainCountX > 0 || mainCountY > 0) {
+    secondGroups.push(group(mainCountX, mainCountY, dMain, gradeMain));
+  }
+  if (alternateCountX > 0 || alternateCountY > 0) {
+    secondGroups.push(group(alternateCountX, alternateCountY, alternateDia, alternateGrade));
+  }
+  if (secondGroups.length > 0) layers.push({ step: 2, groups: secondGroups });
+  return layers;
+}
+
+function estimatePerimeterBarCount(countX, countY) {
+  if (countX > 0 && countY > 0) return 2 * (countX + countY) - 4;
+  return 2 * Math.max(countX, countY, 0);
+}
+
+function averageDefined(first, second) {
+  const values = [first, second].filter((value) => value !== null);
+  if (values.length === 0) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 /**
@@ -360,60 +513,78 @@ function extractRectBarInfo(rectBar, result) {
  * @param {Element} circleBar - StbSecBarColumn_RC_Circle/CircleSame/CircleNotSame要素
  * @param {Object} result - 結果オブジェクト
  */
-function extractCircleBarInfo(circleBar, result) {
+function extractCircleBarInfo(circleBar, barArrangement, defaultPosition) {
   // 主筋本数 - 3段階フォールバック（v2.0.2 → v1.x → 旧版）
   const nMain =
-    parseInt(
-      circleBar.getAttribute('N_main_1st') || // v2.0.2
-        circleBar.getAttribute('N_main') || // v1.x
-        circleBar.getAttribute('count_main'), // 旧版
-    ) || 0;
+    parseInt(readAttribute(circleBar, barArrangement, 'N_main_1st', 'N_main', 'count_main')) || 0;
 
   // 主筋径
-  const dMain = circleBar.getAttribute('D_main') || circleBar.getAttribute('dia_main') || 'D25';
-  const gradeMain =
-    circleBar.getAttribute('strength_main') || circleBar.getAttribute('grade_main') || 'SD345';
+  const dMain = readAttribute(circleBar, barArrangement, 'D_main', 'dia_main');
+  const gradeMain = readAttribute(circleBar, barArrangement, 'strength_main', 'grade_main');
+  const center = readNumber(circleBar, barArrangement, 'D1', 'center');
 
-  result.mainBar = {
+  const mainBar = {
+    countX: 0,
+    countY: 0,
+    countTotal: nMain,
     count: nMain,
-    dia: dMain.toUpperCase(),
+    dia: dMain ? dMain.toUpperCase() : null,
+    diaSub: null,
     grade: gradeMain,
+    gradeSub: null,
+    mainDirection: null,
+    layers: [],
+    firstLayerExtraGroups: [],
+    secondLayer: null,
+    centerStartX: null,
+    centerEndX: null,
+    centerStartY: null,
+    centerEndY: null,
+    dtX: null,
+    dtY: null,
+    dt: center,
   };
 
-  // 1段目dt
-  const dt = parseFloat(circleBar.getAttribute('D1') || circleBar.getAttribute('center')) || 0;
-  result.mainBar.dt = dt;
-
   // 帯筋径 - D_bandを最優先（v2.0.2）
-  const dStirrup =
-    circleBar.getAttribute('D_band') || // v2.0.2（最優先）
-    circleBar.getAttribute('D_stirrup') ||
-    circleBar.getAttribute('D_hoop') ||
-    circleBar.getAttribute('dia_band') ||
-    'D10';
+  const dStirrup = readAttribute(
+    circleBar,
+    barArrangement,
+    'D_band',
+    'D_stirrup',
+    'D_hoop',
+    'dia_band',
+  );
 
   // 帯筋ピッチ - pitch_bandを最優先（v2.0.2）
   const pitchStirrup =
-    parseFloat(
-      circleBar.getAttribute('pitch_band') || // v2.0.2（最優先）
-        circleBar.getAttribute('pitch_stirrup') ||
-        circleBar.getAttribute('pitch_hoop') || // SS7生成
-        circleBar.getAttribute('pitch'),
-    ) || 100;
+    readNumber(circleBar, barArrangement, 'pitch_band', 'pitch_stirrup', 'pitch_hoop', 'pitch') ??
+    0;
 
   // 帯筋強度 - strength_bandを最優先（v2.0.2）
-  const gradeStirrup =
-    circleBar.getAttribute('strength_band') || // v2.0.2（最優先）
-    circleBar.getAttribute('grade_band') ||
-    circleBar.getAttribute('strength_stirrup') ||
-    circleBar.getAttribute('strength_hoop') || // SS7生成
-    circleBar.getAttribute('grade_stirrup') ||
-    'SD295';
+  const gradeStirrup = readAttribute(
+    circleBar,
+    barArrangement,
+    'strength_band',
+    'grade_band',
+    'strength_stirrup',
+    'strength_hoop',
+    'grade_stirrup',
+  );
 
-  result.hoop = {
-    dia: dStirrup.toUpperCase(),
+  const hoop = {
+    dia: dStirrup ? dStirrup.toUpperCase() : null,
     pitch: pitchStirrup,
     grade: gradeStirrup,
+    countX: readInteger(circleBar, barArrangement, 'N_hoop_X', 'N_band_direction_X'),
+    countY: readInteger(circleBar, barArrangement, 'N_hoop_Y', 'N_band_direction_Y'),
+  };
+
+  return {
+    position: normalizeBarPosition(circleBar.getAttribute('pos'), defaultPosition),
+    mainBar,
+    hoop,
+    coreBar: extractCoreBar(circleBar, barArrangement),
+    cover: extractCover(circleBar, barArrangement, true),
   };
 }
 
@@ -422,7 +593,7 @@ function extractCircleBarInfo(circleBar, result) {
  * @param {Document} xmlDoc - XMLドキュメント
  * @returns {Map<string, Object>} id → 断面詳細データ
  */
-function extractRcColumnSections(xmlDoc) {
+export function extractRcColumnSections(xmlDoc) {
   const sections = new Map();
   const sectionElements = querySelectorAll(xmlDoc, 'StbSecColumn_RC');
 
@@ -519,7 +690,7 @@ function buildColumnSectionList(xmlDoc, _parserVersion) {
     });
   });
 
-  // 階を降順（上階から下階）にソート
+  // 階を降順（上から下、高さレベル基準）にソート
   const sortedStories = Array.from(stories.values()).sort(compareStoriesDescending);
 
   // 階×符号の組み合わせごとに一行を構築
@@ -577,7 +748,7 @@ function buildColumnSectionList(xmlDoc, _parserVersion) {
  * @returns {Object} レンダリング用断面データ
  */
 function convertSectionForRender(section, storyUsages) {
-  const { id, name, concrete, dimensions, mainBar, hoop, coreBar } = section;
+  const { id, name, concrete, dimensions, arrangements, mainBar, hoop, coreBar, cover } = section;
 
   // 符号名リストを生成（例: "10C1, 9C1"）- 降順（上階から）
   // story名の末尾サフィックス（SL, F, 階等）を除去し、section名の階プレフィックス（B1, 1 等）を除去して結合
@@ -610,73 +781,22 @@ function convertSectionForRender(section, storyUsages) {
     diameter: dimensions.diameter || 0,
     isCircular: dimensions.type === 'CIRCLE',
 
-    // かぶり（推定値、dtから逆算）
-    cover: estimateCover(mainBar, hoop),
+    // 配筋（柱頭・柱脚別）
+    arrangements,
 
-    // 主筋（SVGレンダラー用）
-    mainBar: {
-      countX: mainBar.countX || mainBar.count || 0,
-      countY: mainBar.countY || mainBar.count || 0,
-      count: mainBar.count || 0,
-      dia: mainBar.dia,
-      grade: mainBar.grade,
-      dtX: mainBar.dtX || mainBar.dt || 0,
-      dtY: mainBar.dtY || mainBar.dt || 0,
-    },
+    // 優先配筋の明示かぶり。欠損時は推定値を作らない。
+    cover,
 
-    // 帯筋
-    hoop: {
-      dia: hoop.dia,
-      pitch: hoop.pitch,
-      grade: hoop.grade,
-      countX: hoop.countX || 0,
-      countY: hoop.countY || 0,
-    },
-
-    // 芯鉄筋
-    coreBar: coreBar
-      ? {
-          countX: coreBar.countX || 0,
-          countY: coreBar.countY || 0,
-          dia: coreBar.dia,
-          position: coreBar.position,
-        }
-      : null,
+    // 優先配筋（BOTTOM → SAME → TOP）を後方互換用トップレベルへミラー
+    mainBar,
+    hoop,
+    coreBar,
 
     // 元データ（詳細表示用）
     raw: section,
   };
 
   return renderData;
-}
-
-/**
- * かぶりを推定
- * @param {Object} mainBar - 主筋情報
- * @param {Object} hoop - 帯筋情報
- * @returns {number} 推定かぶり（mm）
- */
-function estimateCover(mainBar, hoop) {
-  // dt = かぶり + 帯筋径 + 主筋径/2
-  // より: かぶり = dt - 帯筋径 - 主筋径/2
-  const dt = mainBar.dtX || mainBar.dtY || mainBar.dt || 70;
-
-  const hoopDia = parseBarDiameter(hoop.dia);
-  const mainDia = parseBarDiameter(mainBar.dia);
-
-  const cover = dt - hoopDia - mainDia / 2;
-  return Math.max(cover, 30); // 最小30mm
-}
-
-/**
- * 鉄筋径を数値に変換
- * @param {string} dia - 鉄筋径（例: "D25"）
- * @returns {number} 直径（mm）
- */
-function parseBarDiameter(dia) {
-  if (!dia) return 25;
-  const match = dia.match(/\d+/);
-  return match ? parseInt(match[0], 10) : 25;
 }
 
 /**

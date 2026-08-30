@@ -12,6 +12,10 @@ import {
 } from '../export/dxf/stb-to-dxf/index.js';
 import { DEFAULT_ELEMENT_COLORS } from '../config/colorConfig.js';
 import { ELEMENT_LABELS } from '../config/elementLabels.js';
+import {
+  getElementColorPreference,
+  subscribeElementColorPreferences,
+} from './elementColorPreferences.js';
 import { showWarning } from './dxfLoaderHelpers.js';
 import {
   initBatchExportButtons,
@@ -21,16 +25,50 @@ import {
 
 const log = createLogger('DXFLoader');
 
-// STBエクスポート用に選択された要素タイプ
 const selectedStbExportTypes = new Set();
+let unsubscribeElementColorPreferences = null;
 
-// 要素タイプの日本語名と色（SSOT: elementLabels.js, colorConfig.js）
+const DXF_ONLY_TYPE_INFO = {
+  Open: { name: '開口', color: '#ffff00' },
+};
+
 const ELEMENT_TYPE_INFO = Object.fromEntries(
-  Object.keys(DEFAULT_ELEMENT_COLORS).map((type) => [
-    type,
-    { name: ELEMENT_LABELS[type] || type, color: DEFAULT_ELEMENT_COLORS[type] },
-  ]),
+  Object.keys(DEFAULT_ELEMENT_COLORS).map((type) => [type, { name: ELEMENT_LABELS[type] || type }]),
 );
+
+function getTypeInfo(type) {
+  return ELEMENT_TYPE_INFO[type] || DXF_ONLY_TYPE_INFO[type] || { name: ELEMENT_LABELS[type] || type };
+}
+
+function getTypeColor(type) {
+  return (
+    getElementColorPreference(type) ||
+    DEFAULT_ELEMENT_COLORS[type] ||
+    DXF_ONLY_TYPE_INFO[type]?.color ||
+    '#ffffff'
+  );
+}
+
+function updateStbExportColorSwatches(colors, changedType, changedColor) {
+  const colorBoxes = document.querySelectorAll(
+    '#stb-export-type-list .type-color[data-element-type]',
+  );
+
+  colorBoxes.forEach((colorBox) => {
+    const elementType = colorBox.dataset.elementType;
+    if (!elementType || (changedType && elementType !== changedType)) return;
+
+    const color = changedType ? changedColor : colors?.[elementType] || getTypeColor(elementType);
+    if (color) colorBox.style.backgroundColor = color;
+  });
+}
+
+function ensureElementColorPreferenceSubscription() {
+  if (unsubscribeElementColorPreferences) return;
+  unsubscribeElementColorPreferences = subscribeElementColorPreferences(
+    updateStbExportColorSwatches,
+  );
+}
 
 /**
  * 選択されたSTBエクスポート要素タイプの配列を取得
@@ -57,32 +95,24 @@ export function updateStbExportStatus() {
 
   if (canExport) {
     statusEl.className = 'stb-export-status status-ready';
-    statusTextEl.textContent = `エクスポート可能: ${solidElementTypes.length}種類の部材`;
+    statusTextEl.textContent = `エクスポート可能: ${solidElementTypes.length}種類の要素`;
 
-    // 要素選択UIを表示
     if (elementSelectEl) elementSelectEl.classList.remove('hidden');
     if (statsEl) statsEl.classList.remove('hidden');
     if (filenameGroupEl) filenameGroupEl.classList.remove('hidden');
 
-    // 要素タイプリストを更新
     updateStbExportTypeList(solidElementTypes);
-
-    // エクスポートボタンを有効化
     if (exportBtn) exportBtn.disabled = false;
   } else {
     statusEl.className = 'stb-export-status status-not-ready';
     statusTextEl.textContent = reason;
 
-    // UIを非表示
     if (elementSelectEl) elementSelectEl.classList.add('hidden');
     if (statsEl) statsEl.classList.add('hidden');
     if (filenameGroupEl) filenameGroupEl.classList.add('hidden');
-
-    // エクスポートボタンを無効化
     if (exportBtn) exportBtn.disabled = true;
   }
 
-  // 連続出力ボタンの状態を更新
   updateBatchExportButtons();
 }
 
@@ -90,19 +120,20 @@ export function updateStbExportStatus() {
  * STBエクスポート要素タイプリストを更新
  * @param {Array<string>} availableTypes - 利用可能な要素タイプ
  */
-function updateStbExportTypeList(availableTypes) {
+export function updateStbExportTypeList(availableTypes) {
   const listContainer = document.getElementById('stb-export-type-list');
   if (!listContainer) return;
 
   listContainer.innerHTML = '';
   selectedStbExportTypes.clear();
 
-  // メッシュ数を取得
   const stats = getStbExportStats(availableTypes);
+  ensureElementColorPreferenceSubscription();
 
   for (const type of availableTypes) {
-    const info = ELEMENT_TYPE_INFO[type] || { name: type, color: '#ffffff' };
-    const meshCount = stats.byElementType[type] || 0;
+    const info = getTypeInfo(type);
+    const color = getTypeColor(type);
+    const elementCount = stats.byElementType[type] || 0;
 
     const item = document.createElement('label');
     item.className = 'stb-export-type-item';
@@ -113,8 +144,8 @@ function updateStbExportTypeList(availableTypes) {
     checkbox.dataset.elementType = type;
     selectedStbExportTypes.add(type);
 
-    checkbox.addEventListener('change', (e) => {
-      if (e.target.checked) {
+    checkbox.addEventListener('change', (event) => {
+      if (event.target.checked) {
         selectedStbExportTypes.add(type);
       } else {
         selectedStbExportTypes.delete(type);
@@ -124,7 +155,8 @@ function updateStbExportTypeList(availableTypes) {
 
     const colorBox = document.createElement('span');
     colorBox.className = 'type-color';
-    colorBox.style.backgroundColor = info.color;
+    colorBox.dataset.elementType = type;
+    colorBox.style.backgroundColor = color;
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'type-name';
@@ -132,7 +164,7 @@ function updateStbExportTypeList(availableTypes) {
 
     const countSpan = document.createElement('span');
     countSpan.className = 'type-count';
-    countSpan.textContent = `(${meshCount}メッシュ)`;
+    countSpan.textContent = `(${elementCount}要素)`;
 
     item.appendChild(checkbox);
     item.appendChild(colorBox);
@@ -154,19 +186,20 @@ function updateStbExportStats() {
 
   const selectedTypes = Array.from(selectedStbExportTypes);
   const stats = getStbExportStats(selectedTypes);
+  const openCount = stats.byElementType.Open || 0;
+  const totalElementCount = stats.totalMeshes + openCount;
 
-  statsEl.textContent = `選択: ${stats.totalMeshes} メッシュ`;
+  statsEl.textContent = `選択: ${totalElementCount} 要素`;
 
-  // エクスポートボタンの有効/無効
   if (exportBtn) {
-    exportBtn.disabled = stats.totalMeshes === 0;
+    exportBtn.disabled = totalElementCount === 0;
   }
 }
 
 /**
  * STB→DXFエクスポートを実行
  */
-function handleExportStbDxf() {
+async function handleExportStbDxf() {
   const selectedTypes = Array.from(selectedStbExportTypes);
   if (selectedTypes.length === 0) {
     showWarning('エクスポートする部材を選択してください');
@@ -176,7 +209,7 @@ function handleExportStbDxf() {
   const filenameInput = document.getElementById('stbDxfExportFilename');
   const filename = filenameInput?.value?.trim() || 'stb_export';
 
-  const success = exportStbToDxf(selectedTypes, filename);
+  const success = await exportStbToDxf(selectedTypes, filename);
   if (success) {
     log.info('STB→DXFエクスポート成功:', filename);
   }
@@ -186,45 +219,37 @@ function handleExportStbDxf() {
  * STBエクスポートUIを初期化
  */
 export function initStbExportUI() {
-  // 全選択ボタン
   const selectAllBtn = document.getElementById('selectAllStbExportTypes');
   if (selectAllBtn) {
     selectAllBtn.addEventListener('click', () => {
       const checkboxes = document.querySelectorAll('#stb-export-type-list input[type="checkbox"]');
-      checkboxes.forEach((cb) => {
-        cb.checked = true;
-        selectedStbExportTypes.add(cb.dataset.elementType);
+      checkboxes.forEach((checkbox) => {
+        checkbox.checked = true;
+        selectedStbExportTypes.add(checkbox.dataset.elementType);
       });
       updateStbExportStats();
     });
   }
 
-  // 全解除ボタン
   const deselectAllBtn = document.getElementById('deselectAllStbExportTypes');
   if (deselectAllBtn) {
     deselectAllBtn.addEventListener('click', () => {
       const checkboxes = document.querySelectorAll('#stb-export-type-list input[type="checkbox"]');
-      checkboxes.forEach((cb) => {
-        cb.checked = false;
-        selectedStbExportTypes.delete(cb.dataset.elementType);
+      checkboxes.forEach((checkbox) => {
+        checkbox.checked = false;
+        selectedStbExportTypes.delete(checkbox.dataset.elementType);
       });
       updateStbExportStats();
     });
   }
 
-  // エクスポートボタン
   const exportBtn = document.getElementById('exportStbDxfButton');
   if (exportBtn) {
     exportBtn.addEventListener('click', handleExportStbDxf);
   }
 
-  // バッチエクスポートに選択タイプ取得関数を設定（循環依存回避）
   setSelectedStbExportTypesGetter(getSelectedStbExportTypes);
-
-  // 連続出力ボタンを初期化
   initBatchExportButtons();
-
-  // 初期状態を更新
   updateStbExportStatus();
 
   log.info('STBエクスポートUI初期化完了');

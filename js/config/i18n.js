@@ -12,6 +12,8 @@ const messages = {
     'app.compare.loadModel': '🔍 モデル読込',
     'app.compare.loadOrCompare': '🔍 読込 / 比較実行',
     'file.unselected': '未選択',
+    'file.clear': '解除',
+    'file.clearModel': 'モデル{slot}を解除',
     'errors.unexpected': '予期しないエラーが発生しました。操作をやり直してください。',
   },
   en: {
@@ -19,6 +21,8 @@ const messages = {
     'app.compare.loadModel': '🔍 Load Model',
     'app.compare.loadOrCompare': '🔍 Load / Compare',
     'file.unselected': 'Not selected',
+    'file.clear': 'Clear',
+    'file.clearModel': 'Clear model {slot}',
     'errors.unexpected': 'An unexpected error occurred. Please try again.',
   },
 };

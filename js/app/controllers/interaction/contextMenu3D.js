@@ -23,6 +23,9 @@ import { findSelectableAncestor } from './selectionInfoUtils.js';
 
 const logger = createLogger('interaction:contextMenu3D');
 
+/** @type {Set<THREE.Object3D>} 3Dコンテキストメニューで非表示にした要素の台帳 */
+const hiddenContextMenuObjects = new Set();
+
 /**
  * 3Dビューでの右クリック（コンテキストメニュー）を処理
  * @param {MouseEvent} event - マウスイベント
@@ -106,6 +109,26 @@ function show3DContextMenu(x, y, targetObject, scheduleRender, deps) {
     ...buildDisplayWindowMenuItems(),
   ];
 
+  // 大梁/小梁は貫通孔配置可能範囲図を表示できる
+  const elementType = targetObject.userData?.elementType;
+  if (!isMultipleSelected && (elementType === 'Girder' || elementType === 'Beam')) {
+    menuItems.push(
+      { separator: true },
+      {
+        label: '貫通孔 配置可能範囲図',
+        icon: '⭕',
+        action: () =>
+          eventBus.emit(InteractionEvents.OPEN_BEAM_OPENING_DIAGRAM, {
+            elementType,
+            elementId: targetObject.userData?.elementId,
+            elementIdA: targetObject.userData?.elementIdA,
+            elementIdB: targetObject.userData?.elementIdB,
+            modelSource: targetObject.userData?.modelSource,
+          }),
+      },
+    );
+  }
+
   eventBus.emit(InteractionEvents.SHOW_CONTEXT_MENU, { x, y, menuItems });
 }
 
@@ -136,8 +159,19 @@ function buildDisplayWindowMenuItems() {
  */
 function showEmpty3DContextMenu(x, y, scheduleRender, deps) {
   const hasSelection = deps.getSelectedObjects().length > 0;
+  const hasHiddenObjects = hiddenContextMenuObjects.size > 0;
 
   const menuItems = [
+    ...(hasHiddenObjects
+      ? [
+          {
+            label: '非表示要素を元に戻す',
+            icon: '👁️',
+            action: () => restoreHiddenContextMenuElements(scheduleRender),
+          },
+          { separator: true },
+        ]
+      : []),
     {
       label: '選択をリセット',
       icon: '🔄',
@@ -183,6 +217,7 @@ function handle3DHideElements(scheduleRender, deps) {
   // 非表示にする
   selectedObjects.forEach((obj) => {
     obj.visible = false;
+    hiddenContextMenuObjects.add(obj);
   });
 
   // 選択をリセット
@@ -197,6 +232,22 @@ function handle3DHideElements(scheduleRender, deps) {
       elements: elementsToHide,
     });
   }
+
+  if (scheduleRender) scheduleRender();
+}
+
+/**
+ * 3Dコンテキストメニューで非表示にした要素を元に戻す
+ * @param {Function} scheduleRender - 再描画要求関数
+ */
+function restoreHiddenContextMenuElements(scheduleRender) {
+  const hiddenObjects = Array.from(hiddenContextMenuObjects);
+  if (hiddenObjects.length === 0) return;
+
+  hiddenObjects.forEach((obj) => {
+    obj.visible = true;
+    hiddenContextMenuObjects.delete(obj);
+  });
 
   if (scheduleRender) scheduleRender();
 }

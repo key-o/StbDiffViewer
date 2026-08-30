@@ -7,7 +7,6 @@
  * @module config/elementRedrawConfig
  */
 
-import { filterWallsByViewerElementType } from '../common-stb/walls/wallClassification.js';
 import { STB_TAG_NAMES } from '../constants/elementTypes.js';
 
 /**
@@ -19,7 +18,8 @@ import { STB_TAG_NAMES } from '../constants/elementTypes.js';
  * @property {string} elementsKey - stbData内の要素キー
  * @property {string} sectionsKey - stbData内の断面キー
  * @property {boolean} [supportsLineMode=true] - 線表示モードをサポートするか
- * @property {(function(Array): Array)|undefined} [elementFilter] - 表示対象を絞り込むフィルタ
+ * @property {string} [wallViewerElementType] - 壁要素の表示種別（'Wall'|'ShearWall'）。
+ *   指定時は描画側（elementRedrawCore）が wallClassification で絞り込む
  */
 
 /**
@@ -28,7 +28,6 @@ import { STB_TAG_NAMES } from '../constants/elementTypes.js';
  * @type {Map<string, ElementRedrawConfig>}
  */
 export const ELEMENT_REDRAW_CONFIGS = new Map([
-  // 垂直要素（2ノード: bottom-top）
   // 垂直要素（2ノード: bottom-top）
   [
     'Column',
@@ -211,7 +210,7 @@ export const ELEMENT_REDRAW_CONFIGS = new Map([
       elementsKey: 'wallElements',
       sectionsKey: 'wallSections',
       supportsLineMode: true,
-      elementFilter: (elements) => filterWallsByViewerElementType('ShearWall', elements),
+      wallViewerElementType: 'ShearWall',
     },
   ],
   [
@@ -224,7 +223,7 @@ export const ELEMENT_REDRAW_CONFIGS = new Map([
       elementsKey: 'wallElements',
       sectionsKey: 'wallSections',
       supportsLineMode: true,
-      elementFilter: (elements) => filterWallsByViewerElementType('Wall', elements),
+      wallViewerElementType: 'Wall',
     },
   ],
 ]);

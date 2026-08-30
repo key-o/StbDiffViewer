@@ -10,6 +10,7 @@ import {
   toggleGridVisibility,
 } from './eventHandlers.js';
 import { getLoadDisplayManager, LOAD_DISPLAY_MODE } from '../../viewer/index.js';
+import { initializeRebarDisplaySync, setRebarDisplayVisible } from '../viewModes/rebarDisplay.js';
 import {
   initializeThemeSystem,
   initializeSharedPanels,
@@ -157,5 +158,82 @@ export function setupButtonEventListeners() {
     });
   }
 
+  setupRebarDisplayListeners();
+
   log.info('ボタンイベントリスナーをセットアップしました');
+}
+
+/**
+ * 3D配筋表示のイベントリスナーをセットアップ
+ * @private
+ */
+function setupRebarDisplayListeners() {
+  const coverInput = document.getElementById('rebarCoverInput');
+
+  /**
+   * かぶり入力欄から配置設定を作る
+   * @returns {Object} setRebarDisplayVisible へ渡す設定
+   */
+  const readOptions = () => {
+    const value = coverInput ? Number.parseFloat(coverInput.value) : NaN;
+    return Number.isFinite(value) && value >= 0 ? { coverMm: value } : {};
+  };
+
+  /** 種別ごとのチェックボックスと文言 */
+  const toggles = [
+    {
+      key: 'main',
+      element: document.getElementById('toggleRebarDisplay'),
+      label: '鉄筋表示',
+      emptyMessage: '配筋情報を持つRC柱・RC梁が見つかりませんでした。',
+    },
+    {
+      key: 'hoop',
+      element: document.getElementById('toggleHoopDisplay'),
+      label: '帯筋・あばら筋表示',
+      emptyMessage: '帯筋・あばら筋のピッチを持つRC柱・RC梁が見つかりませんでした。',
+    },
+  ].filter((toggle) => {
+    if (toggle.element) return true;
+    log.warn(`${toggle.label}の切り替えボタンが見つかりません。`);
+    return false;
+  });
+
+  if (toggles.length === 0) return;
+
+  for (const toggle of toggles) {
+    toggle.element.addEventListener('change', (event) => {
+      const requested = event.target.checked;
+      const shown = setRebarDisplayVisible(requested, readOptions(), toggle.key);
+
+      if (requested && !shown) {
+        event.target.checked = false;
+        import('../../ui/common/toast.js')
+          .then(({ showWarning }) => showWarning(toggle.emptyMessage))
+          .catch(() => {});
+        log.warn(`配筋情報が無いため、${toggle.label}を無効にしました`);
+        return;
+      }
+      log.info(`${toggle.label}を${requested ? '有効化' : '無効化'}しました`);
+    });
+  }
+
+  if (coverInput) {
+    coverInput.addEventListener('change', () => {
+      // かぶりはループ芯・主筋芯の両方の基準なので、表示中の種別すべてへ反映する
+      for (const toggle of toggles) {
+        if (!toggle.element.checked) continue;
+        setRebarDisplayVisible(true, readOptions(), toggle.key);
+      }
+      log.info('かぶり厚さの変更を鉄筋表示へ反映しました');
+    });
+  }
+
+  // モデル再読み込み後の追従（新モデルに配筋が無ければチェックを戻す）
+  initializeRebarDisplaySync((kindKey) => {
+    const toggle = toggles.find((item) => item.key === kindKey);
+    if (!toggle) return;
+    toggle.element.checked = false;
+    log.warn(`新しいモデルに配筋情報が無いため、${toggle.label}を無効にしました`);
+  });
 }

@@ -5,10 +5,8 @@
  */
 
 // 設定（直接定義）
+// R3: config/ は最下層のため utils/logger を import せず console を直接使用する
 
-import { createLogger } from '../utils/logger.js';
-
-const log = createLogger('config:environment');
 const globalConfig = {
   environments: {
     development: {
@@ -98,7 +96,7 @@ export function isFeatureEnabled(featureName) {
 export function displayEnvironmentInfo() {
   const config = getEnvironmentConfig();
   console.group('🌍 環境設定情報');
-  log.info('環境:', config.environment);
-  log.info('有効な機能:', config.features);
+  console.info('環境:', config.environment);
+  console.info('有効な機能:', config.features);
   console.groupEnd();
 }

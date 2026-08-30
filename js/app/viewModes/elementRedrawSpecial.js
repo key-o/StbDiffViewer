@@ -13,6 +13,7 @@ import {
   labelDisplayManager,
   geometryGeneratorFactory,
   parseStbFile,
+  finalizeRenderableBatch,
 } from '../../viewer/index.js';
 import { eventBus, LabelEvents } from '../../data/events/index.js';
 import { compareElements } from '../../common-stb/comparison/index.js';
@@ -46,8 +47,9 @@ export function redrawJointsForViewMode(scheduleRender) {
   log.debug(`[redrawJointsForViewMode] mode: ${viewMode}`);
 
   if (viewMode !== 'solid') {
-    // 線表示モードでは継手は非表示
+    // 線表示モードでは継手は非表示。clear済みの空groupもbatch変更として通知する。
     group.visible = false;
+    finalizeRenderableBatch({ elementType: 'Joint', group });
     if (scheduleRender) scheduleRender();
     return;
   }
@@ -123,6 +125,7 @@ export function redrawJointsForViewMode(scheduleRender) {
 
   if (!jointInfo) {
     log.warn('Joint generator not found');
+    finalizeRenderableBatch({ elementType: 'Joint', group });
     if (scheduleRender) scheduleRender();
     return;
   }
@@ -170,6 +173,8 @@ export function redrawJointsForViewMode(scheduleRender) {
     });
     log.debug(`[redrawJointsForViewMode] Created ${meshes.length} joint meshes from model B`);
   }
+
+  finalizeRenderableBatch({ elementType: 'Joint', group });
 
   // カラーモード適用（動的インポート）
   import('../../colorModes/index.js')
@@ -308,6 +313,8 @@ export function redrawUndefinedElementsForViewMode(scheduleRender) {
     log.debug(`[redrawUndefinedElementsForViewMode] Created ${createdLabels.length} labels`);
     eventBus.emit(LabelEvents.ADD_LABELS, createdLabels);
   }
+
+  finalizeRenderableBatch({ elementType: 'Undefined', group });
 
   // カラーモード適用（動的インポート）
   import('../../colorModes/index.js')

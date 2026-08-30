@@ -16,53 +16,9 @@
  */
 
 import { createLogger } from '../../utils/logger.js';
+import { createInitialModelState } from './modelStateFactory.js';
 
 const log = createLogger('app:globalState');
-
-function createEmptySectionMaps() {
-  return {
-    columnSections: new Map(),
-    postSections: new Map(),
-    girderSections: new Map(),
-    beamSections: new Map(),
-    braceSections: new Map(),
-    pileSections: new Map(),
-    footingSections: new Map(),
-    foundationColumnSections: new Map(),
-    foundationcolumnSections: new Map(),
-    slabSections: new Map(),
-    wallSections: new Map(),
-    parapetSections: new Map(),
-    isolatingDeviceSections: new Map(),
-    isolatingdeviceSections: new Map(),
-    dampingDeviceSections: new Map(),
-    dampingdeviceSections: new Map(),
-    undefinedSections: new Map(),
-  };
-}
-
-function createEmptyElementData() {
-  return {
-    columnElements: [],
-    postElements: [],
-    girderElements: [],
-    beamElements: [],
-    braceElements: [],
-    isolatingDeviceElements: [],
-    dampingDeviceElements: [],
-    frameDampingDeviceElements: [],
-    pileElements: [],
-    footingElements: [],
-    foundationColumnElements: [],
-    slabElements: [],
-    wallElements: [],
-    parapetElements: [],
-    openingElements: [],
-    jointElements: [],
-    stripFootingElements: [],
-    undefinedElements: [],
-  };
-}
 
 class ApplicationState {
   constructor() {
@@ -75,35 +31,7 @@ class ApplicationState {
       },
 
       // モデル関連
-      models: {
-        documentA: null, // 旧: modelADocument - modelLoader.js と統一
-        documentB: null, // 旧: modelBDocument - modelLoader.js と統一
-        nodeMapA: new Map(),
-        nodeMapB: new Map(),
-        // 荷重データ（StbCalData）
-        calDataA: null,
-        calDataB: null,
-        // SS7元CSVテキスト（SS7再エクスポート時のパススルー用）
-        ss7OriginalCsvTextA: null,
-        ss7OriginalCsvTextB: null,
-        // IFC変換用: 生の座標データ（THREE.Vector3変換前）
-        nodeMapRawA: new Map(),
-        nodeMapRawB: new Map(),
-        sectionMaps: createEmptySectionMaps(),
-        // 鋼材断面データ（IFC変換で再利用）
-        steelSections: new Map(),
-        // 要素データ（IFC変換で再利用）
-        elementData: createEmptyElementData(),
-        modelsLoaded: false,
-        // STBバージョン情報
-        stbVersionA: null, // '2.0.2' | '2.1.0' | 'unknown'
-        stbVersionB: null, // '2.0.2' | '2.1.0' | 'unknown'
-        activeXsdVersion: null, // 現在アクティブなXSDバージョン
-        versionInfo: null,
-        stories: [],
-        axesData: { xAxes: [], yAxes: [] },
-        modelBounds: null,
-      },
+      models: createInitialModelState(),
 
       // UI関連
       ui: {
@@ -370,30 +298,7 @@ class ApplicationState {
         requestRender: null,
         rendererInitialized: false,
       },
-      models: {
-        documentA: null, // 旧: modelADocument - modelLoader.js と統一
-        documentB: null, // 旧: modelBDocument - modelLoader.js と統一
-        nodeMapA: new Map(),
-        nodeMapB: new Map(),
-        // 荷重データ（StbCalData）
-        calDataA: null,
-        calDataB: null,
-        ss7OriginalCsvTextA: null,
-        ss7OriginalCsvTextB: null,
-        nodeMapRawA: new Map(),
-        nodeMapRawB: new Map(),
-        sectionMaps: createEmptySectionMaps(),
-        steelSections: new Map(),
-        elementData: createEmptyElementData(),
-        modelsLoaded: false,
-        stbVersionA: null,
-        stbVersionB: null,
-        activeXsdVersion: null,
-        versionInfo: null,
-        stories: [],
-        axesData: { xAxes: [], yAxes: [] },
-        modelBounds: null,
-      },
+      models: createInitialModelState(),
       ui: {
         nodeLabels: [],
         stories: [],

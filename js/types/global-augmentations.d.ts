@@ -96,7 +96,6 @@ interface Window {
   };
   viewer: ViewerGlobal;
   AppLogger?: any;
-  ElementGeometryUtils?: any;
   FootingGenerator?: any;
   GeometryDebugger?: any;
   GeometryDiagnostics?: any;

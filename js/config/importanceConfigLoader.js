@@ -3,21 +3,9 @@
  */
 
 import { IMPORTANCE_LEVELS } from '../constants/importanceLevels.js';
-import { createLogger } from '../utils/logger.js';
+import { resolveRuntimeAssetUrl } from './runtimeAssetUrl.js';
 
-const log = createLogger('config:importanceConfigLoader');
-
-function resolveRuntimeAssetUrl(appRelativePath, moduleRelativePath) {
-  if (typeof document !== 'undefined' && document.baseURI) {
-    try {
-      return new URL(appRelativePath, document.baseURI).href;
-    } catch {
-      // jsdom の about:blank など、相対 URL を解決できないテスト環境では
-      // モジュール相対の file URL にフォールバックする。
-    }
-  }
-  return new URL(moduleRelativePath, import.meta.url).href;
-}
+// R3: config/ は最下層のため utils/logger を import せず console を直接使用する
 
 /**
  * 利用可能な設定ファイル一覧
@@ -31,19 +19,22 @@ export const AVAILABLE_CONFIGS = [
       resolveRuntimeAssetUrl(
         'config/importance-mvd-combined.json',
         '../../config/importance-mvd-combined.json',
+        import.meta.url,
       ),
     description: 'S2/S4 の統合設定',
   },
   {
     id: 's2',
     name: 'MVD S2 (必須)',
-    path: () => resolveRuntimeAssetUrl('config/mvd-s2.json', '../../config/mvd-s2.json'),
+    path: () =>
+      resolveRuntimeAssetUrl('config/mvd-s2.json', '../../config/mvd-s2.json', import.meta.url),
     description: 'MVD S2 - 通り芯上での配置・大体の部材サイズ確認',
   },
   {
     id: 's4',
     name: 'MVD S4 (任意)',
-    path: () => resolveRuntimeAssetUrl('config/mvd-s4.json', '../../config/mvd-s4.json'),
+    path: () =>
+      resolveRuntimeAssetUrl('config/mvd-s4.json', '../../config/mvd-s4.json', import.meta.url),
     description: 'MVD S4 - 入力可能な決定項目',
   },
 ];
@@ -78,7 +69,7 @@ export async function loadImportanceConfig(configPath) {
     // 旧フォーマット（後方互換）
     return loadLegacyFormatConfig(config);
   } catch (error) {
-    log.error('[ImportanceConfigLoader] 設定ファイルの読み込みエラー:', error);
+    console.error('[ImportanceConfigLoader] 設定ファイルの読み込みエラー:', error);
     throw error;
   }
 }

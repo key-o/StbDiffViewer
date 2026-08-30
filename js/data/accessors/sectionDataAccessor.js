@@ -19,6 +19,7 @@ import {
   DIAMETER_KEYS,
   THICKNESS_KEYS,
 } from '../../common-stb/import/constants/attributeKeys.js';
+import { extractDimensions } from '../../common-stb/import/data/dimensionNormalizer.js';
 
 /**
  * 断面データから寸法オブジェクトを取得
@@ -27,17 +28,7 @@ import {
  * @param {Object} sectionData - 断面データ
  * @returns {Object} 寸法オブジェクト
  */
-export function getDimensions(sectionData) {
-  if (!sectionData) return {};
-
-  // dimensions プロパティがあればそれを使用
-  if (sectionData.dimensions && typeof sectionData.dimensions === 'object') {
-    return sectionData.dimensions;
-  }
-
-  // 直接プロパティとして持っている場合はそのまま返す
-  return sectionData;
-}
+export const getDimensions = extractDimensions;
 
 /**
  * 断面データから幅を取得

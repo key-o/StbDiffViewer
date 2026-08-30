@@ -20,6 +20,11 @@ export const COLOR_MODES = {
 // 現在の色付けモード
 let currentColorMode = COLOR_MODES.DIFF;
 
+// ユーザーが色付けモードセレクターから明示的に選択したか。
+// モデルの再読み込みでは維持し、ページの再読み込み時だけ初期化される。
+let hasExplicitUserSelection = false;
+let lastUserSelectedColorMode = null;
+
 /**
  * 現在の色付けモードを取得
  * @returns {string} 現在の色付けモード
@@ -34,4 +39,20 @@ export function getCurrentColorMode() {
  */
 export function setCurrentColorModeInternal(mode) {
   currentColorMode = mode;
+}
+
+/** ユーザーによる明示的な色付けモード選択を記録する */
+export function markColorModeSelectedByUser(mode) {
+  hasExplicitUserSelection = true;
+  lastUserSelectedColorMode = mode;
+}
+
+/** @returns {boolean} ユーザーが色付けモードを明示選択済みか */
+export function hasUserSelectedColorMode() {
+  return hasExplicitUserSelection;
+}
+
+/** @returns {string|null} ユーザーが最後に要求した色付けモード */
+export function getLastUserSelectedColorMode() {
+  return lastUserSelectedColorMode;
 }

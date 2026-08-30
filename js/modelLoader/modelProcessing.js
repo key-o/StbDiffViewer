@@ -12,54 +12,15 @@ import {
   detectStbVersion,
   getVersionInfo,
 } from '../common-stb/import/parser/utils/versionDetector.js';
+import {
+  loadJsonSchemaForVersion,
+  setActiveVersion,
+  isVersionLoaded,
+} from '../common-stb/import/parser/jsonSchemaLoader.js';
 import { parseStbCalData } from '../common-stb/import/extractor/StbCalDataExtractor.js';
 import { getLoaderSetState } from './loaderDependencies.js';
 import { SS7_ENABLED } from '../config/featureFlags.js';
-
-function createEmptySectionMaps() {
-  return {
-    columnSections: new Map(),
-    postSections: new Map(),
-    girderSections: new Map(),
-    beamSections: new Map(),
-    braceSections: new Map(),
-    pileSections: new Map(),
-    footingSections: new Map(),
-    foundationColumnSections: new Map(),
-    foundationcolumnSections: new Map(),
-    slabSections: new Map(),
-    wallSections: new Map(),
-    parapetSections: new Map(),
-    isolatingDeviceSections: new Map(),
-    isolatingdeviceSections: new Map(),
-    dampingDeviceSections: new Map(),
-    dampingdeviceSections: new Map(),
-    undefinedSections: new Map(),
-  };
-}
-
-function createEmptyElementData() {
-  return {
-    columnElements: [],
-    postElements: [],
-    girderElements: [],
-    beamElements: [],
-    braceElements: [],
-    isolatingDeviceElements: [],
-    dampingDeviceElements: [],
-    frameDampingDeviceElements: [],
-    pileElements: [],
-    footingElements: [],
-    foundationColumnElements: [],
-    slabElements: [],
-    wallElements: [],
-    parapetElements: [],
-    openingElements: [],
-    jointElements: [],
-    stripFootingElements: [],
-    undefinedElements: [],
-  };
-}
+import { createEmptyElementData, createEmptySectionMaps } from '../data/state/modelStateFactory.js';
 
 /**
  * Process model documents and extract structural data.
@@ -114,9 +75,20 @@ export async function processModelDocuments(fileA, fileB) {
   // Build version info
   const versionA = resultA?.version || null;
   const versionB = resultB?.version || null;
+  const supportedSchemaVersions = new Set(['2.0.2', '2.1.0', '2.1.1']);
+  const schemaVersions = [
+    ...new Set([versionA, versionB].filter((version) => supportedSchemaVersions.has(version))),
+  ];
+  if (schemaVersions.length > 0) {
+    await Promise.all(schemaVersions.map((version) => loadJsonSchemaForVersion(version)));
+    const activeVersion = schemaVersions.find((version) => isVersionLoaded(version));
+    if (activeVersion) setActiveVersion(activeVersion);
+  }
   const versionInfo = {
     versionA: versionA || 'unknown',
     versionB: versionB || 'unknown',
+    hasModelA: Boolean(resultA),
+    hasModelB: Boolean(resultB),
     isCrossVersion: versionA && versionB && versionA !== versionB,
     sourceTypeA: resultA?.sourceType || 'stb',
     sourceTypeB: resultB?.sourceType || 'stb',

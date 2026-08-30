@@ -15,7 +15,7 @@ import {
   setCameraMode,
   setView,
 } from '../../viewer/index.js';
-import { setStbExportPanelVisibility } from '../dxfLoader.js';
+import { setStbExportPanelVisibility } from '../controllers/dxfLoader.js';
 import { createLogger } from '../../utils/logger.js';
 import { getModelContext } from './modelContext.js';
 import { eventBus } from '../../data/events/eventBus.js';

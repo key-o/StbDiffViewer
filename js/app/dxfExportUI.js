@@ -6,7 +6,7 @@
 
 import { createLogger } from '../utils/logger.js';
 import { exportDxf, getExportStats } from '../export/dxf/dxfExporter.js';
-import { getCurrentEntities, getCurrentLayers } from './dxfFileLoader.js';
+import { getCurrentEntities, getCurrentLayers } from './controllers/dxfFileLoader.js';
 import { showWarning } from './dxfLoaderHelpers.js';
 import { getState } from '../data/state/globalState.js';
 

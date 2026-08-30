@@ -22,7 +22,7 @@ import {
   redrawJointsForViewMode,
 } from './elementRedrawer.js';
 import { eventBus, LabelEvents } from '../../data/events/index.js';
-import { updateStbExportStatus } from '../dxfLoader.js';
+import { updateStbExportStatus } from '../controllers/dxfLoader.js';
 import { getState, setState } from '../../data/state/globalState.js';
 import {
   isVisibleByStructuralFilter,

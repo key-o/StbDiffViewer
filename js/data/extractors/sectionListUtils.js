@@ -1,13 +1,16 @@
 /**
  * @fileoverview 断面リスト抽出用の共通ユーティリティ
  *
- * beamSectionListExtractor と columnSectionListExtractor で共通する
+ * beamSectionList と columnSectionListExtractor で共通する
  * XML検索、階データ抽出、ソートのロジックを集約します。
  *
  * @module data/extractors/sectionListUtils
  */
 
-const STB_NS = 'https://www.building-smart.or.jp/dl';
+const STB_NAMESPACES = [
+  'https://www.building-smart.or.jp/dl',
+  'https://www.building-smart.or.jp/dl/stbridge',
+];
 
 /**
  * 要素を取得するヘルパー（名前空間対応）
@@ -24,8 +27,10 @@ export function querySelector(parent, selector) {
     // querySelector失敗時は名前空間フォールバック
   }
   if (typeof parent.getElementsByTagNameNS === 'function') {
-    const nsList = parent.getElementsByTagNameNS(STB_NS, selector);
-    if (nsList && nsList.length > 0) return nsList[0];
+    for (const namespace of STB_NAMESPACES) {
+      const nsList = parent.getElementsByTagNameNS(namespace, selector);
+      if (nsList && nsList.length > 0) return nsList[0];
+    }
   }
   // 直接子要素検索
   const children = parent.children || [];
@@ -56,11 +61,13 @@ export function querySelectorAll(parent, selector) {
     // querySelector失敗時は名前空間フォールバック
   }
   if (typeof parent.getElementsByTagNameNS === 'function') {
-    const nsList = parent.getElementsByTagNameNS(STB_NS, selector);
-    for (let i = 0; i < nsList.length; i++) {
-      results.push(nsList[i]);
+    for (const namespace of STB_NAMESPACES) {
+      const nsList = parent.getElementsByTagNameNS(namespace, selector);
+      for (let i = 0; i < nsList.length; i++) {
+        results.push(nsList[i]);
+      }
+      if (results.length > 0) return results;
     }
-    if (results.length > 0) return results;
   }
   // 再帰的に子要素を検索
   function findAll(el) {

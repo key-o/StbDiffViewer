@@ -82,7 +82,8 @@ import {
   handleFinalizationError,
 } from '../../modelLoader/visualizationFinalizer.js';
 import { syncDisplayModeFromUI } from '../viewModes/index.js';
-import { normalizeModelSourceToComparisonState } from '../../colorModes/modelSourceMapping.js';
+import { convertToAdapterFormat } from './modelLoaderAdapterFormat.js';
+import { updateObjectMaterialAsync } from './modelLoaderMaterialUpdate.js';
 
 // モデル状態管理
 let stories = [];
@@ -95,6 +96,8 @@ let modelADocument = null;
 let modelBDocument = null;
 let modelsLoaded = false;
 let sectionMaps = null; // 断面データ
+let modelStateGeneration = 0;
+let comparisonInProgress = false;
 
 // 比較キータイプ変更時に自動再比較を実行
 comparisonKeyManager.onChange(async (newKeyType, oldKeyType) => {
@@ -137,8 +140,21 @@ comparisonKeyManager.onStoryAxisCriterionChange(async (newCriterion, oldCriterio
   }
 });
 
+// 異ソフト間の階名正準化設定変更時に自動再比較を実行
+comparisonKeyManager.onCrossSoftwareModeChange(async (enabled) => {
+  if (!modelsLoaded) return;
+  log.info(`異ソフト間の階名正準化を${enabled ? '有効化' : '無効化'}、再比較を実行します`);
+  try {
+    if (typeof window.handleCompareModelsClick === 'function') {
+      await window.handleCompareModelsClick();
+    }
+  } catch (error) {
+    log.error('階名正準化設定変更後の再比較に失敗:', error);
+  }
+});
+
 // 許容差変更時に自動再比較を実行（eventBus経由）。
-// 断面一致基準（NAME_FLOOR_CANONICAL＝異ソフト間を含む）は onSectionCriterionChange で購読する。
+// 断面の対応付け基準は onSectionCriterionChange で購読する。
 const RECOMPARE_SETTING_TYPES = new Set(['tolerance']);
 eventBus.on(SettingsEvents.CHANGED, async (payload = {}) => {
   const { type, config: newConfig } = /** @type {{type?: string, config?: any}} */ (payload);
@@ -181,6 +197,64 @@ export function isModelLoaded() {
   return modelsLoaded;
 }
 
+function clearAdapterContent(adapter) {
+  if (typeof adapter?.loadComparisonResult !== 'function') return;
+
+  // アダプターで実際に利用している公開APIへ空の比較結果を渡し、
+  // 未確認のclear系APIを仮定せず既存オブジェクトを破棄する。
+  adapter.loadComparisonResult(convertToAdapterFormat(new Map(), new Map(), new Map(), null));
+}
+
+/**
+ * モデルに依存するシーン・状態・UI・キャッシュを一括して破棄する。
+ * compareModels の再読込前と、最後のモデルを解除した時の両方で使用する。
+ * @param {Function} [requestRender] - 再描画要求関数
+ * @returns {number} クリア後のモデル状態世代
+ */
+export function clearLoadedModels(requestRender) {
+  log.info('全状態を初期化しています...');
+  const generation = ++modelStateGeneration;
+
+  const adapter = getState('viewer.adapter');
+  try {
+    clearAdapterContent(adapter);
+  } catch (error) {
+    // adapter固有の破棄失敗で、標準シーンやアプリ状態のクリアを中断しない。
+    log.warn('common viewer adapterのモデル解除に失敗しました:', error);
+  }
+
+  modelBounds = clearSceneContent(elementGroups, nodeLabels);
+  setState('models.modelBounds', modelBounds);
+
+  stories.length = 0;
+  nodeMapA.clear();
+  nodeMapB.clear();
+  axesData = { xAxes: [], yAxes: [] };
+  nodeLabels = [];
+  modelADocument = null;
+  modelBDocument = null;
+  sectionMaps = null;
+  modelsLoaded = false;
+
+  clearModelProcessingState();
+  resetApplicationState();
+  setState('elementGroups', elementGroups);
+
+  eventBus.emit(ModelEvents.CLEARED);
+  eventBus.emit(AppEvents.CLEAR_UI_STATE);
+  resetSelection();
+  eventBus.emit(AppEvents.CLEAR_TREE);
+  eventBus.emit(AppEvents.CLEAR_SECTION_TREE);
+  clearParseCache();
+  clearClippingPlanes();
+  createOrUpdateGridHelper(modelBounds);
+
+  const render = requestRender || scheduleRender;
+  if (typeof render === 'function') render();
+  log.info('全状態の初期化が完了しました');
+  return generation;
+}
+
 /**
  * モデルを読み込み比較する（リファクタリング版）
  * @param {Function} scheduleRender - 再描画要求関数
@@ -214,63 +288,29 @@ export async function compareModels(scheduleRender, { camera, controls } = {}) {
     return false;
   }
 
-  // Set loading state
-  setLoadingState(true);
-  onLoadingStart();
-
+  // 比較・再読込はシーンとglobalStateを一括更新するため、同時実行させない。
+  // 解除中の中央読込や設定変更イベントなど、ボタン以外の入口からの競合もここで防ぐ。
+  if (comparisonInProgress) {
+    log.warn('モデルの読込/比較処理が進行中のため、重複実行をスキップしました');
+    return false;
+  }
   // === Phase 0: Comprehensive State Reset ===
-  log.info('全状態を初期化しています...');
-
-  // Clear 3D scene content
-  modelBounds = clearSceneContent(elementGroups, nodeLabels);
-  setState('models.modelBounds', modelBounds);
-
-  // Clear local module state
-  stories.length = 0;
-  nodeMapA.clear();
-  nodeMapB.clear();
-  axesData = { xAxes: [], yAxes: [] };
-  nodeLabels = [];
-  modelADocument = null;
-  modelBDocument = null;
-  sectionMaps = null;
-  modelsLoaded = false;
-  // 読み込み済みモデルを破棄した時点で通知し、ARなどのモデル依存UIを即時無効化する。
-  eventBus.emit(ModelEvents.CLEARED);
-
-  // Clear model processing state (globalState documents)
-  clearModelProcessingState();
-
-  // Reset global application state
-  resetApplicationState();
-  // 重要度色分け等が参照する要素グループ参照を再登録
-  setState('elementGroups', elementGroups);
-
-  // Clear UI state (labels, stories, axes)
-  eventBus.emit(AppEvents.CLEAR_UI_STATE);
-
-  // Clear selection state in 3D viewer
-  resetSelection();
-
-  // Clear tree views
-  eventBus.emit(AppEvents.CLEAR_TREE);
-  eventBus.emit(AppEvents.CLEAR_SECTION_TREE);
-
-  // Clear STB parse cache to ensure fresh parsing
-  clearParseCache();
-
-  log.info('全状態の初期化が完了しました');
-
-  // 元のSTBファイルをグローバル状態に再保存（リセット後に行う）
-  // IFC変換やSTBバージョン変換で使用するため
-  if (fileA) {
-    setState('files.originalFileA', fileA);
-  }
-  if (fileB) {
-    setState('files.originalFileB', fileB);
-  }
+  const loadGeneration = clearLoadedModels(scheduleRender);
+  comparisonInProgress = true;
+  setLoadingState(true);
 
   try {
+    onLoadingStart();
+
+    // 元のSTBファイルをグローバル状態に再保存（リセット後に行う）
+    // IFC変換やSTBバージョン変換で使用するため
+    if (fileA) {
+      setState('files.originalFileA', fileA);
+    }
+    if (fileB) {
+      setState('files.originalFileB', fileB);
+    }
+
     // Phase 2: Model Document Processing (throws on failure)
     const processingResult = await processModelDocuments(fileA, fileB);
 
@@ -548,6 +588,7 @@ export async function compareModels(scheduleRender, { camera, controls } = {}) {
     onLoadingComplete();
 
     schedulePostLoadTask(() => {
+      if (loadGeneration !== modelStateGeneration) return;
       // 要素情報用違反は即時実行せず、メイン描画完了後のアイドル時に実行
       // UI層に直接依存せずEventBus経由で通知（R1ルール遵守）
       eventBus.emit(AppEvents.POST_LOAD_VALIDATION, {
@@ -558,7 +599,9 @@ export async function compareModels(scheduleRender, { camera, controls } = {}) {
 
     // Apply appropriate color mode based on loaded models
     setTimeout(() => {
+      if (loadGeneration !== modelStateGeneration) return;
       import('../../colorModes/index.js').then(({ applyDefaultColorModeAfterLoad }) => {
+        if (loadGeneration !== modelStateGeneration) return;
         const hasBothModels = !!modelADocument && !!modelBDocument;
         const hasSingleModel = (!!modelADocument || !!modelBDocument) && !hasBothModels;
         applyDefaultColorModeAfterLoad(hasBothModels, hasSingleModel, reapplyColorMode);
@@ -566,6 +609,7 @@ export async function compareModels(scheduleRender, { camera, controls } = {}) {
     }, UI_TIMING.COLOR_MODE_APPLY_DELAY_MS);
 
     schedulePostLoadTask(() => {
+      if (loadGeneration !== modelStateGeneration) return;
       // 差分フィルタパネル等の統計更新イベントをアイドル時に発行
       eventBus.emit(ComparisonEvents.UPDATE_STATISTICS, {
         comparisonResults: comparisonResults,
@@ -607,7 +651,7 @@ export async function compareModels(scheduleRender, { camera, controls } = {}) {
 
     return false;
   } finally {
-    // Always reset loading state
+    comparisonInProgress = false;
     setLoadingState(false);
   }
 }
@@ -648,333 +692,4 @@ export function reapplyColorMode() {
   } catch (error) {
     log.error('カラーモード再適用中のエラー:', error);
   }
-}
-
-/**
- * オブジェクトのマテリアルを色付けモードに応じて非同期で更新
- * @param {THREE.Object3D} object - 更新対象のオブジェクト
- * @returns {Promise} 更新完了のPromise
- */
-function updateObjectMaterialAsync(object) {
-  return import('../../viewer/index.js').then(({ getMaterialForElementWithMode }) => {
-    if (getMaterialForElementWithMode && object.userData) {
-      const elementType = object.userData.elementType;
-
-      // AxisとStoryは色付けモードの対象外（独自のマテリアルを使用）
-      if (elementType === 'Axis' || elementType === 'Story') {
-        return;
-      }
-
-      const comparisonState = normalizeModelSourceToComparisonState(object.userData.modelSource);
-      const isLine = object.userData.isLine || false;
-      const isPoly = object.userData.isPoly || false;
-      const elementId = object.userData.elementId || null;
-      const materialOptions = {
-        isTransparent: object.userData.isSRCConcrete === true,
-        srcComponentType: object.userData.srcComponentType || null,
-        modelSource: object.userData.modelSource || null,
-        diffStatus: object.userData.diffStatus || null,
-        positionState: object.userData.positionState || null,
-        attributeState: object.userData.attributeState || null,
-      };
-
-      const newMaterial = getMaterialForElementWithMode(
-        elementType,
-        comparisonState,
-        isLine,
-        isPoly,
-        elementId,
-        object.userData.toleranceState || null,
-        materialOptions,
-      );
-
-      if (newMaterial && object.material !== newMaterial) {
-        object.material = newMaterial;
-      }
-    }
-  });
-}
-
-/**
- * 比較結果をStbViewerAdapter用の形式に変換
- * @param {Map} comparisonResults - 比較結果Map
- * @param {Map} nodeMapA - モデルAの節点Map
- * @param {Map} nodeMapB - モデルBの節点Map
- * @param {Object} sectionMaps - 断面データ
- * @returns {Object} アダプター用の比較結果オブジェクト
- */
-function convertToAdapterFormat(comparisonResults, nodeMapA, nodeMapB, sectionMaps) {
-  const result = {
-    columns: [],
-    girders: [],
-    beams: [],
-    braces: [],
-    isolatingDevices: [],
-    dampingDevices: [],
-    frameDampingDevices: [],
-    slabs: [],
-    walls: [],
-    nodes: [],
-  };
-
-  // 要素タイプのマッピング
-  const typeMapping = {
-    Column: 'columns',
-    Girder: 'girders',
-    Beam: 'beams',
-    Brace: 'braces',
-    IsolatingDevice: 'isolatingDevices',
-    DampingDevice: 'dampingDevices',
-    FrameDampingDevice: 'frameDampingDevices',
-    Slab: 'slabs',
-    Wall: 'walls',
-    StbNode: 'nodes',
-  };
-
-  // 比較結果を変換
-  if (comparisonResults && comparisonResults instanceof Map) {
-    /**
-     * カテゴリのアイテム群を変換してresultに追加する
-     * @param {string} targetKey - result のキー名
-     * @param {string} elementType - 要素タイプ
-     * @param {Array} items - 変換対象アイテム配列
-     * @param {Function} getElementData - アイテムから elementData を取得するコールバック
-     * @param {string} comparisonStatus - 'matched' | 'onlyA' | 'onlyB'
-     * @param {string} modelSource - 'A' | 'B'
-     * @param {Function} getHasMismatch - アイテムから hasMismatch を取得するコールバック
-     */
-    const pushCategory = (
-      targetKey,
-      elementType,
-      items,
-      getElementData,
-      comparisonStatus,
-      modelSource,
-      getHasMismatch = () => false,
-    ) => {
-      if (!items) return;
-      for (const item of items) {
-        const element = convertElementForAdapter(
-          getElementData(item),
-          elementType,
-          comparisonStatus,
-          getHasMismatch(item),
-          modelSource,
-          nodeMapA,
-          nodeMapB,
-          sectionMaps,
-        );
-        if (element) result[targetKey].push(element);
-      }
-    };
-
-    for (const [elementType, categoryResult] of comparisonResults) {
-      const targetKey = typeMapping[elementType];
-      if (!targetKey) continue;
-
-      pushCategory(
-        targetKey,
-        elementType,
-        categoryResult.matched,
-        (item) => item.dataA || item.dataB,
-        'matched',
-        'A',
-        (item) => item.hasMismatch || false,
-      );
-      pushCategory(targetKey, elementType, categoryResult.onlyA, (item) => item, 'onlyA', 'A');
-      pushCategory(targetKey, elementType, categoryResult.onlyB, (item) => item, 'onlyB', 'B');
-    }
-  }
-
-  return result;
-}
-
-/**
- * 単一要素をアダプター形式に変換
- * @private
- */
-function convertElementForAdapter(
-  elementData,
-  elementType,
-  comparisonStatus,
-  hasMismatch,
-  modelSource,
-  nodeMapA,
-  nodeMapB,
-  sectionMaps,
-) {
-  if (!elementData) return null;
-
-  const nodeMap = modelSource === 'A' ? nodeMapA : nodeMapB;
-
-  // 線状要素（柱、梁、ブレース）
-  if (
-    ['Column', 'Girder', 'Beam', 'Brace', 'IsolatingDevice', 'DampingDevice'].includes(elementType)
-  ) {
-    const idNode1 =
-      getElementValueForAdapter(elementData, 'id_node_bottom') ||
-      getElementValueForAdapter(elementData, 'id_node_start');
-    const idNode2 =
-      getElementValueForAdapter(elementData, 'id_node_top') ||
-      getElementValueForAdapter(elementData, 'id_node_end');
-
-    const startNode = nodeMap.get(idNode1);
-    const endNode = nodeMap.get(idNode2);
-
-    if (!startNode || !endNode) {
-      return null;
-    }
-
-    // 断面情報を取得
-    let section = null;
-    if (sectionMaps) {
-      const sectionKey = getSectionMapKey(elementType);
-      const sectionMap = sectionMaps[sectionKey];
-      if (sectionMap) {
-        const sectionId = getElementValueForAdapter(elementData, 'id_section');
-        section = sectionMap.get(sectionId);
-      }
-    }
-
-    return {
-      id: getElementValueForAdapter(elementData, 'id'),
-      modelSource,
-      comparisonStatus,
-      hasMismatch,
-      elementType,
-      startNode: { x: startNode.x, y: startNode.y, z: startNode.z },
-      endNode: { x: endNode.x, y: endNode.y, z: endNode.z },
-      section: section ? convertSectionForAdapter(section) : null,
-      typeShape: getElementValueForAdapter(elementData, 'type_shape'),
-    };
-  }
-
-  // 節点
-  if (elementType === 'StbNode') {
-    return {
-      id: elementData.id,
-      modelSource,
-      comparisonStatus,
-      x: parseFloat(elementData.X || elementData.x || 0),
-      y: parseFloat(elementData.Y || elementData.y || 0),
-      z: parseFloat(elementData.Z || elementData.z || 0),
-    };
-  }
-
-  // 面要素（スラブ、壁）- 簡略化実装
-  if (['Slab', 'ShearWall', 'Wall', 'FrameDampingDevice'].includes(elementType)) {
-    // 面要素は節点リストを持つ
-    const nodeIds = extractNodeIdsForAdapter(elementData);
-    const nodes = nodeIds
-      .map((id) => {
-        const node = nodeMap.get(id);
-        return node ? { x: node.x, y: node.y, z: node.z } : null;
-      })
-      .filter((n) => n !== null);
-
-    if (nodes.length < 3) return null;
-
-    return {
-      id: getElementValueForAdapter(elementData, 'id'),
-      modelSource,
-      comparisonStatus,
-      hasMismatch,
-      nodes,
-      elementType,
-      sectionId: getElementValueForAdapter(elementData, 'id_section'),
-      typeShape: getElementValueForAdapter(elementData, 'type_shape'),
-    };
-  }
-
-  return null;
-}
-
-/**
- * 要素タイプから断面マップのキーを取得
- * @private
- */
-function getSectionMapKey(elementType) {
-  const mapping = {
-    Column: 'columnSections',
-    Girder: 'girderSections',
-    Beam: 'beamSections',
-    Brace: 'braceSections',
-    IsolatingDevice: 'isolatingDeviceSections',
-    DampingDevice: 'dampingDeviceSections',
-    FrameDampingDevice: 'dampingDeviceSections',
-  };
-  return mapping[elementType];
-}
-
-/**
- * アダプター向けに要素からノードID配列を抽出
- * @private
- */
-function extractNodeIdsForAdapter(elementData) {
-  if (!elementData) return [];
-  if (Array.isArray(elementData.nodeIds)) return elementData.nodeIds;
-  if (Array.isArray(elementData.node_ids)) return elementData.node_ids;
-
-  if (typeof elementData.getElementsByTagName === 'function') {
-    const nodeIdOrderEl = elementData.getElementsByTagName('StbNodeIdOrder')[0];
-    const nodeIdText = nodeIdOrderEl
-      ? nodeIdOrderEl.textContent || nodeIdOrderEl.innerText || ''
-      : '';
-    return nodeIdText.trim().split(/\s+/).filter(Boolean);
-  }
-
-  return [];
-}
-
-/**
- * アダプター向けに要素値を取得
- * @private
- */
-function getElementValueForAdapter(elementData, key) {
-  if (!elementData || !key) return null;
-  if (elementData[key] !== undefined && elementData[key] !== null) {
-    return elementData[key];
-  }
-  if (typeof elementData.getAttribute === 'function') {
-    return elementData.getAttribute(key);
-  }
-  return null;
-}
-
-/**
- * 断面情報をアダプター形式に変換
- * @private
- */
-function convertSectionForAdapter(section) {
-  if (!section) return null;
-
-  // 断面タイプを判定
-  const sectionType = section.shape || section.type || 'RECTANGLE';
-
-  // 基本的な断面プロパティを抽出
-  const result = {
-    type: sectionType.toUpperCase(),
-  };
-
-  // 矩形断面
-  if (sectionType === 'RECTANGLE' || sectionType === 'RC') {
-    result.width = parseFloat(section.width || section.A || 400);
-    result.height = parseFloat(section.height || section.B || 400);
-  }
-  // H形鋼
-  else if (sectionType === 'H' || sectionType === 'H-SHAPE') {
-    result.type = 'H';
-    result.height = parseFloat(section.A || section.height || 400);
-    result.width = parseFloat(section.B || section.width || 200);
-    result.tw = parseFloat(section.t1 || section.tw || 8);
-    result.tf = parseFloat(section.t2 || section.tf || 13);
-  }
-  // 円形断面
-  else if (sectionType === 'PIPE' || sectionType === 'CIRCLE') {
-    result.type = 'PIPE';
-    result.outerRadius = parseFloat(section.D || section.diameter || 300) / 2;
-    result.thickness = parseFloat(section.t || section.thickness || 10);
-  }
-
-  return result;
 }
