@@ -2,6 +2,8 @@
  * @fileoverview STB wall classification helpers
  */
 
+import { readElementAttribute } from '../../data/accessors/elementAttributeAccessor.js';
+
 /**
  * @typedef {'ShearWall'|'Wall'} ViewerWallElementType
  */
@@ -12,13 +14,8 @@
  * @param {string} attributeName
  * @returns {string}
  */
-function readWallAttribute(element, attributeName) {
-  if (!element) return '';
-  if (typeof element.getAttribute === 'function') {
-    return element.getAttribute(attributeName) || '';
-  }
-  return String(element[attributeName] ?? '');
-}
+const readWallAttribute = (element, attributeName) =>
+  readElementAttribute(element, attributeName, { missingValue: '' });
 
 /**
  * Returns the STB wall kind.

@@ -10,21 +10,11 @@
  */
 
 import { createLogger } from '../../utils/logger.js';
+import { resolveRuntimeAssetUrl } from '../../config/runtimeAssetUrl.js';
 import { SEVERITY, CATEGORY } from './validationConstants.js';
+import { buildIssueLocation } from './issueLocation.js';
 
 const logger = createLogger('validation:mvdValidator');
-
-function resolveRuntimeAssetUrl(appRelativePath, moduleRelativePath) {
-  if (typeof document !== 'undefined' && document.baseURI) {
-    try {
-      return new URL(appRelativePath, document.baseURI).href;
-    } catch {
-      // jsdom の about:blank など、相対 URL を解決できないテスト環境では
-      // モジュール相対の file URL にフォールバックする。
-    }
-  }
-  return new URL(moduleRelativePath, import.meta.url).href;
-}
 
 /**
  * MVD データキャッシュ
@@ -50,8 +40,16 @@ export async function initializeMvdData() {
 
   loadingPromise = (async () => {
     try {
-      const s2Url = resolveRuntimeAssetUrl('config/mvd-s2.json', '../../../config/mvd-s2.json');
-      const s4Url = resolveRuntimeAssetUrl('config/mvd-s4.json', '../../../config/mvd-s4.json');
+      const s2Url = resolveRuntimeAssetUrl(
+        'config/mvd-s2.json',
+        '../../../config/mvd-s2.json',
+        import.meta.url,
+      );
+      const s4Url = resolveRuntimeAssetUrl(
+        'config/mvd-s4.json',
+        '../../../config/mvd-s4.json',
+        import.meta.url,
+      );
       const [s2Res, s4Res] = await Promise.all([fetch(s2Url), fetch(s4Url)]);
 
       if (!s2Res.ok) throw new Error(`mvd-s2.json のロードに失敗: ${s2Res.status}`);
@@ -174,61 +172,4 @@ function buildMvdIssue(element, elementName, elementId, missingAttr, mvdLevel) {
     ...buildIssueLocation(element, missingAttr),
     repairable: false,
   };
-}
-
-// ============================================================
-// 内部: XPath 生成（jsonSchemaValidator.js と同等のロジック）
-// ============================================================
-
-function buildIssueLocation(element, attributeName) {
-  if (!element || element.nodeType !== 1) return {};
-
-  const segments = [];
-  let current = element;
-  while (current && current.nodeType === 1) {
-    const name = current.localName || current.nodeName.replace(/^.*:/, '');
-    const id = current.getAttribute ? current.getAttribute('id') : null;
-    segments.unshift({ name, id: id || '' });
-    current = current.parentNode;
-  }
-
-  if (segments.length === 0) return {};
-
-  const fullElementXPath = `/${segments.map((s) => buildXPathSegment(s)).join('/')}`;
-  const xpath = attributeName ? `${fullElementXPath}/@${attributeName}` : fullElementXPath;
-
-  let idXPath = xpath;
-  let anchorElementType;
-  let anchorElementId;
-
-  for (let i = segments.length - 1; i >= 0; i--) {
-    if (!segments[i].id) continue;
-
-    const head = `//${buildXPathSegment(segments[i])}`;
-    const tail = segments
-      .slice(i + 1)
-      .map((s) => buildXPathSegment(s))
-      .join('/');
-    const base = tail ? `${head}/${tail}` : head;
-    idXPath = attributeName ? `${base}/@${attributeName}` : base;
-    anchorElementType = segments[i].name;
-    anchorElementId = segments[i].id;
-    break;
-  }
-
-  return { xpath, idXPath, anchorElementType, anchorElementId };
-}
-
-function buildXPathSegment(segment) {
-  if (!segment.id) return segment.name;
-  return `${segment.name}[@id=${toXPathLiteral(segment.id)}]`;
-}
-
-function toXPathLiteral(value) {
-  const str = String(value);
-  if (!str.includes("'")) return `'${str}'`;
-  if (!str.includes('"')) return `"${str}"`;
-
-  const parts = str.split("'").map((part) => `'${part}'`);
-  return `concat(${parts.join(`, "'", `)})`;
 }

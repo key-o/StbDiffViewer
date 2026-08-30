@@ -1,9 +1,8 @@
 /**
  * @fileoverview スキーマ駆動 断面 XML ビルダー
  *
- * SectionBuilderForm が組み立てた formState（テンプレートに沿った属性 + 子ツリー）を
- * ネストした DOM 要素へ変換する。純粋なシリアライズに徹し、id 採番やコンテナへの
- * 追加は EditMode 側が行う。
+ * SectionBuilderForm の formState と XML Element の相互変換を行う。
+ * id 採番・StbSections への追加は EditMode 側の責務とする。
  *
  * @module common-stb/import/section/sectionXmlBuilder
  */
@@ -12,22 +11,14 @@ import { getElementAttributes } from '../parser/jsonSchemaLoader.js';
 
 /**
  * @typedef {Object} SectionFormState
- * @property {string} elementName 要素タグ名
- * @property {Object<string, string>} [attrs] 属性値（空文字・未設定は出力しない）
- * @property {SectionFormState[]} [children] 子要素の formState
+ * @property {string} elementName
+ * @property {Object<string, string>} [attrs]
+ * @property {SectionFormState[]} [children]
  */
 
 /**
  * formState から DOM 要素ツリーを構築する（id は付与しない）。
- * 名前空間は親（StbModel 等）から継承するため、ルートのドキュメント要素の
- * namespaceURI を既定として使う。明示指定があればそれを優先する。
- *
- * fixed（const）属性はスキーマから自動補完する。
- *
- * @param {Document} doc
- * @param {SectionFormState} formState
- * @param {string|null} [ns] 名前空間 URI（省略時は documentElement から継承）
- * @returns {Element}
+ * fixed（const）属性はスキーマ値を優先して自動補完する。
  */
 export function buildSectionElement(doc, formState, ns = undefined) {
   if (!doc) throw new Error('buildSectionElement: doc が必要です');
@@ -36,12 +27,10 @@ export function buildSectionElement(doc, formState, ns = undefined) {
   }
 
   const namespace = ns !== undefined ? ns : (doc.documentElement?.namespaceURI ?? null);
-
   const element = namespace
     ? doc.createElementNS(namespace, formState.elementName)
     : doc.createElement(formState.elementName);
 
-  // fixed（const）属性をスキーマから補完
   const attrMap = getElementAttributes(formState.elementName);
   const fixedNames = new Set();
   if (attrMap) {
@@ -53,17 +42,47 @@ export function buildSectionElement(doc, formState, ns = undefined) {
     }
   }
 
-  // 入力属性を設定（空値・fixed 属性はスキップ。fixed はスキーマ値を優先する）
   for (const [name, value] of Object.entries(formState.attrs || {})) {
     if (fixedNames.has(name)) continue;
     if (value === undefined || value === null || String(value).trim() === '') continue;
     element.setAttribute(name, String(value));
   }
 
-  // 子要素を再帰構築（名前空間を継承）
   for (const child of formState.children || []) {
     element.appendChild(buildSectionElement(doc, child, namespace));
   }
 
   return element;
+}
+
+/**
+ * 既存の断面 Element を SectionBuilderForm が扱う formState に変換する。
+ * コピー作成用途では id/guid を引き継がない。その他の属性と子要素構成はそのまま保持する。
+ *
+ * @param {Element} element
+ * @param {{skipAttributes?: Set<string>|string[]}} [options]
+ * @returns {SectionFormState}
+ */
+export function sectionElementToFormState(element, options = {}) {
+  if (!element?.tagName) throw new Error('sectionElementToFormState: element が必要です');
+
+  const skip =
+    options.skipAttributes instanceof Set
+      ? options.skipAttributes
+      : new Set(options.skipAttributes || ['id', 'guid']);
+  const attrs = {};
+  for (const attr of Array.from(element.attributes || [])) {
+    if (skip.has(attr.name)) continue;
+    attrs[attr.name] = attr.value;
+  }
+
+  const children = Array.from(element.children || []).map((child) =>
+    sectionElementToFormState(child, { skipAttributes: skip }),
+  );
+
+  return {
+    elementName: element.tagName,
+    attrs,
+    children,
+  };
 }

@@ -59,8 +59,8 @@ export {
   getValidationStyles,
 } from './validationHtmlRenderer.js';
 
-// JSON Schemaスキーマ検証（メイン）
-export { validateJsonSchema } from './jsonSchemaValidator.js';
+// JSON Schema + XSD parity スキーマ検証（メイン）
+export { validateJsonSchema } from './jsonSchemaParityValidator.js';
 
 // MVD必須属性バリデーション
 export { validateMvdRequirements, initializeMvdData, isMvdDataLoaded } from './mvdValidator.js';

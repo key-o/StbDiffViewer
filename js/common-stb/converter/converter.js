@@ -13,6 +13,11 @@ import {
 import { fixInvalidGuids, applyCanonicalChildOrder } from './rules/type13-211-fixups.js';
 import convert202to211 from './v202-to-v211.js';
 import convert211to202 from './v211-to-v202.js';
+import {
+  normalizeStbVersion as normalizeVersion,
+  isStb21x as is21x,
+  isSupportedStbVersion,
+} from '../version/stbVersion.js';
 
 /**
  * Convert STB XML content to a different version.
@@ -48,7 +53,7 @@ export async function convert(xmlContent, targetVersion, options = {}) {
   logger.info(`Target version: ${targetVersion}`);
 
   const normalizedTarget = normalizeVersion(targetVersion);
-  if (!['2.0.2', '2.1.0', '2.1.1'].includes(normalizedTarget)) {
+  if (!isSupportedStbVersion(normalizedTarget)) {
     throw new Error(`Unsupported target version: ${targetVersion}. Supported: 2.0.2, 2.1.0, 2.1.1`);
   }
 
@@ -95,24 +100,6 @@ export async function convert(xmlContent, targetVersion, options = {}) {
     targetVersion: normalizedTarget,
     summary: logger.getSummary(),
   };
-}
-
-/**
- * Normalize version string to canonical form
- * @param {string} version
- * @returns {string}
- */
-function normalizeVersion(version) {
-  const v = version.toLowerCase().replace(/^v/, '');
-  if (v === '202' || v === '2.0' || v.startsWith('2.0.')) return '2.0.2';
-  if (v === '211' || v === '2.1.1') return '2.1.1';
-  if (v === '210' || v === '2.1' || v.startsWith('2.1.')) return '2.1.0';
-  return v;
-}
-
-/** @param {string} version - normalized */
-function is21x(version) {
-  return version === '2.1.0' || version === '2.1.1';
 }
 
 /**
@@ -171,7 +158,7 @@ export async function validate(xmlContent) {
     const version = getVersion(stbRoot);
     if (!version) {
       warnings.push('Missing version attribute');
-    } else if (!['2.0.2', '2.1.0', '2.1.1'].includes(normalizeVersion(version))) {
+    } else if (!isSupportedStbVersion(version)) {
       warnings.push(`Unsupported version: ${version}`);
     }
 

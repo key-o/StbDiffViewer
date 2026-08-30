@@ -8,6 +8,7 @@
 import { COMPARISON_KEY_TYPE } from '../../config/comparisonKeyConfig.js';
 import { COORDINATE_PRECISION } from '../../config/geometryConfig.js';
 import { createLogger } from '../../utils/logger.js';
+import { readElementAttribute } from '../../data/accessors/elementAttributeAccessor.js';
 
 const log = createLogger('common-stb:comparison:keyGenerator');
 
@@ -122,12 +123,7 @@ export function getPolyElementKey(vertexCoordsList, precision = PRECISION) {
  * @returns {string|null} 属性値
  */
 export function getAttr(element, attrName) {
-  if (!element) return null;
-  if (typeof element.getAttribute === 'function') {
-    return element.getAttribute(attrName);
-  }
-  const val = element[attrName];
-  return val !== undefined ? String(val) : null;
+  return readElementAttribute(element, attrName);
 }
 
 /**

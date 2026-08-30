@@ -11,7 +11,7 @@
  * @module common-stb/import/extractor/barArrangementExtractors
  */
 
-import { getElementChildren } from './dimensionExtractors.js';
+import { getElementChildren } from './utils/domTraversal.js';
 
 // STB 名前空間（querySelector がヒットしない場合にフォールバック）
 const STB_NS = 'https://www.building-smart.or.jp/dl';

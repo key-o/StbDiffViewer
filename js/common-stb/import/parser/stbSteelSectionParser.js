@@ -9,6 +9,7 @@
  */
 
 import { getLogger, parseElements } from './stbParserCore.js';
+import { normalizeSteelDimensions } from '../data/steelDimensionNormalizers.js';
 
 // --- 鋼材形状データ抽出関数 ---
 /**
@@ -115,105 +116,4 @@ export function extractSteelSections(xmlDoc) {
   }
   logger.log(`[Load] 鋼材断面読込完了: ${steelSections.size}種類`);
   return steelSections;
-}
-
-/**
- * 鋼材断面の寸法情報を正規化する
- *
- * @param {Object} sectionData - 鋼材断面データ
- * @param {string} kind - 断面種別 ('H', 'BOX', 'PIPE', 'L', 'C', 'T')
- * @returns {Object|null} 正規化された寸法オブジェクト
- */
-function normalizeSteelDimensions(sectionData, kind) {
-  if (!sectionData) return null;
-
-  const dims = {};
-
-  // 共通: 生の寸法パラメータをコピー
-  const rawParams = ['A', 'B', 'D', 't', 't1', 't2', 'r', 'r1', 'r2', 'H'];
-  for (const param of rawParams) {
-    if (sectionData[param] !== undefined) {
-      dims[param] =
-        typeof sectionData[param] === 'number'
-          ? sectionData[param]
-          : parseFloat(sectionData[param]);
-    }
-  }
-
-  // 種別に応じた正規化
-  switch (kind) {
-    case 'H':
-      if (dims.A) dims.height = dims.A;
-      if (dims.B) dims.width = dims.B;
-      if (dims.t1) dims.web_thickness = dims.t1;
-      if (dims.t2) dims.flange_thickness = dims.t2;
-      if (dims.r) dims.fillet_radius = dims.r;
-      dims.profile_type = 'H';
-      break;
-
-    case 'BOX':
-      if (dims.A) dims.height = dims.A;
-      if (dims.B) dims.width = dims.B;
-      if (dims.t) dims.wall_thickness = dims.t;
-      if (dims.r) dims.corner_radius = dims.r;
-      dims.profile_type = 'BOX';
-      break;
-
-    case 'PIPE':
-      if (dims.D) {
-        dims.diameter = dims.D;
-        dims.outer_diameter = dims.D;
-        dims.height = dims.D;
-        dims.width = dims.D;
-      }
-      if (dims.t) dims.wall_thickness = dims.t;
-      dims.profile_type = 'PIPE';
-      break;
-
-    case 'L':
-      if (dims.A) {
-        dims.leg1 = dims.A;
-        dims.height = dims.A;
-      }
-      if (dims.B) {
-        dims.leg2 = dims.B;
-        dims.width = dims.B;
-      }
-      if (dims.t1) dims.thickness1 = dims.t1;
-      if (dims.t2) dims.thickness2 = dims.t2;
-      dims.profile_type = 'L';
-      break;
-
-    case 'C':
-      if (dims.A) dims.height = dims.A;
-      if (dims.B) {
-        dims.flange_width = dims.B;
-        dims.width = dims.B;
-      }
-      if (dims.t1) dims.web_thickness = dims.t1;
-      if (dims.t2) dims.flange_thickness = dims.t2;
-      dims.profile_type = 'C';
-      break;
-
-    case 'T':
-      if (dims.H) dims.height = dims.H;
-      else if (dims.A) dims.height = dims.A;
-      if (dims.B) dims.width = dims.B;
-      if (dims.t1) dims.web_thickness = dims.t1;
-      if (dims.t2) dims.flange_thickness = dims.t2;
-      dims.profile_type = 'T';
-      break;
-
-    default:
-      if (dims.A) dims.height = dims.A;
-      if (dims.B) dims.width = dims.B;
-      if (dims.D) {
-        dims.diameter = dims.D;
-        dims.height = dims.D;
-        dims.width = dims.D;
-      }
-      break;
-  }
-
-  return Object.keys(dims).length > 0 ? dims : null;
 }

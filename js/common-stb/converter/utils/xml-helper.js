@@ -127,6 +127,27 @@ export function getStbRoot(stbRoot) {
 }
 
 /**
+ * Get the StbModel container from a parsed STB object
+ * @param {object} stbRoot - Parsed STB XML object
+ * @returns {object|null} StbModel element or null
+ */
+function getStbModel(stbRoot) {
+  const root = getStbRoot(stbRoot);
+  if (!root) return null;
+  const rootData = Array.isArray(root) ? root[0] : root;
+  return rootData?.['StbModel']?.[0] ?? null;
+}
+
+/**
+ * Get the StbSections container from a parsed STB object
+ * @param {object} stbRoot - Parsed STB XML object
+ * @returns {object|null} StbSections element or null
+ */
+export function getStbSections(stbRoot) {
+  return getStbModel(stbRoot)?.['StbSections']?.[0] ?? null;
+}
+
+/**
  * Parse XML string to JavaScript object.
  * The returned shape intentionally matches the subset of xml2js used by the
  * converter: element names map to arrays, attributes live under "$", and text

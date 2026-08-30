@@ -21,6 +21,7 @@
 
 import { normalizeComparisonResult } from '../../data/normalizeComparisonResult.js';
 import { createFloorCanonicalizer } from './storyFloorCanonicalizer.js';
+import { normalizeSectionName } from './sectionNameNormalizer.js';
 
 export const STB_DEFINITION_ELEMENT_TYPE = 'StbDefinition';
 
@@ -127,15 +128,6 @@ function hasDefinitionRootAncestor(element) {
     parent = parent.parentNode;
   }
   return false;
-}
-
-/**
- * 断面名の正規化（trim・大文字化・空白除去）。異ソフト間比較モード時のキー生成に使用。
- * @param {string|null} name
- * @returns {string}
- */
-function normalizeSectionName(name) {
-  return name ? String(name).trim().toUpperCase().replace(/\s+/g, '') : '';
 }
 
 function getStableKeyBase(element, floorCanonicalizer) {

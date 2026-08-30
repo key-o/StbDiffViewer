@@ -168,3 +168,49 @@ export function createAttributeComparator(elementExtractor) {
     return compareStructuralAttributes(elementA, elementB);
   };
 }
+
+/**
+ * 要素自身の構造属性と、参照断面の内容シグネチャをまとめて比較する。
+ * 断面解決は呼び出し側から注入し、比較モジュールのレイヤー依存を増やさない。
+ *
+ * @param {Object} options
+ * @param {Function} options.resolveSectionContentSignature
+ * @param {Map|Object} options.nodeMapA
+ * @param {Map|Object} options.nodeMapB
+ * @param {Function} [options.elementExtractor]
+ * @returns {Function}
+ */
+export function createSectionAwareAttributeComparator({
+  resolveSectionContentSignature,
+  nodeMapA,
+  nodeMapB,
+  elementExtractor = (data) => data?.rawElement || data?.element || data,
+}) {
+  return (dataA, dataB) => {
+    const elementA = elementExtractor(dataA);
+    const elementB = elementExtractor(dataB);
+    const instanceComparison = compareStructuralAttributeDetails(elementA, elementB);
+    const signatureA = resolveSectionContentSignature(elementA, nodeMapA);
+    const signatureB = resolveSectionContentSignature(elementB, nodeMapB);
+    const hasInstanceDiff = !instanceComparison.matches;
+    const hasTypeDiff = signatureA !== signatureB;
+
+    if (!hasInstanceDiff && !hasTypeDiff) {
+      return { matches: true };
+    }
+
+    return {
+      matches: false,
+      attributeMismatchKind:
+        hasInstanceDiff && hasTypeDiff ? 'both' : hasTypeDiff ? 'type' : 'instance',
+      attributeDiffScope: {
+        instance: hasInstanceDiff,
+        type: hasTypeDiff,
+      },
+      attributeDiffDetails: {
+        instance: instanceComparison.differences,
+        type: hasTypeDiff ? { sectionSignatureA: signatureA, sectionSignatureB: signatureB } : null,
+      },
+    };
+  };
+}

@@ -8,29 +8,12 @@
  */
 
 import { deriveDimensionsFromAttributes } from '../data/dimensionNormalizer.js';
-
-// STB 名前空間（querySelector がヒットしない場合にフォールバック）
-const STB_NS = 'https://www.building-smart.or.jp/dl';
-
-/**
- * 要素ノードの子要素一覧を取得（Node環境互換）
- *
- * `element.children` ではなく `childNodes` + `nodeType === 1` フィルタを使用する
- * （@xmldom/xmldom など `children` 未実装のDOM実装でも動作する。MC方式）。
- * ブラウザ/JSDOM では `children` と同一の結果になる。
- *
- * @param {Element|null} node - 対象要素
- * @returns {Element[]} 子要素の配列
- */
-export function getElementChildren(node) {
-  if (!node) return [];
-  const childNodes = node.childNodes || node.children || [];
-  const result = [];
-  for (let i = 0; i < childNodes.length; i++) {
-    if (childNodes[i].nodeType === 1) result.push(childNodes[i]);
-  }
-  return result;
-}
+import {
+  getElementChildren,
+  findFigureElement,
+  collectChildrenByTag,
+  sortByIdOrder,
+} from './utils/domTraversal.js';
 
 // ---------------- 追加ヘルパー: S造断面寸法抽出 ----------------
 /**
@@ -308,44 +291,12 @@ export function parseDimensionsFromShapeName(shapeName) {
   return Object.keys(dims).length > 0 ? dims : null;
 }
 
-/**
- * コンクリート図形要素をセレクタで検索
- * querySelector → 名前空間付き検索 → 直接子要素のタグ名比較の順にフォールバック
- *
- * @param {Element} element - 断面のDOM要素
- * @param {string} figSel - 図形要素のタグ名
- * @returns {Element|null}
- */
-function findConcreteFigureElement(element, figSel) {
-  let fig = null;
-  try {
-    fig = element.querySelector(figSel);
-  } catch (_) {
-    fig = null;
-  }
-  if (!fig && typeof element.getElementsByTagNameNS === 'function') {
-    const nsList = element.getElementsByTagNameNS(STB_NS, figSel);
-    fig = nsList && nsList[0];
-  }
-  if (!fig) {
-    // タグ名で直接検索を試みる（querySelector が失敗する場合のフォールバック）
-    const children = getElementChildren(element);
-    for (let i = 0; i < children.length; i++) {
-      if (children[i].tagName === figSel || children[i].localName === figSel) {
-        fig = children[i];
-        break;
-      }
-    }
-  }
-  return fig;
-}
-
 // ---------------- 追加ヘルパー: コンクリート図形寸法抽出 ----------------
 export function extractConcreteDimensions(element, config) {
   if (!config.concreteFigures || config.concreteFigures.length === 0) return null;
   let dims = null;
   for (const figSel of config.concreteFigures) {
-    const fig = findConcreteFigureElement(element, figSel);
+    const fig = findFigureElement(element, figSel);
     if (!fig) continue;
     // 子要素内の shape を持つもの or 寸法属性を持つものを調査
     const candidates = getElementChildren(fig);
@@ -420,7 +371,7 @@ export function extractConcreteTaperDimensions(element, config) {
   if (!config?.concreteFigures || config.concreteFigures.length === 0) return null;
 
   for (const figSel of config.concreteFigures) {
-    const fig = findConcreteFigureElement(element, figSel);
+    const fig = findFigureElement(element, figSel);
     if (!fig) continue;
 
     const children = getElementChildren(fig);
@@ -477,7 +428,7 @@ export function extractConcreteHaunchDimensions(element, config) {
   const POS_ORDER = { START: 0, CENTER: 1, END: 2 };
 
   for (const figSel of config.concreteFigures) {
-    const fig = findConcreteFigureElement(element, figSel);
+    const fig = findFigureElement(element, figSel);
     if (!fig) continue;
 
     const children = getElementChildren(fig);
@@ -519,57 +470,24 @@ export function extractSteelPileDimensions(element, _config) {
   }
 
   // StbSecFigurePile_S > StbSecPile_S_Straight の構造を探す
-  let figureElement = null;
-  const steelFigureSelectors = ['StbSecFigurePile_S'];
-
-  for (const sel of steelFigureSelectors) {
-    try {
-      figureElement = element.querySelector(sel);
-    } catch (_) {
-      figureElement = null;
-    }
-    if (!figureElement && typeof element.getElementsByTagNameNS === 'function') {
-      const nsList = element.getElementsByTagNameNS(STB_NS, sel);
-      figureElement = nsList && nsList[0];
-    }
-    if (!figureElement) {
-      // 直接子要素をタグ名で検索
-      const children = getElementChildren(element);
-      for (let i = 0; i < children.length; i++) {
-        if (children[i].tagName === sel || children[i].localName === sel) {
-          figureElement = children[i];
-          break;
-        }
-      }
-    }
-    if (figureElement) break;
-  }
+  const figureElement = findFigureElement(element, ['StbSecFigurePile_S']);
 
   if (!figureElement) {
     return null;
   }
 
   // StbSecPile_S_Straight 要素を収集
-  const straightElements = [];
-  const children = getElementChildren(figureElement);
-  for (let i = 0; i < children.length; i++) {
-    const child = children[i];
-    const childTag = child.tagName || child.localName;
-    if (childTag === 'StbSecPile_S_Straight') {
-      straightElements.push(child);
-    }
-  }
+  const straightElements = collectChildrenByTag(
+    figureElement,
+    (tag) => tag === 'StbSecPile_S_Straight',
+  );
 
   if (straightElements.length === 0) {
     return null;
   }
 
   // id_order でソート（昇順）
-  straightElements.sort((a, b) => {
-    const orderA = parseInt(a.getAttribute('id_order') || '0', 10);
-    const orderB = parseInt(b.getAttribute('id_order') || '0', 10);
-    return orderA - orderB;
-  });
+  sortByIdOrder(straightElements);
 
   // 各セグメントからデータを抽出し、合計長さを計算
   let totalLength = 0;
@@ -657,28 +575,7 @@ export function extractPileProductDimensions(element, _config) {
   }
 
   // StbSecFigurePileProduct を探す
-  let figureElement = null;
-  const figureSelector = 'StbSecFigurePileProduct';
-
-  try {
-    figureElement = element.querySelector(figureSelector);
-  } catch (_) {
-    figureElement = null;
-  }
-  if (!figureElement && typeof element.getElementsByTagNameNS === 'function') {
-    const nsList = element.getElementsByTagNameNS(STB_NS, figureSelector);
-    figureElement = nsList && nsList[0];
-  }
-  if (!figureElement) {
-    // 直接子要素をタグ名で検索
-    const children = getElementChildren(element);
-    for (let i = 0; i < children.length; i++) {
-      if (children[i].tagName === figureSelector || children[i].localName === figureSelector) {
-        figureElement = children[i];
-        break;
-      }
-    }
-  }
+  const figureElement = findFigureElement(element, 'StbSecFigurePileProduct');
 
   if (!figureElement) {
     return null;
@@ -687,27 +584,17 @@ export function extractPileProductDimensions(element, _config) {
   // 既製杭セグメント要素を収集
   // StbSecPileProduct_PHC, StbSecPileProduct_SC, StbSecPileProduct_CPRC,
   // StbSecPileProductNodular_PHC など
-  const pileSegmentElements = [];
-  const children = getElementChildren(figureElement);
-  for (let i = 0; i < children.length; i++) {
-    const child = children[i];
-    const childTag = child.tagName || child.localName;
-    // StbSecPileProduct_ または StbSecPileProductNodular_ で始まる要素を収集
-    if (/^StbSecPileProduct/.test(childTag)) {
-      pileSegmentElements.push(child);
-    }
-  }
+  // StbSecPileProduct_ または StbSecPileProductNodular_ で始まる要素を収集
+  const pileSegmentElements = collectChildrenByTag(figureElement, (tag) =>
+    /^StbSecPileProduct/.test(tag),
+  );
 
   if (pileSegmentElements.length === 0) {
     return null;
   }
 
   // id_order でソート（昇順）
-  pileSegmentElements.sort((a, b) => {
-    const orderA = parseInt(a.getAttribute('id_order') || '0', 10);
-    const orderB = parseInt(b.getAttribute('id_order') || '0', 10);
-    return orderA - orderB;
-  });
+  sortByIdOrder(pileSegmentElements);
 
   // 各セグメントからデータを抽出し、合計長さを計算
   let totalLength = 0;

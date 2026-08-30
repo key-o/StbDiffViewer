@@ -15,6 +15,7 @@
  */
 
 import { createFloorCanonicalizer } from './storyFloorCanonicalizer.js';
+import { normalizeSectionName } from './sectionNameNormalizer.js';
 
 /** 構造種別サフィックス（ファミリ集約用）。StbSecColumn_RC → StbSecColumn */
 const FAMILY_SUFFIX_PATTERN = /_(RC|S|SRC|CFT)$/;
@@ -43,16 +44,6 @@ const SHAPE_ATTRS = new Set([
 
 function isElementNode(node) {
   return node?.nodeType === 1;
-}
-
-/**
- * 断面名称の正規化（trim・大文字化・空白除去）。
- * stbDefinitionComparator の異ソフト間キー生成と同一規則。
- * @param {string|null} name
- * @returns {string}
- */
-function normalizeSectionName(name) {
-  return name ? String(name).trim().toUpperCase().replace(/\s+/g, '') : '';
 }
 
 /**

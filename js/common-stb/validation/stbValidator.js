@@ -14,7 +14,7 @@
 import { buildNodeMap, parseStories, parseAxes } from '../import/parser/stbXmlParser.js';
 import { createLogger } from '../../utils/logger.js';
 import { isSchemaLoaded, getActiveVersion } from '../import/parser/jsonSchemaLoader.js';
-import { validateJsonSchema } from './jsonSchemaValidator.js';
+import { validateJsonSchema } from './jsonSchemaParityValidator.js';
 import { validateMvdRequirements, initializeMvdData } from './mvdValidator.js';
 import { SEVERITY, CATEGORY } from './validationConstants.js';
 import {
@@ -113,14 +113,14 @@ export function validateStbDocument(xmlDoc, options = {}) {
     return createReport(false, issues, statistics, timestamp);
   }
 
-  // 0. JSON Schemaスキーマ検証（オプション、スキーマ読込済みの場合のみ）
+  // 0. JSON Schema + XSD parity 検証（オプション、スキーマ読込済みの場合のみ）
   if (validateSchema && isSchemaLoaded()) {
     try {
       const version = detectStbVersion(xmlDoc);
       const schemaIssues = validateJsonSchema(xmlDoc, { version });
       issues.push(...schemaIssues);
     } catch (e) {
-      logger.warn(`JSON Schemaスキーマ検証中にエラーが発生: ${e.message}`);
+      logger.warn(`JSON Schema/XSD parity検証中にエラーが発生: ${e.message}`);
     }
   }
 
