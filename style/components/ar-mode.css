@@ -42,7 +42,7 @@
   /* ジェスチャー取得のため全面でタッチを受ける（背景は透過表示） */
   touch-action: none;
   background: transparent;
-  font-family: sans-serif;
+  font-family: var(--font-family-base);
   user-select: none;
   -webkit-user-select: none;
 }

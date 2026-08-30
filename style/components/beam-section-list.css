@@ -5,174 +5,18 @@
  * 梁特有：左端・中央・右端など複数位置の断面を1セル内に水平並び表示
  */
 
-/* フローティングウィンドウ */
-.beam-section-list-window {
-  width: 1000px;
-  max-width: 95vw;
-  height: 80vh;
-  max-height: 900px;
-  top: 50px;
-  left: 50%;
-  transform: translateX(-50%);
-  /* リサイズ対応 */
-  min-width: 500px;
-  min-height: 350px;
-}
-
-.beam-section-list-window .float-window-content {
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  height: calc(100% - 40px);
-  overflow: hidden;
-}
-
-/* ツールバー */
-.section-list-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: var(--spacing-sm) 12px;
-  background: var(--bg-secondary, #f5f5f5);
-  border-bottom: 1px solid var(--border-color, #ddd);
-  flex-shrink: 0;
-}
-
-.section-list-source-selector {
-  display: flex;
-  gap: 12px;
-}
-
-.section-list-render-settings {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.section-list-render-settings label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--font-size-sm);
-  white-space: nowrap;
-}
-
-.section-list-render-settings select,
-.section-list-render-settings input {
-  height: 24px;
-  font-size: var(--font-size-sm);
-  padding: 1px 4px;
-}
-
 .section-list-render-settings input {
   width: 56px;
 }
 
-.section-list-source-selector label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-  font-size: var(--font-size-sm);
-}
-
-.section-list-info {
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary, #666);
-}
-
-/* テーブルコンテナ */
-.section-list-table-wrapper {
-  flex: 1;
-  overflow: auto;
-  padding: 12px;
-}
-
-/* テーブル */
-.beam-section-list-table {
-  border-collapse: collapse;
-  width: 100%;
-  font-size: var(--font-size-sm);
-  background: white;
-}
-
-.beam-section-list-table th,
-.beam-section-list-table td {
-  border-bottom: 1px solid var(--border-color);
-  padding: 6px 8px;
-  text-align: left;
-  vertical-align: top;
-  word-wrap: break-word;
-}
-
-/* ヘッダー */
-.section-list-header-floor,
-.section-list-header-symbol,
-.section-list-header-section {
-  background: var(--bg-secondary);
-  font-weight: var(--font-weight-semibold);
-  text-align: center;
-  padding: 8px 8px;
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  color: var(--text-heading);
-}
-
-.section-list-header-floor {
-  width: 70px;
-  min-width: 70px;
-}
-
-.section-list-header-symbol {
-  width: 60px;
-  min-width: 60px;
-}
-
-.section-list-header-section {
-  flex: 1;
-  min-width: 200px;
-}
-
-/* 階セル */
-.section-list-floor-cell {
-  background: var(--bg-secondary, #f5f5f5);
-  font-weight: var(--font-weight-bold);
-  text-align: center;
-  vertical-align: middle;
-  width: 70px;
-  min-width: 70px;
-}
-
-/* 符号セル */
-.section-list-symbol-cell {
-  background: var(--bg-secondary, #f5f5f5);
-  font-weight: var(--font-weight-bold);
-  text-align: center;
-  vertical-align: middle;
-  width: 60px;
-  min-width: 60px;
-}
-
-/* 断面セル */
-.section-list-section-cell {
-  min-width: 160px;
-  text-align: center;
-}
-
-.section-cell-empty {
-  color: var(--text-disabled, #999);
-  padding: 20px;
-}
-
 /* 断面セル内容 */
-.section-cell-content {
+.beam-section-grid-table .section-cell-content {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-xs);
 }
 
-.section-cell-name {
+.beam-section-grid-table .section-cell-name {
   font-weight: var(--font-weight-bold);
   font-size: var(--font-size-xs);
   color: var(--text-primary, #333);
@@ -184,7 +28,7 @@
   text-overflow: ellipsis;
 }
 
-.section-cell-pattern {
+.beam-section-grid-table .section-cell-pattern {
   font-size: var(--font-size-xs);
   color: var(--text-secondary, #666);
   padding: 1px var(--spacing-xs);
@@ -193,105 +37,87 @@
   white-space: nowrap;
 }
 
-.section-cell-diagram {
-  display: flex;
-  justify-content: center;
-  margin: 4px 0;
-}
-
-.section-cell-diagram svg {
-  max-width: 120px;
-  max-height: 120px;
-}
-
-/* 梁用：複数位置コンテナ（横並び） */
-.beam-positions-container {
-  display: flex;
-  flex-direction: row;
-  gap: var(--spacing-xs);
-  justify-content: center;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  margin: 4px 0;
-}
-
-/* 梁用：単一位置アイテム */
-.beam-position-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  flex: 0 1 auto;
-  min-width: 0;
-}
-
-.beam-position-item .position-label {
-  font-size: var(--font-size-xs);
-  color: var(--text-secondary, #666);
-  font-weight: var(--font-weight-bold);
-  white-space: nowrap;
-}
-
-.beam-position-item .beam-section-diagram {
-  display: flex;
-  justify-content: center;
-  margin: 2px 0;
-}
-
-.beam-position-item .beam-section-diagram svg {
-  max-width: 80px;
-  max-height: 80px;
-  border: 1px solid var(--border-color, #eee);
-  border-radius: var(--border-radius-sm);
-}
-
-.beam-position-item .position-dims {
-  font-size: var(--font-size-xs);
-  color: var(--text-secondary, #666);
-  white-space: nowrap;
-}
-
-/* 仕様テーブル */
-.section-cell-specs {
-  text-align: left;
-  margin-top: 2px;
-}
-
-.section-specs-table {
-  width: 100%;
-  font-size: var(--font-size-xs);
+/* 国内の梁断面リスト形式：位置を列、仕様を行とする小表 */
+.beam-section-grid-table .beam-position-schedule {
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
+  table-layout: auto;
+  font-size: var(--font-size-xs);
+  background: white;
 }
 
-.section-specs-table td {
-  padding: 2px 4px;
-  border: none;
-  vertical-align: top;
-}
-
-.section-specs-table .spec-label {
-  color: var(--text-secondary, #666);
+.beam-section-grid-table .beam-position-schedule th,
+.beam-section-grid-table .beam-position-schedule td {
+  border: 1px solid var(--border-color, #ccc);
+  padding: 3px 5px;
+  text-align: center;
+  vertical-align: middle;
   white-space: nowrap;
-  width: 60px;
+}
+
+.beam-section-grid-table .beam-position-schedule .beam-schedule-corner,
+.beam-section-grid-table .beam-position-schedule .beam-schedule-row-label {
+  width: 64px;
+  min-width: 64px;
+  background: var(--bg-secondary, #f5f5f5);
+  color: var(--text-secondary, #555);
   font-weight: var(--font-weight-bold);
 }
 
-.section-specs-table .spec-value {
-  color: var(--text-primary, #333);
-  word-break: break-word;
+.beam-section-grid-table .beam-position-schedule .position-label,
+.beam-section-grid-table .beam-position-schedule .beam-schedule-position-cell {
+  width: auto;
+  min-width: 116px;
 }
 
-/* 複数位置仕様表示 */
-.multi-position-spec {
+.beam-section-grid-table .beam-position-schedule .position-label {
+  background: var(--bg-tertiary, #e8e8e8);
+  color: var(--text-heading, #222);
+  font-weight: var(--font-weight-bold);
+}
+
+.beam-section-grid-table .beam-schedule-diagram-row td {
+  height: auto;
+  padding: 3px;
+}
+
+.beam-section-grid-table .beam-section-diagram {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
 }
 
-.multi-position-spec .position-spec {
+.beam-section-grid-table .beam-section-diagram svg {
+  max-width: none;
+  max-height: none;
+  flex: none;
+  border: 0;
+  background: white;
+}
+
+.beam-section-grid-table .beam-section-common-spec {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  padding: 3px 5px;
+  border: 1px solid var(--border-color, #ccc);
+  border-top: 0;
   font-size: var(--font-size-xs);
-  display: block;
-  line-height: 1.2;
+  background: var(--bg-secondary, #f8f8f8);
+}
+
+.beam-section-grid-table .beam-material-item {
+  display: inline-flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.beam-section-grid-table .beam-section-common-spec .spec-label {
+  color: var(--text-secondary, #555);
+  font-weight: var(--font-weight-bold);
 }
 
 /* ボタン */
@@ -347,51 +173,47 @@
 }
 
 /* ダークテーマ対応 */
-[data-theme="dark"] .beam-section-list-table {
+[data-theme='dark'] .beam-section-list-table {
   background: var(--bg-primary);
 }
 
-[data-theme="dark"] .section-list-header-floor,
-[data-theme="dark"] .section-list-header-symbol {
+[data-theme='dark'] .beam-section-list-table .section-list-header-floor,
+[data-theme='dark'] .beam-section-list-table .section-list-header-symbol {
   background: var(--bg-tertiary);
 }
 
-[data-theme="dark"] .section-list-floor-cell {
+[data-theme='dark'] .beam-section-list-table .section-list-floor-cell {
   background: var(--bg-secondary);
 }
 
-[data-theme="dark"] .beam-section-list-table svg rect:first-child {
+[data-theme='dark'] .beam-section-list-table svg rect:first-child {
   fill: var(--bg-primary);
-}
-
-[data-theme="dark"] .beam-position-item .beam-section-diagram svg {
-  border-color: var(--border-color);
 }
 
 /* ===== グリッド表示用スタイル ===== */
 
 /* 横スクロールコンテナ（グリッドモード） */
-.section-list-table-wrapper.grid-mode {
+.beam-section-list-window .section-list-table-wrapper.grid-mode {
   overflow-x: auto;
   overflow-y: auto;
   scrollbar-width: thin;
 }
 
-.section-list-table-wrapper.grid-mode::-webkit-scrollbar {
+.beam-section-list-window .section-list-table-wrapper.grid-mode::-webkit-scrollbar {
   height: 12px;
   width: 12px;
 }
 
-.section-list-table-wrapper.grid-mode::-webkit-scrollbar-track {
+.beam-section-list-window .section-list-table-wrapper.grid-mode::-webkit-scrollbar-track {
   background: var(--bg-secondary, #f5f5f5);
 }
 
-.section-list-table-wrapper.grid-mode::-webkit-scrollbar-thumb {
+.beam-section-list-window .section-list-table-wrapper.grid-mode::-webkit-scrollbar-thumb {
   background: var(--border-color, #ccc);
   border-radius: var(--border-radius-lg);
 }
 
-.section-list-table-wrapper.grid-mode::-webkit-scrollbar-thumb:hover {
+.beam-section-list-window .section-list-table-wrapper.grid-mode::-webkit-scrollbar-thumb:hover {
   background: var(--border-color-hover, #999);
 }
 
@@ -414,7 +236,7 @@
   min-width: 100%;
   font-size: var(--font-size-sm);
   background: white;
-  table-layout: fixed;
+  table-layout: auto;
 }
 
 .beam-section-grid-table th,
@@ -436,8 +258,8 @@
 }
 
 /* グリッドヘッダー（列） */
-.section-grid-header-floor,
-.section-grid-header-symbol {
+.beam-section-grid-table .section-grid-header-floor,
+.beam-section-grid-table .section-grid-header-symbol {
   background: var(--bg-tertiary, #e8e8e8);
   font-weight: var(--font-weight-bold);
   text-align: center;
@@ -449,7 +271,7 @@
 }
 
 /* 階ヘッダー（左上角の固定セル） */
-.section-grid-header-floor {
+.beam-section-grid-table .section-grid-header-floor {
   left: 0;
   z-index: 20;
   min-width: 70px;
@@ -457,17 +279,16 @@
 }
 
 /* 符号ヘッダー（各列） */
-.section-grid-header-symbol {
-  min-width: 200px;
-  max-width: 280px;
-  width: 240px;
+.beam-section-grid-table .section-grid-header-symbol {
+  min-width: 416px;
+  width: auto;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 /* グリッド階セル（各行の左端固定列） */
-.section-grid-floor-cell {
+.beam-section-grid-table .section-grid-floor-cell {
   background: var(--bg-secondary, #f5f5f5);
   font-weight: var(--font-weight-bold);
   text-align: center;
@@ -481,10 +302,9 @@
 }
 
 /* グリッド梁断面セル */
-.section-grid-section-cell {
-  min-width: 200px;
-  max-width: 320px;
-  width: 260px;
+.beam-section-grid-table .section-grid-section-cell {
+  min-width: 416px;
+  width: auto;
   text-align: center;
   background: white;
   vertical-align: top;
@@ -492,7 +312,7 @@
 }
 
 /* セル内をflexbox縦配置でレイアウト */
-.section-grid-section-cell .section-cell-content {
+.beam-section-grid-table .section-grid-section-cell .section-cell-content {
   display: flex;
   flex-direction: column;
   height: auto;
@@ -500,16 +320,15 @@
 }
 
 /* セル内の各要素 */
-.section-grid-section-cell .section-cell-name,
-.section-grid-section-cell .section-cell-pattern,
-.section-grid-section-cell .beam-positions-container,
-.section-grid-section-cell .section-cell-specs {
+.beam-section-grid-table .section-grid-section-cell .section-cell-name,
+.beam-section-grid-table .section-grid-section-cell .section-cell-pattern,
+.beam-section-grid-table .section-grid-section-cell .beam-position-schedule {
   box-sizing: border-box;
   flex-shrink: 0;
 }
 
 /* 断面名（符号）- 固定高さ */
-.section-grid-section-cell .section-cell-name {
+.beam-section-grid-table .section-grid-section-cell .section-cell-name {
   height: 18px;
   line-height: 16px;
   overflow: hidden;
@@ -519,7 +338,7 @@
 }
 
 /* 位置パターンラベル */
-.section-grid-section-cell .section-cell-pattern {
+.beam-section-grid-table .section-grid-section-cell .section-cell-pattern {
   height: auto;
   min-height: 14px;
   line-height: 1.2;
@@ -527,112 +346,14 @@
   padding: 1px 3px;
 }
 
-/* 複数位置コンテナ - フレックス */
-.section-grid-section-cell .beam-positions-container {
-  display: flex;
-  flex-direction: row;
-  gap: 3px;
-  justify-content: center;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  min-height: 0;
-  max-height: none;
-  flex: 0 0 auto;
-  padding: 2px 0;
-}
-
-/* グリッド内の位置アイテム */
-.section-grid-section-cell .beam-position-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1px;
-  flex: 0 0 auto;
-  min-width: 0;
-}
-
-.section-grid-section-cell .beam-position-item .position-label {
-  font-size: var(--font-size-xs);
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.section-grid-section-cell .beam-position-item .beam-section-diagram {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  margin: 1px 0;
-  min-height: 65px;
-}
-
-.section-grid-section-cell .beam-position-item .beam-section-diagram svg {
-  max-width: 90px;
-  max-height: 90px;
-  border: 1px solid var(--border-color, #e8e8e8);
-  border-radius: var(--border-radius-sm);
-  padding: 2px;
-  background: white;
-}
-
-.section-grid-section-cell .beam-position-item .position-dims {
-  font-size: var(--font-size-xs);
-  line-height: 1;
-  white-space: nowrap;
-}
-
-/* 詳細情報テーブル - 内容に応じた高さ */
-.section-grid-section-cell .section-cell-specs {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  padding-top: 2px;
-  border-top: 1px solid var(--border-color, #eee);
-}
-
-.section-grid-section-cell .section-specs-table {
-  width: 100%;
-  table-layout: fixed;
-  font-size: var(--font-size-xs);
-}
-
-.section-grid-section-cell .section-specs-table td {
-  padding: 1px 3px;
-  line-height: 1.2;
-  vertical-align: top;
-}
-
-.section-grid-section-cell .section-specs-table .spec-label {
-  width: 50px;
-  min-width: 50px;
-  font-weight: var(--font-weight-bold);
-  font-size: var(--font-size-xs);
-}
-
-.section-grid-section-cell .section-specs-table .spec-value {
-  font-size: var(--font-size-xs);
-}
-
-/* 複数位置仕様（グリッド用） */
-.section-grid-section-cell .multi-position-spec {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-.section-grid-section-cell .multi-position-spec .position-spec {
-  font-size: var(--font-size-xs);
-  line-height: 1.2;
-}
-
-.section-grid-section-cell.empty {
+.beam-section-grid-table .section-grid-section-cell.empty {
   background: var(--bg-secondary, #fafafa);
   color: var(--text-disabled, #999);
   font-style: italic;
   vertical-align: middle;
 }
 
-.section-grid-section-cell.empty .section-cell-empty {
+.beam-section-grid-table .section-grid-section-cell.empty .section-cell-empty {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -641,7 +362,7 @@
 }
 
 /* グリッド用の空セル表示 */
-.section-list-table-wrapper.grid-mode .section-cell-empty {
+.beam-section-list-window .section-list-table-wrapper.grid-mode .section-cell-empty {
   color: var(--text-disabled, #999);
   padding: 0;
   font-size: var(--font-size-base);
@@ -659,33 +380,14 @@
     font-size: var(--font-size-xs);
   }
 
-  .section-grid-header-symbol,
-  .section-grid-section-cell {
-    min-width: 240px;
-    max-width: 340px;
-    width: 290px;
-  }
-
-  .section-grid-section-cell .beam-position-item .beam-section-diagram svg {
-    max-width: 95px;
-    max-height: 95px;
-  }
-
-  .section-grid-section-cell {
+  .beam-section-grid-table .section-grid-section-cell {
     min-height: auto;
   }
 }
 
 /* レスポンシブ対応（中規模1280-1919px） */
 @media screen and (min-width: 1280px) and (max-width: 1919px) {
-  .section-grid-header-symbol,
-  .section-grid-section-cell {
-    min-width: 200px;
-    max-width: 280px;
-    width: 240px;
-  }
-
-  .section-grid-section-cell {
+  .beam-section-grid-table .section-grid-section-cell {
     min-height: auto;
   }
 }
@@ -697,31 +399,14 @@
     width: 95vw;
   }
 
-  .section-grid-header-symbol,
-  .section-grid-section-cell {
-    min-width: 180px;
-    max-width: 240px;
-    width: 210px;
-  }
-
-  .section-grid-section-cell {
+  .beam-section-grid-table .section-grid-section-cell {
     min-height: auto;
-  }
-
-  .section-grid-section-cell .beam-positions-container {
-    flex-wrap: wrap;
-    gap: 2px;
-  }
-
-  .section-grid-section-cell .beam-position-item .beam-section-diagram svg {
-    max-width: 80px;
-    max-height: 80px;
   }
 }
 
 /* グリッド印刷用スタイル */
 @media print {
-  .section-list-table-wrapper.grid-mode {
+  .beam-section-list-window .section-list-table-wrapper.grid-mode {
     overflow: visible;
     padding: 0;
   }
@@ -736,25 +421,15 @@
     page-break-after: auto;
   }
 
-  .section-grid-header-floor,
-  .section-grid-header-symbol,
-  .section-grid-floor-cell {
+  .beam-section-grid-table .section-grid-header-floor,
+  .beam-section-grid-table .section-grid-header-symbol,
+  .beam-section-grid-table .section-grid-floor-cell {
     position: static;
   }
 
-  .section-grid-section-cell {
+  .beam-section-grid-table .section-grid-section-cell {
     min-height: auto;
     page-break-inside: avoid;
-  }
-
-  .beam-positions-container {
-    flex-direction: row;
-    gap: 8px;
-  }
-
-  .beam-position-item .beam-section-diagram svg {
-    max-width: 100px;
-    max-height: 100px;
   }
 
   @page {
@@ -764,36 +439,48 @@
 }
 
 /* ダークテーマ対応（グリッド） */
-[data-theme="dark"] .beam-section-grid-table {
+[data-theme='dark'] .beam-section-grid-table {
   background: var(--bg-primary);
 }
 
-[data-theme="dark"] .section-grid-header-floor,
-[data-theme="dark"] .section-grid-header-symbol {
+[data-theme='dark'] .beam-section-grid-table .section-grid-header-floor,
+[data-theme='dark'] .beam-section-grid-table .section-grid-header-symbol {
   background: var(--bg-tertiary);
 }
 
-[data-theme="dark"] .section-grid-floor-cell {
+[data-theme='dark'] .beam-section-grid-table .section-grid-floor-cell {
   background: var(--bg-secondary);
 }
 
-[data-theme="dark"] .section-grid-section-cell {
+[data-theme='dark'] .beam-section-grid-table .section-grid-section-cell {
   background: var(--bg-primary);
 }
 
-[data-theme="dark"] .section-grid-section-cell.empty {
+[data-theme='dark'] .beam-section-grid-table .section-grid-section-cell.empty {
   background: var(--bg-secondary);
 }
 
-[data-theme="dark"] .section-grid-section-cell .beam-position-item .beam-section-diagram svg {
+[data-theme='dark'] .beam-section-grid-table .beam-position-schedule,
+[data-theme='dark'] .beam-section-grid-table .beam-position-schedule td {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+[data-theme='dark'] .beam-section-grid-table .beam-position-schedule .position-label {
+  background: var(--bg-tertiary);
+}
+
+[data-theme='dark'] .beam-section-grid-table .beam-position-schedule .beam-schedule-corner,
+[data-theme='dark'] .beam-section-grid-table .beam-position-schedule .beam-schedule-row-label,
+[data-theme='dark'] .beam-section-grid-table .beam-section-common-spec {
+  background: var(--bg-secondary);
+}
+
+[data-theme='dark'] .beam-section-grid-table .section-grid-section-cell {
   border-color: var(--border-color);
 }
 
-[data-theme="dark"] .section-grid-section-cell {
-  border-color: var(--border-color);
-}
-
-[data-theme="dark"] .beam-section-grid-table th,
-[data-theme="dark"] .beam-section-grid-table td {
+[data-theme='dark'] .beam-section-grid-table th,
+[data-theme='dark'] .beam-section-grid-table td {
   border-color: var(--border-color);
 }

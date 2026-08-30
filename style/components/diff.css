@@ -20,31 +20,13 @@
 }
 
 /* ========================================
-   比較ボタン
-   ======================================== */
-
-.btn-primary.compare-button {
-  background: var(--color-primary);
-  color: var(--text-white);
-  border: none;
-  padding: var(--btn-padding-y-lg) var(--btn-padding-x-lg);
-  border-radius: var(--border-radius);
-  font-weight: var(--font-weight-bold);
-  cursor: pointer;
-  transition: background-color var(--transition-fast);
-}
-
-.btn-primary.compare-button:hover {
-  background: var(--color-primary-hover);
-}
-
-/* ========================================
    差分サマリー
    ======================================== */
 
 /* 差分サマリーは独立フローティングウィンドウ (#diff-summary-float) で表示 */
 #diff-summary-content {
   font-size: var(--font-size-sm);
+  line-height: var(--line-height-base, 1.45);
   color: #666;
 }
 
@@ -106,7 +88,7 @@
 }
 
 .diff-headline-value {
-  font-size: 1.6em;
+  font-size: var(--font-size-xl);
   font-weight: var(--font-weight-bold);
   font-variant-numeric: tabular-nums;
 }
@@ -241,7 +223,7 @@
   border-left: 3px solid var(--border-color, #ced4da);
   font-size: var(--font-size-sm);
   color: #6c757d;
-  line-height: 1.5;
+  line-height: var(--line-height-base, 1.45);
   font-variant-numeric: tabular-nums;
 }
 
@@ -267,7 +249,7 @@
 
 .diff-scope-hint {
   flex-basis: 100%;
-  font-size: var(--font-size-xs, 0.72rem);
+  font-size: var(--font-size-xs);
   color: #868e96;
 }
 
@@ -283,7 +265,7 @@
   border-left: 3px solid var(--color-warning, #f59e0b);
   font-size: var(--font-size-sm);
   color: var(--text-primary, #374151);
-  line-height: 1.5;
+  line-height: var(--line-height-base, 1.45);
 }
 
 .diff-cross-precondition-icon {
@@ -299,7 +281,7 @@
   border-left: 3px solid var(--color-info, #3b82f6);
   font-size: var(--font-size-sm);
   color: #495057;
-  line-height: 1.5;
+  line-height: var(--line-height-base, 1.45);
 }
 
 .diff-cross-scope-title {
@@ -321,7 +303,7 @@
 }
 
 .diff-cross-scope-hint {
-  font-size: var(--font-size-xs, 0.72rem);
+  font-size: var(--font-size-xs);
   color: #868e96;
 }
 
@@ -333,6 +315,7 @@
 
 /* 要素タイプ別テーブル */
 .diff-type-section {
+  container-type: inline-size;
   overflow-x: auto;
   padding-bottom: 2px;
 }
@@ -358,8 +341,8 @@
 .diff-type-note {
   max-width: 34rem;
   color: #6c757d;
-  font-size: var(--font-size-xs, 0.72rem);
-  line-height: 1.45;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-base, 1.45);
 }
 
 .diff-type-section .diff-view-filter-toolbar {
@@ -384,12 +367,11 @@
 
 .diff-view-filter-toolbar .diff-view-filter-title {
   color: #6c757d;
+  white-space: nowrap;
 }
 
 .diff-view-filter-toolbar .diff-filter-presets {
   margin-bottom: 0;
-  flex-wrap: wrap;
-  justify-content: flex-end;
 }
 
 /* クリックで内容（絞り込み状態・件数・タイプチップ）が書き換わる動的部。
@@ -494,7 +476,7 @@
   border-radius: 8px;
   background: var(--bg-secondary, #e9ecef);
   color: var(--text-secondary, #6c757d);
-  font-size: var(--font-size-xs, 0.72rem);
+  font-size: var(--font-size-xs);
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
@@ -553,7 +535,7 @@
 
 /* 段1（親）ヘッダ「対応要素数」。分類軸すべてを束ねる見出し */
 .diff-type-parent-header-grid {
-  font-size: calc(var(--font-size-sm) * 0.95);
+  font-size: var(--font-size-sm);
 }
 
 .diff-type-parent-header-grid .diff-group-parent {
@@ -651,6 +633,21 @@
 
   .diff-type-section .diff-view-filter-toolbar {
     justify-content: flex-start;
+  }
+}
+
+@container (max-width: 620px) {
+  .diff-type-toolbar {
+    flex-direction: column;
+  }
+
+  .diff-type-section .diff-view-filter-toolbar,
+  .diff-view-filter-toolbar .diff-view-filter-fixed {
+    width: 100%;
+  }
+
+  .diff-view-filter-toolbar .diff-filter-presets {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

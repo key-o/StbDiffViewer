@@ -76,6 +76,7 @@
   border: none;
   color: var(--text-white);
   cursor: pointer;
+  margin: 0;
   padding: 2px 6px;
   border-radius: var(--border-radius-sm);
   font-size: var(--font-size-sm);
@@ -154,7 +155,10 @@
 /* 色付けモード設定ウィンドウ */
 #display-settings-float {
   min-width: 400px;
-  max-width: 500px;
+  /* 比較設定の選択肢が多い場合も、画面内の安全余白を残して十分に広げられるようにする */
+  max-width: calc(100vw - 20px);
+  max-height: calc(100vh - 20px);
+  overflow: hidden; /* コンテンツ側でスクロールさせるため */
 }
 
 /* 差分サマリーウィンドウ

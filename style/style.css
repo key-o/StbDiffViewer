@@ -11,6 +11,7 @@ body {
   overflow: hidden; /* Prevent body scrollbars */
   font-family: var(--font-family-base);
   font-size: var(--font-size-base);
+  line-height: var(--line-height-base, 1.45);
 }
 
 /* フォーム要素のフォント継承リセット */
@@ -187,7 +188,7 @@ body.overlay-collapsed .canvas-drop-hint {
 
 .canvas-drop-hint-sub {
   font-size: var(--font-size-sm);
-  line-height: 1.6;
+  line-height: var(--line-height-relaxed, 1.6);
   max-width: 480px;
 }
 
@@ -253,10 +254,7 @@ body.overlay-collapsed .canvas-drop-hint {
 /* #legendPanel は panels.css で定義 */
 
 /* Optional: Improve spacing within the overlay panel */
-#overlay label,
-#overlay input[type='file'],
-#overlay select,
-#overlay button {
+:where(#overlay) :where(label, input[type='file'], select, button) {
   display: block; /* Make controls block elements */
   width: calc(100% - 10px); /* Adjust width slightly for padding */
   margin-bottom: 10px; /* Add space below controls */
@@ -316,7 +314,7 @@ body.overlay-collapsed .canvas-drop-hint {
   display: inline-block;
   width: 1em;
   text-align: center;
-  font-size: 0.7em;
+  font-size: var(--font-size-xs);
   user-select: none;
   vertical-align: middle;
   color: var(--text-secondary, #666);
@@ -342,7 +340,7 @@ body.overlay-collapsed .canvas-drop-hint {
 
 .structural-system-label,
 .element-sub-label {
-  font-size: 0.85em;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary, #666);
   padding-left: 24px !important;
   text-align: left !important;

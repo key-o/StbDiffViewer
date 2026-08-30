@@ -1,11 +1,11 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-D8yVzjsfq7ph+oOYxslR/o/28zRTlivxWXAyIRBw860=' https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-Qgz4eS3E3CCGj9FwWSnWaLQ0RFNNl8YzJZNpMQ9O5s4=' https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
     />
     <title>STB Diff Viewer</title>
     <link rel="icon" href="./favicon.ico" />
@@ -47,10 +47,9 @@
           "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
           "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
           "camera-controls": "https://unpkg.com/camera-controls@3.1.0/dist/camera-controls.module.js",
-          "xml2js": "https://esm.sh/xml2js@0.6.2",
           "dxf-parser": "https://esm.sh/dxf-parser@1.1.2",
           "html2canvas": "https://esm.sh/html2canvas@1.4.1",
-          "jspdf": "https://esm.sh/jspdf@2.5.1",
+          "jspdf": "https://esm.sh/jspdf@4.2.1",
           "ajv": "https://esm.sh/ajv@8.17.1",
           "web-ifc": "https://cdn.jsdelivr.net/npm/web-ifc@0.0.74/web-ifc-api.js",
           "encoding-japanese": "https://esm.sh/encoding-japanese@2.2.0"
@@ -157,20 +156,48 @@
             <div class="model-header">
               <label for="fileA"><strong>モデルA</strong></label>
               <span class="version-badge-inline" id="versionA-inline"></span>
-              <button type="button" class="custom-file-btn" data-target="fileA">選択</button>
+              <div class="model-file-actions">
+                <button type="button" class="custom-file-btn" data-target="fileA">選択</button>
+                <button
+                  type="button"
+                  id="clearFileA"
+                  class="clear-file-btn"
+                  data-target="fileA"
+                  aria-label="モデルAを解除"
+                  title="モデルAを解除"
+                  hidden
+                  disabled
+                >
+                  解除
+                </button>
+              </div>
             </div>
             <span class="file-name-display" id="fileNameA">未選択</span>
-            <input type="file" id="fileA" accept=".stb,.xml,.csv,.ss7,.ifc" />
+            <input type="file" id="fileA" />
           </div>
 
           <div class="file-input-wrapper" id="wrapperB">
             <div class="model-header">
               <label for="fileB"><strong>モデルB</strong></label>
               <span class="version-badge-inline" id="versionB-inline"></span>
-              <button type="button" class="custom-file-btn" data-target="fileB">選択</button>
+              <div class="model-file-actions">
+                <button type="button" class="custom-file-btn" data-target="fileB">選択</button>
+                <button
+                  type="button"
+                  id="clearFileB"
+                  class="clear-file-btn"
+                  data-target="fileB"
+                  aria-label="モデルBを解除"
+                  title="モデルBを解除"
+                  hidden
+                  disabled
+                >
+                  解除
+                </button>
+              </div>
             </div>
             <span class="file-name-display" id="fileNameB">未選択</span>
-            <input type="file" id="fileB" accept=".stb,.xml,.csv,.ss7,.ifc" />
+            <input type="file" id="fileB" />
           </div>
 
           <hr class="section-divider" />
@@ -432,9 +459,7 @@
         </button>
       </div>
       <div class="ar-overlay-bottom">
-        <button type="button" id="arRepositionButton" class="ar-ctrl-btn" hidden>
-          再配置
-        </button>
+        <button type="button" id="arRepositionButton" class="ar-ctrl-btn" hidden>再配置</button>
         <div class="ar-scale-presets" role="group" aria-label="縮尺切替">
           <button type="button" class="ar-ctrl-btn" data-ar-scale="0.005">1/200</button>
           <button type="button" class="ar-ctrl-btn" data-ar-scale="0.01">1/100</button>
@@ -463,7 +488,12 @@
     </div>
 
     <!-- 寸法測定：ステップインジケーター（キャンバス上に重ねて表示） -->
-    <div id="measurement-step-indicator" class="measurement-step-indicator hidden" aria-live="polite" aria-atomic="true">
+    <div
+      id="measurement-step-indicator"
+      class="measurement-step-indicator hidden"
+      aria-live="polite"
+      aria-atomic="true"
+    >
       <div class="msi-step active" id="msi-step1">
         <span class="msi-circle">1</span>
         <span class="msi-label">1点目をクリック</span>
@@ -697,6 +727,43 @@
             <select id="loadCaseSelector" title="荷重ケースを選択">
               <option value="">全ての荷重ケース</option>
             </select>
+          </div>
+
+          <div class="rebar-display-control">
+            <label for="toggleRebarDisplay">
+              <input type="checkbox" id="toggleRebarDisplay" />
+              鉄筋を表示（RC柱・RC梁の主筋／直線部）
+            </label>
+            <label for="rebarCoverInput" class="rebar-cover-label">
+              かぶり
+              <input
+                type="number"
+                id="rebarCoverInput"
+                min="0"
+                max="200"
+                step="5"
+                value="40"
+                title="STBに主筋中心位置が無い場合に使うかぶり厚さ [mm]"
+              />
+              mm
+            </label>
+          </div>
+
+          <div class="rebar-display-control">
+            <label for="toggleHoopDisplay">
+              <input type="checkbox" id="toggleHoopDisplay" />
+              帯筋・あばら筋を表示（ピッチ配置／直線部）
+            </label>
+          </div>
+
+          <div class="rebar-display-control">
+            <button
+              type="button"
+              id="openAnchorageCheckBtn"
+              title="柱・梁主筋の定着長さとカットオフ筋長さを配筋標準図の一般値と比較します"
+            >
+              定着・カットオフ一覧を開く
+            </button>
           </div>
         </div>
       </div>
@@ -1159,11 +1226,20 @@
       <div class="float-window-header" id="measurement-panel-header">
         <span class="float-window-title">📏 寸法測定</span>
         <div class="float-window-controls">
-          <button type="button" class="float-window-btn" id="close-measurement-panel-btn" title="閉じる">✕</button>
+          <button
+            type="button"
+            class="float-window-btn"
+            id="close-measurement-panel-btn"
+            title="閉じる"
+          >
+            ✕
+          </button>
         </div>
       </div>
       <div class="float-window-content">
-        <p id="measurement-hint" class="measurement-hint">モデルを読み込んでから測定を開始してください</p>
+        <p id="measurement-hint" class="measurement-hint">
+          モデルを読み込んでから測定を開始してください
+        </p>
         <div id="measurement-list"></div>
       </div>
     </div>

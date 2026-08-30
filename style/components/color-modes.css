@@ -285,18 +285,22 @@
 }
 
 .diff-filter-presets {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--spacing-xs);
+  width: 100%;
+  margin-bottom: var(--spacing-sm);
 }
 
 .diff-filter-presets .preset-btn {
+  width: 100%;
+  margin: 0;
   background-color: var(--bg-body);
   border-color: var(--border-color);
   color: var(--text-primary);
   padding: 4px 10px;
   font-size: var(--font-size-sm);
+  white-space: nowrap;
 }
 
 .diff-filter-presets .preset-btn:hover {

@@ -34,6 +34,7 @@
   font-weight: var(--font-weight-semibold);
   text-align: left;
   width: 100%;
+  margin: 0;
   color: var(--sidebar-btn-text);
   transition: all var(--transition-fast);
   user-select: none;
@@ -205,8 +206,8 @@
 .model-header {
   display: grid;
   grid-template-areas:
-    "label action"
-    "version action";
+    'label action'
+    'version action';
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 12px;
@@ -238,12 +239,49 @@
   white-space: nowrap;
 }
 
-.model-header .custom-file-btn {
+.model-header .model-file-actions {
   grid-area: action;
-  width: auto;
-  margin: 0;
   justify-self: end;
   align-self: center;
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.model-header .custom-file-btn,
+.model-header .clear-file-btn {
+  width: 58px;
+  min-width: 58px;
+  min-height: 36px;
+  margin: 0;
+}
+
+.clear-file-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--btn-padding-y-sm) var(--btn-padding-x-sm);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--border-radius);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  transition: all var(--transition-fast);
+}
+
+.clear-file-btn:hover {
+  border-color: var(--color-danger, #dc3545);
+  color: var(--color-danger, #dc3545);
+  background: color-mix(in srgb, var(--color-danger, #dc3545) 8%, transparent);
+}
+
+.clear-file-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.clear-file-btn[hidden] {
+  display: none !important;
 }
 
 .version-badge-inline:empty {

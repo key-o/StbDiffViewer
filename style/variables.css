@@ -81,14 +81,32 @@
      フォント
      ======================================== */
 
-  --font-family-base: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
-  --font-family-monospace: 'Courier New', monospace;
+  /*
+   * アプリ全体のフォントファミリはこの1変数だけで定義する。
+   * Windows では BIZ UDGothic（非P）を最優先し、項目名・値・ID・XML・Canvas文字を
+   * 同一ファミリで表示する。BIZ UDGothic は BIZ UDPGothic より等幅用途に適し、
+   * 英数字も比較的コンパクトで _ / - / 数字の視認性を揃えやすい。
+   *
+   * CSSを直接継承できない Canvas / Three.js Sprite は js/utils/typography.js 経由で
+   * --font-family-base / --font-family-monospace を読むが、両者ともこの変数へ集約する。
+   */
+  --font-family-app: "BIZ UDGothic", "BIZ UDゴシック", "Yu Gothic UI", "Meiryo UI", monospace;
+  --font-family-base: var(--font-family-app);
+  --font-family-monospace: var(--font-family-app);
 
-  --font-size-xs:   0.75rem;   /* 12px - 小ラベル・バッジ・コンパクト */
-  --font-size-sm:   0.875rem;  /* 14px - テーブル・メニュー・補助テキスト */
-  --font-size-base: 1rem;      /* 16px - 標準本文 */
-  --font-size-lg:   1.25rem;   /* 20px - パネルタイトル・見出し */
-  --font-size-xl:   1.5rem;    /* 24px - 大見出し・アイコン */
+  /*
+   * デスクトップUIの文字サイズを従来より1段階大きくする。
+   * 13/14/16/18/20px の5段階に限定し、画面全体の可読性を揃える。
+   */
+  --font-size-xs:   0.8125rem;  /* 13px - バッジ・補足 */
+  --font-size-sm:   0.875rem;   /* 14px - テーブル・メニュー */
+  --font-size-base: 1rem;       /* 16px - 標準本文・ウィンドウタイトル */
+  --font-size-lg:   1.125rem;   /* 18px - パネル見出し */
+  --font-size-xl:   1.25rem;    /* 20px - 大見出し */
+
+  --line-height-tight: 1.3;
+  --line-height-base: 1.45;
+  --line-height-relaxed: 1.6;
 
   --font-weight-normal: 400;
   --font-weight-medium: 500;
@@ -206,4 +224,13 @@
   --sidebar-btn-border: var(--border-color-light);
   --sidebar-btn-text: var(--text-primary);
   --sidebar-btn-icon-color: var(--color-primary);
+}
+
+/*
+ * DOMベースのUIは原則すべて同じファミリを使用する。
+ * 既存コンポーネントに残る古い system-ui / Consolas / Arial 等の指定もここで統一し、
+ * 項目名だけ別フォントになる状態を防ぐ。Canvas描画は typography.js 側で同じ変数を参照する。
+ */
+:where(html, body, body *) {
+  font-family: var(--font-family-app) !important;
 }

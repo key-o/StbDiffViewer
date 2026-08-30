@@ -3,20 +3,22 @@
  */
 
 /* フローティングウィンドウ */
-.column-section-list-window {
-  width: 900px;
+.column-section-list-window,
+.beam-section-list-window {
+  width: 1000px;
   max-width: 95vw;
   height: 80vh;
-  max-height: 800px;
+  max-height: 900px;
   top: 50px;
   left: 50%;
   transform: translateX(-50%);
   /* リサイズ対応 */
-  min-width: 400px;
-  min-height: 300px;
+  min-width: 500px;
+  min-height: 350px;
 }
 
-.column-section-list-window .float-window-content {
+.column-section-list-window .float-window-content,
+.beam-section-list-window .float-window-content {
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -40,6 +42,27 @@
   gap: 12px;
 }
 
+.section-list-render-settings {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.section-list-render-settings label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+.section-list-render-settings select,
+.section-list-render-settings input {
+  height: 24px;
+  padding: 1px 4px;
+  font-size: var(--font-size-sm);
+}
+
 .section-list-source-selector label {
   display: flex;
   align-items: center;
@@ -61,7 +84,8 @@
 }
 
 /* テーブル */
-.column-section-list-table {
+.column-section-list-table,
+.beam-section-list-table {
   border-collapse: collapse;
   width: 100%;
   font-size: var(--font-size-sm);
@@ -69,7 +93,9 @@
 }
 
 .column-section-list-table th,
-.column-section-list-table td {
+.column-section-list-table td,
+.beam-section-list-table th,
+.beam-section-list-table td {
   border-bottom: 1px solid var(--border-color);
   padding: 6px 8px;
   text-align: left;
@@ -155,8 +181,100 @@
 }
 
 .section-cell-diagram svg {
-  max-width: 120px;
-  max-height: 120px;
+  max-width: none;
+  max-height: none;
+  flex: none;
+}
+
+/* 柱頭・柱脚の位置別配筋 */
+.column-section-cell .column-arrangements-container {
+  display: grid;
+  grid-template-columns: max-content;
+  justify-content: center;
+  gap: 0;
+}
+
+.column-section-cell .column-arrangements-container.is-multiple {
+  grid-template-columns: repeat(2, max-content);
+  gap: 0;
+}
+
+.column-section-cell .column-arrangement-item {
+  min-width: 0;
+  border: 1px solid var(--border-color, #ccc);
+  background: white;
+}
+
+.column-section-cell
+  .column-arrangements-container.is-multiple
+  .column-arrangement-item:nth-child(even) {
+  margin-left: -1px;
+}
+
+.column-section-cell
+  .column-arrangements-container.is-multiple
+  .column-arrangement-item:nth-child(n + 3) {
+  margin-top: -1px;
+}
+
+.column-section-cell .column-arrangement-label {
+  margin: 0;
+  padding: 3px 5px;
+  color: var(--text-heading, #222);
+  background: var(--bg-tertiary, #e8e8e8);
+  border-bottom: 1px solid var(--border-color, #ccc);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  text-align: center;
+}
+
+.column-section-cell .column-arrangement-item .section-cell-diagram {
+  min-height: 0;
+  height: auto;
+  margin: 0;
+  padding: 3px;
+  align-items: center;
+  border-bottom: 1px solid var(--border-color, #ccc);
+}
+
+.column-section-cell .column-arrangement-item .section-cell-diagram svg {
+  max-width: none;
+  max-height: none;
+}
+
+.column-section-cell .column-arrangement-item .section-specs-table {
+  width: 100%;
+  table-layout: auto;
+}
+
+.column-section-cell .column-arrangement-item .section-specs-table td {
+  padding: 3px 5px;
+  border: 0;
+  border-top: 1px solid var(--border-color, #ccc);
+  white-space: nowrap;
+}
+
+.column-section-cell .column-arrangement-item .section-specs-table tr:first-child td {
+  border-top: 0;
+}
+
+.column-section-cell .column-arrangement-item .section-specs-table .spec-label {
+  width: 64px;
+  min-width: 64px;
+  border-right: 1px solid var(--border-color, #ccc);
+  color: var(--text-secondary, #555);
+  background: var(--bg-secondary, #f5f5f5);
+  font-weight: var(--font-weight-bold);
+}
+
+.bar-direction-note,
+.placement-estimated-note {
+  color: var(--text-secondary, #666);
+  font-size: 0.9em;
+}
+
+.placement-estimated-note {
+  white-space: nowrap;
 }
 
 /* 仕様テーブル */
@@ -240,20 +358,20 @@
 }
 
 /* ダークテーマ対応 */
-[data-theme="dark"] .column-section-list-table {
+[data-theme='dark'] .column-section-list-table {
   background: var(--bg-primary);
 }
 
-[data-theme="dark"] .section-list-header-floor,
-[data-theme="dark"] .section-list-header-symbol {
+[data-theme='dark'] .section-list-header-floor,
+[data-theme='dark'] .section-list-header-symbol {
   background: var(--bg-tertiary);
 }
 
-[data-theme="dark"] .section-list-floor-cell {
+[data-theme='dark'] .section-list-floor-cell {
   background: var(--bg-secondary);
 }
 
-[data-theme="dark"] .section-cell-diagram svg rect:first-child {
+[data-theme='dark'] .section-cell-diagram svg rect:first-child {
   fill: var(--bg-primary);
 }
 
@@ -348,8 +466,8 @@
 /* 符号ヘッダー（各列） */
 .section-grid-header-symbol {
   min-width: 180px;
-  max-width: 220px;
-  width: 200px;
+  max-width: none;
+  width: auto;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -372,8 +490,8 @@
 /* グリッド断面セル */
 .section-grid-section-cell {
   min-width: 180px;
-  max-width: 220px;
-  width: 200px;
+  max-width: none;
+  width: auto;
   text-align: center;
   background: white;
   vertical-align: top;
@@ -384,7 +502,7 @@
 .section-grid-section-cell .section-cell-content {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  height: auto;
 }
 
 /* セル内レイアウト（グリッドモード用） */
@@ -404,9 +522,9 @@
   white-space: nowrap;
 }
 
-/* 断面図エリア - 固定高さ */
+/* 断面図エリア - SVGの指定縮尺へ追従 */
 .section-grid-section-cell .section-cell-diagram {
-  height: 130px;
+  height: auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -414,8 +532,23 @@
 }
 
 .section-grid-section-cell .section-cell-diagram svg {
-  max-width: 120px;
-  max-height: 120px;
+  max-width: none;
+  max-height: none;
+  flex: none;
+}
+
+.section-grid-section-cell .column-arrangements-container.is-multiple .section-cell-diagram {
+  height: auto;
+}
+
+[data-theme='dark'] .column-section-cell .column-arrangement-item,
+[data-theme='dark'] .column-section-cell .column-arrangement-item .section-specs-table .spec-value {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+[data-theme='dark'] .column-section-cell .column-arrangement-item .section-specs-table .spec-label {
+  background: var(--bg-secondary);
 }
 
 /* 詳細情報テーブル - 内容に応じた高さ */
@@ -466,23 +599,6 @@
   .column-section-grid-table {
     font-size: var(--font-size-xs);
   }
-
-  .section-grid-header-symbol,
-  .section-grid-section-cell {
-    min-width: 160px;
-    max-width: 200px;
-    width: 180px;
-  }
-}
-
-/* レスポンシブ対応（小画面） */
-@media screen and (max-width: 1280px) {
-  .section-grid-header-symbol,
-  .section-grid-section-cell {
-    min-width: 200px;
-    max-width: 240px;
-    width: 220px;
-  }
 }
 
 /* グリッド印刷用スタイル */
@@ -514,23 +630,23 @@
 }
 
 /* ダークテーマ対応（グリッド） */
-[data-theme="dark"] .column-section-grid-table {
+[data-theme='dark'] .column-section-grid-table {
   background: var(--bg-primary);
 }
 
-[data-theme="dark"] .section-grid-header-floor,
-[data-theme="dark"] .section-grid-header-symbol {
+[data-theme='dark'] .section-grid-header-floor,
+[data-theme='dark'] .section-grid-header-symbol {
   background: var(--bg-tertiary);
 }
 
-[data-theme="dark"] .section-grid-floor-cell {
+[data-theme='dark'] .section-grid-floor-cell {
   background: var(--bg-secondary);
 }
 
-[data-theme="dark"] .section-grid-section-cell {
+[data-theme='dark'] .section-grid-section-cell {
   background: var(--bg-primary);
 }
 
-[data-theme="dark"] .section-grid-section-cell.empty {
+[data-theme='dark'] .section-grid-section-cell.empty {
   background: var(--bg-secondary);
 }

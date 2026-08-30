@@ -150,8 +150,9 @@
   overflow: auto;
   max-height: 340px;
   font-family: var(--font-family-monospace, monospace);
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-base, 1.45);
+  font-variant-ligatures: none;
   white-space: pre;
   color: var(--text-primary);
 }

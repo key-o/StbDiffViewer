@@ -201,6 +201,37 @@ body.has-docked-element-info {
 }
 
 /* ========================================
+   3D配筋表示コントロール
+   ======================================== */
+
+.rebar-display-control {
+  margin-left: 20px;
+  margin-top: 8px;
+  font-size: var(--font-size-sm);
+  color: #666;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rebar-display-control label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.rebar-display-control input[type='number'] {
+  width: 4.5em;
+  padding: 2px 6px;
+  font-size: var(--font-size-sm);
+  border: 1px solid #ccc;
+  border-radius: var(--border-radius);
+  background-color: #fff;
+}
+
+/* ========================================
    編集モードボタン（ツール内・ON時のアクティブ表示）
    ======================================== */
 
@@ -229,14 +260,17 @@ body.has-docked-element-info {
 }
 
 .view-mode-buttons {
-  display: flex;
-  gap: 4px;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: var(--spacing-sm);
 }
 
 .view-mode-btn {
-  flex: 1;
+  width: 100%;
   min-height: 48px;
   padding: 10px 8px;
+  margin: 0;
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-semibold);
   border: 1px solid var(--border-color);
@@ -261,14 +295,17 @@ body.has-docked-element-info {
 
 /* ビュー方向ボタン */
 .view-submode-buttons {
-  display: flex;
-  gap: 4px;
-  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
 }
 
 .view-submode-btn {
-  flex: 1;
-  padding: 6px 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: var(--btn-padding-y) var(--btn-padding-x-sm);
+  margin: 0;
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   border: 1px solid var(--border-color, #ccc);
