@@ -6,7 +6,7 @@
  * @module ui/events/labelVisibilityListeners
  */
 
-import { updateLabelVisibility } from '../viewer3d/unifiedLabelManager.js';
+import { regenerateAllLabels, updateLabelVisibility } from '../viewer3d/unifiedLabelManager.js';
 import { setState } from '../../data/state/globalState.js';
 import { renderingController } from '../../app/controllers/renderingController.js';
 import { REDRAW_REQUIRED_ELEMENT_TYPES } from '../../config/uiElementConfig.js';
@@ -36,11 +36,14 @@ const ELEMENT_REDRAW_FUNCTION_MAP = {
 
 /** @type {Array<{el: Element, handler: Function}>} */
 let _labelListeners = [];
+/** @type {{el: Element, handler: Function}|null} */
+let _labelContentListener = null;
 
 /**
  * Setup label toggle checkbox listeners to update label visibility
  */
 export function setupLabelToggleListeners() {
+  teardownLabelToggleListeners();
   const labelToggles = document.querySelectorAll('input[name="labelToggle"]');
   labelToggles.forEach((checkbox) => {
     const handler = () => {
@@ -121,13 +124,25 @@ function triggerViewModeRedraw(elementType) {
  * Setup label content selector listener
  */
 export function setupLabelContentListener() {
+  teardownLabelContentListener();
   const labelContentSelector = document.getElementById('labelContentSelector');
 
   if (labelContentSelector) {
     labelContentSelector.addEventListener('change', handleLabelContentChange);
+    _labelContentListener = { el: labelContentSelector, handler: handleLabelContentChange };
   } else {
     log.warn('[UI] ラベル: コンテンツセレクタが見つかりません');
   }
+}
+
+/**
+ * Teardown label content selector listener
+ */
+export function teardownLabelContentListener() {
+  if (!_labelContentListener) return;
+  const { el, handler } = _labelContentListener;
+  el.removeEventListener('change', handler);
+  _labelContentListener = null;
 }
 
 /**
@@ -142,11 +157,7 @@ function handleLabelContentChange(event) {
   setState('ui.labelContentType', newContentType);
 
   // Trigger label regeneration
-  if (typeof window.regenerateAllLabels === 'function') {
-    window.regenerateAllLabels();
-  } else {
-    log.warn('[UI] ラベル: regenerateAllLabels関数が未設定');
-  }
+  regenerateAllLabels();
 
   // Request render update via EventBus
   eventBus.emit(RenderEvents.REQUEST_RENDER);

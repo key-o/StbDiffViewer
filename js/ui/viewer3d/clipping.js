@@ -11,6 +11,7 @@
  */
 
 import * as THREE from 'three';
+import { createAxisRangeClippingPlanes, createBoxClippingPlanes } from '../../viewer/index.js';
 import { getCurrentStories, getCurrentAxesData } from '../state.js';
 import { sceneController } from '../../app/controllers/sceneController.js';
 import { scheduleRender } from '../../utils/renderScheduler.js';
@@ -190,27 +191,12 @@ export async function applyAxisClip(axisType, axisId = null, customRange = null)
  * @returns {Array<THREE.Plane>} Array of clipping planes
  */
 function createStoryClippingPlanes(storyBounds) {
-  const planes = [];
-
   try {
-    // Lower clipping plane (normal pointing up)
-    const lowerPlane = new THREE.Plane(
-      new THREE.Vector3(0, 0, 1), // Normal pointing up (positive Z)
-      -storyBounds.lowerBound, // Distance (negative because plane equation)
-    );
-    planes.push(lowerPlane);
-
-    // Upper clipping plane (normal pointing down)
-    const upperPlane = new THREE.Plane(
-      new THREE.Vector3(0, 0, -1), // Normal pointing down (negative Z)
-      storyBounds.upperBound, // Distance
-    );
-    planes.push(upperPlane);
+    return createAxisRangeClippingPlanes('Z', storyBounds.lowerBound, storyBounds.upperBound);
   } catch (error) {
     log.error('Error creating story clipping planes:', error);
+    return [];
   }
-
-  return planes;
 }
 
 /**
@@ -220,47 +206,12 @@ function createStoryClippingPlanes(storyBounds) {
  * @returns {Array<THREE.Plane>} Array of clipping planes
  */
 function createAxisClippingPlanes(axisBounds, axisType) {
-  const planes = [];
-
   try {
-    if (axisType === 'X') {
-      // X-axis clipping (perpendicular to X-axis)
-
-      // Lower clipping plane (normal pointing in positive X)
-      const lowerPlane = new THREE.Plane(
-        new THREE.Vector3(1, 0, 0), // Normal pointing in positive X
-        -axisBounds.lowerBound, // Distance
-      );
-      planes.push(lowerPlane);
-
-      // Upper clipping plane (normal pointing in negative X)
-      const upperPlane = new THREE.Plane(
-        new THREE.Vector3(-1, 0, 0), // Normal pointing in negative X
-        axisBounds.upperBound, // Distance
-      );
-      planes.push(upperPlane);
-    } else if (axisType === 'Y') {
-      // Y-axis clipping (perpendicular to Y-axis)
-
-      // Lower clipping plane (normal pointing in positive Y)
-      const lowerPlane = new THREE.Plane(
-        new THREE.Vector3(0, 1, 0), // Normal pointing in positive Y
-        -axisBounds.lowerBound, // Distance
-      );
-      planes.push(lowerPlane);
-
-      // Upper clipping plane (normal pointing in negative Y)
-      const upperPlane = new THREE.Plane(
-        new THREE.Vector3(0, -1, 0), // Normal pointing in negative Y
-        axisBounds.upperBound, // Distance
-      );
-      planes.push(upperPlane);
-    }
+    return createAxisRangeClippingPlanes(axisType, axisBounds.lowerBound, axisBounds.upperBound);
   } catch (error) {
     log.error('Error creating axis clipping planes:', error);
+    return [];
   }
-
-  return planes;
 }
 
 /**
@@ -319,21 +270,7 @@ export function createClippingPlaneFromPointAndNormal(point, normal) {
  * @param {THREE.Box3} box - Bounding box to clip to
  * @returns {Array<THREE.Plane>} Array of 6 clipping planes
  */
-export function createBoxClippingPlanes(box) {
-  const planes = [];
-  const min = box.min;
-  const max = box.max;
-
-  // 6 planes for a box (one for each face)
-  planes.push(new THREE.Plane(new THREE.Vector3(1, 0, 0), -min.x)); // Left
-  planes.push(new THREE.Plane(new THREE.Vector3(-1, 0, 0), max.x)); // Right
-  planes.push(new THREE.Plane(new THREE.Vector3(0, 1, 0), -min.y)); // Bottom
-  planes.push(new THREE.Plane(new THREE.Vector3(0, -1, 0), max.y)); // Top
-  planes.push(new THREE.Plane(new THREE.Vector3(0, 0, 1), -min.z)); // Near
-  planes.push(new THREE.Plane(new THREE.Vector3(0, 0, -1), max.z)); // Far
-
-  return planes;
-}
+export { createBoxClippingPlanes };
 
 // === NEW FUNCTIONS FOR RANGE-ADJUSTABLE CLIPPING ===
 

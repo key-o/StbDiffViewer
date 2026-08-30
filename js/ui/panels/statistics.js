@@ -237,10 +237,10 @@ export class ImportanceStatistics {
 
   /**
    * スタイルを追加
-   * 注: スタイルは importance.css に外部化されました
+   * 注: スタイルは importance-*.css に外部化されました
    */
   addStyles() {
-    // スタイルは stb-diff-viewer/style/components/importance.css で定義
+    // スタイルは style/components/importance-*.css で定義
     // このメソッドは互換性のために残されています
   }
 

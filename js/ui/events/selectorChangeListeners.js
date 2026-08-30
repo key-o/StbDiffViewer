@@ -133,18 +133,18 @@ export function redrawAxesAtStory(targetStoryId) {
  * Handle X-axis selection change
  * @param {Event} event - Change event
  */
-function handleXAxisSelectionChange(event) {
+function handleAxisSelectionChange(event, axisType, rangeElementId, controlsType) {
   const selectedAxisId = event.target.value;
   const axisRange = parseInt(
-    document.getElementById('xAxisClipRange')?.value || DEFAULT_AXIS_CLIP_RANGE,
+    document.getElementById(rangeElementId)?.value || DEFAULT_AXIS_CLIP_RANGE,
     10,
   );
 
   if (selectedAxisId !== 'all') {
-    const bounds = getAxisClipBounds('X', selectedAxisId, axisRange);
+    const bounds = getAxisClipBounds(axisType, selectedAxisId, axisRange);
     if (bounds) {
       activateSectionBoxForBounds(bounds);
-      updateClipControlsVisibility('xAxis');
+      updateClipControlsVisibility(controlsType);
     }
   } else {
     deactivateSectionBox();
@@ -159,32 +159,19 @@ function handleXAxisSelectionChange(event) {
 }
 
 /**
+ * Handle X-axis selection change
+ * @param {Event} event - Change event
+ */
+function handleXAxisSelectionChange(event) {
+  handleAxisSelectionChange(event, 'X', 'xAxisClipRange', 'xAxis');
+}
+
+/**
  * Handle Y-axis selection change
  * @param {Event} event - Change event
  */
 function handleYAxisSelectionChange(event) {
-  const selectedAxisId = event.target.value;
-  const axisRange = parseInt(
-    document.getElementById('yAxisClipRange')?.value || DEFAULT_AXIS_CLIP_RANGE,
-    10,
-  );
-
-  if (selectedAxisId !== 'all') {
-    const bounds = getAxisClipBounds('Y', selectedAxisId, axisRange);
-    if (bounds) {
-      activateSectionBoxForBounds(bounds);
-      updateClipControlsVisibility('yAxis');
-    }
-  } else {
-    deactivateSectionBox();
-    updateClipControlsVisibility(null);
-  }
-
-  // Update label visibility
-  updateLabelVisibility();
-
-  // Request render update via EventBus
-  eventBus.emit(RenderEvents.REQUEST_RENDER);
+  handleAxisSelectionChange(event, 'Y', 'yAxisClipRange', 'yAxis');
 }
 
 /**

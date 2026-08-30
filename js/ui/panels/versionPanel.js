@@ -6,7 +6,7 @@
  */
 
 import { eventBus } from '../../data/events/eventBus.js';
-import { EventTypes, VersionEvents } from '../../constants/eventTypes.js';
+import { EventTypes, ModelEvents, VersionEvents } from '../../constants/eventTypes.js';
 
 /**
  * バージョン情報の状態
@@ -49,12 +49,14 @@ export function updateVersionPanel(versionInfo) {
     versionInfo.versionA,
     versionInfo.sourceTypeA,
     versionInfo.ifcSchemaA,
+    versionInfo.hasModelA !== false,
   );
   updateInlineVersionBadge(
     'versionB-inline',
     versionInfo.versionB,
     versionInfo.sourceTypeB,
     versionInfo.ifcSchemaB,
+    versionInfo.hasModelB !== false,
   );
 }
 
@@ -64,10 +66,17 @@ export function updateVersionPanel(versionInfo) {
  * @param {string} version - バージョン文字列
  * @param {string} [sourceType] - ソース種別 ('stb'|'ifc'|'ss7csv')
  * @param {string} [ifcSchema] - IFCスキーマ文字列
+ * @param {boolean} [hasModel=true] - 対象スロットにモデルが存在するか
  */
-function updateInlineVersionBadge(elementId, version, sourceType, ifcSchema) {
+function updateInlineVersionBadge(elementId, version, sourceType, ifcSchema, hasModel = true) {
   const el = document.getElementById(elementId);
   if (!el) return;
+
+  if (!hasModel) {
+    el.textContent = '';
+    el.className = 'version-badge-inline';
+    return;
+  }
 
   el.textContent = formatSourceLabel(version, sourceType, ifcSchema);
   el.className = 'version-badge-inline ' + getVersionClass(version, sourceType);
@@ -205,4 +214,6 @@ export function setupVersionPanelEventListeners() {
       updateVersionPanel(data.versionInfo);
     }
   });
+
+  eventBus.on(ModelEvents.CLEARED, clearVersionPanel);
 }

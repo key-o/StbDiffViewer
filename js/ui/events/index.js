@@ -33,6 +33,7 @@ import {
   setupLabelToggleListeners,
   teardownLabelToggleListeners,
   setupLabelContentListener,
+  teardownLabelContentListener,
 } from './labelVisibilityListeners.js';
 
 import {
@@ -111,6 +112,7 @@ export function teardownUIEventListeners() {
     teardownModelVisibilityListeners();
     teardownSelectorChangeListeners();
     teardownLabelToggleListeners();
+    teardownLabelContentListener();
     teardownAccordionListeners();
     teardownClippingListeners();
   } catch (error) {

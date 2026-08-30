@@ -492,10 +492,10 @@ class ImportancePanel {
 
   /**
    * パネルのスタイルを動的に追加する
-   * 注: スタイルは importance.css に外部化されました
+   * 注: スタイルは importance-*.css に外部化されました
    */
   static addStyles() {
-    // スタイルは stb-diff-viewer/style/components/importance.css で定義
+    // スタイルは style/components/importance-*.css で定義
     // このメソッドは互換性のために残されています
   }
 }

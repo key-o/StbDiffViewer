@@ -8,6 +8,7 @@
  * - comparisonUtils.js: 属性比較、バリデーション状態マップなどのユーティリティ
  * - comparisonNodeRenderer.js: ノード座標レンダリング
  * - comparisonSectionRenderer.js: 鉄骨断面、開口、pos属性マッチング
+ * - comparisonTableStyles.js: 比較テーブルのCSSスタイル生成
  */
 
 import {
@@ -15,7 +16,6 @@ import {
   getAllAttributeNames,
   getAttributeInfo,
 } from '../../../common-stb/import/parser/jsonSchemaLoader.js';
-import { getValidationStyles } from '../../../common-stb/validation/validationHtmlRenderer.js';
 import { getImportanceCircleHtml, getImportanceCircleHtmlByPath } from './ImportanceColors.js';
 import {
   findSectionNode,
@@ -32,7 +32,7 @@ import {
   buildGeometryShapeSignature,
   describeGeometryShape,
 } from '../../../common-stb/comparison/geometryShapeSignature.js';
-import { isEditMode, getCurrentEditingElement } from './EditMode.js';
+import { isEditMode, getCurrentEditingElement } from './editMode/index.js';
 import { buildElementEditPath } from './editPath.js';
 import { escapeHtml, valueToSafeHtml } from '../../../utils/htmlUtils.js';
 import { getState } from '../../../data/state/globalState.js';
@@ -56,6 +56,8 @@ import {
   shouldUsePosMatching,
   matchChildrenByPos,
 } from './comparisonSectionRenderer.js';
+
+export { generateTableStyles } from './comparisonTableStyles.js';
 
 /**
  * 壁要素に関連する開口情報セクションを生成する（v2.1.0: StbOpenArrangement経由）
@@ -163,117 +165,6 @@ export function renderOpeningInfo(nodeA, nodeB, showSingleColumn) {
 }
 
 /**
- * 統合比較テーブルのCSSスタイルを生成
- * @param {boolean} showSingleColumn - 単一モデル表示かどうか
- * @returns {string} CSSスタイル文字列
- */
-export function generateTableStyles(showSingleColumn) {
-  return `
-    /* --- 統合比較テーブル --- */
-    .unified-comparison-table {
-        width: 100%; border-collapse: collapse; margin-bottom: 1em; font-size: var(--font-size-sm);
-        table-layout: fixed;
-    }
-    .unified-comparison-table th, .unified-comparison-table td {
-        border-bottom: 1px solid var(--border-color); padding: 6px 8px; text-align: left; vertical-align: top;
-        word-wrap: break-word;
-    }
-    /* スティッキーヘッダー */
-    .unified-comparison-table thead {
-        position: sticky;
-        top: 0;
-        z-index: 10;
-    }
-    .unified-comparison-table th { background-color: var(--bg-secondary); font-weight: var(--font-weight-semibold); color: var(--text-heading); }
-
-    /* 要素名の行 */
-    .unified-comparison-table tr.element-row > td:first-child {
-         background-color: var(--bg-hover); /* 要素行の背景色を少し薄く */
-         white-space: nowrap;
-         overflow: hidden;
-         text-overflow: ellipsis;
-         font-weight: var(--font-weight-semibold);
-         color: var(--color-primary);
-         border-bottom: 2px solid var(--border-color-light); /* 区切りを少し強調 */
-    }
-    /* 属性名/ラベルの行 */
-    .unified-comparison-table tr:not(.element-row):hover {
-         background-color: var(--bg-hover, rgba(0, 0, 0, 0.05));
-    }
-    .unified-comparison-table tr:not(.element-row) > td:first-child {
-         color: var(--text-secondary); /* 属性名/ラベルの色 */
-         white-space: nowrap;
-         padding-left: 12px; /* インデントを模倣 */
-    }
-    /* 差分ハイライト */
-    .unified-comparison-table td.differs {
-        background-color: #fff3cd;
-        font-weight: var(--font-weight-bold);
-        color: var(--color-warning); /* 文字色も警告色に */
-    }
-    .unified-comparison-table td.validation-error {
-        background-color: #ffebee;
-        color: #b71c1c;
-    }
-    .unified-comparison-table td.validation-warning {
-        background-color: #fff8e1;
-        color: #8d5200;
-    }
-    .unified-comparison-table td.differs.validation-error {
-        background-color: #ffcdd2;
-    }
-    .unified-comparison-table td.differs.validation-warning {
-        background-color: #ffe0b2;
-    }
-    /* 断面情報ヘッダー行 */
-    .unified-comparison-table tr.section-header-row > td {
-        background-color: var(--bg-secondary);
-        font-weight: var(--font-weight-semibold);
-        text-align: center;
-        padding: 8px;
-        border-top: 2px solid var(--border-color); /* 上に区切り線 */
-    }
-
-    /* テキスト要素のスタイル */
-    .unified-comparison-table .tag-name { /* .tag-name は要素名セル内で使用 */ }
-    .unified-comparison-table .attr-name { /* .attr-name は属性名セル内で使用 */ }
-    .unified-comparison-table .attr-value { color: #007acc; }
-    .unified-comparison-table .text-label { font-style: italic; color: #555; }
-    .unified-comparison-table .text-content {
-        font-style: italic; color: #555;
-        white-space: pre-wrap;
-        word-break: break-all;
-    }
-    /* 値がない場合のスタイル */
-    .unified-comparison-table .no-value {
-         color: #999;
-         font-style: italic;
-    }
-
-    /* 単一モデル表示時のパネル幅調整 */
-    ${
-      showSingleColumn
-        ? `
-    .unified-comparison-table th:first-child,
-    .unified-comparison-table td:first-child {
-        width: 50% !important;
-    }
-    .unified-comparison-table th:last-child,
-    .unified-comparison-table td:last-child {
-        width: 50% !important;
-    }
-    `
-        : `
-    /* 比較モード時は3カラムのままでCSSによる幅制御は最小限に */
-    `
-    }
-
-    /* バリデーション情報スタイル */
-    ${getValidationStyles()}
-  `;
-}
-
-/**
  * 断面情報セクションのHTMLを生成
  * @param {Element|null} nodeA - モデルAの要素ノード
  * @param {Element|null} nodeB - モデルBの要素ノード
@@ -298,8 +189,8 @@ export function renderSectionInfo(nodeA, nodeB, showSingleColumn, modelSource, e
   const sectionNodeA = sectionIdA ? findSectionNode(docA, sectionIdA, elementType) : null;
   const sectionNodeB = sectionIdB ? findSectionNode(docB, sectionIdB, elementType) : null;
 
-  // 断面等価性評価の実行（比較モードの場合のみ）
-  // 梁/大梁は分類根拠と同じ GSS（形状等価）で判定・表示し、それ以外は従来エンジンにフォールバックする。
+  // 断面等価性評価の実行（比較モードの場合のみ）。
+  // 形状（GSS）と属性評価は対応付け基準から独立した別々の結果として扱う。
   let equivalenceResult = null;
   let geometryEquivalence = null;
   if (!showSingleColumn && sectionNodeA && sectionNodeB && modelSource === 'matched') {
@@ -314,12 +205,12 @@ export function renderSectionInfo(nodeA, nodeB, showSingleColumn, modelSource, e
         descA: geomSectionA ? describeGeometryShape(geomSectionA, elementType) : null,
         descB: geomSectionB ? describeGeometryShape(geomSectionB, elementType) : null,
       };
-    } else {
-      const sectionDataA = extractSectionData(sectionNodeA);
-      const sectionDataB = extractSectionData(sectionNodeB);
-      if (sectionDataA && sectionDataB) {
-        equivalenceResult = evaluateSectionEquivalence(sectionDataA, sectionDataB, elementType);
-      }
+    }
+
+    const sectionDataA = extractSectionData(sectionNodeA);
+    const sectionDataB = extractSectionData(sectionNodeB);
+    if (sectionDataA && sectionDataB) {
+      equivalenceResult = evaluateSectionEquivalence(sectionDataA, sectionDataB, elementType);
     }
   }
 
@@ -334,12 +225,13 @@ export function renderSectionInfo(nodeA, nodeB, showSingleColumn, modelSource, e
   }
 
   // 断面等価性評価結果を表示（比較モードの場合）。
-  // 選択中の断面一致基準（部材レベル）をバッジに併記し、表示を設定に追従させる（F1）。
+  // 選択中の断面対応付け基準（部材レベル）を、対応後の等価判定結果とは分けて併記する。
   const criterionLabel =
     SECTION_MATCH_CRITERION_LABELS[comparisonKeyManager.getSectionMatchCriterion()] || null;
   if (geometryEquivalence && !showSingleColumn) {
     content += generateGeometryEquivalenceSection(geometryEquivalence, criterionLabel);
-  } else if (equivalenceResult && !showSingleColumn) {
+  }
+  if (equivalenceResult && !showSingleColumn) {
     content += generateEquivalenceSection(equivalenceResult, criterionLabel);
   }
 
@@ -358,9 +250,29 @@ export function renderSectionInfo(nodeA, nodeB, showSingleColumn, modelSource, e
 }
 
 /**
+ * ノードのテキストコンテンツが「意味のある内容」かを判定する
+ *
+ * 子要素を持たず、かつ全属性値の連結と一致しないテキストのみを内容とみなす
+ * （属性値がそのまま textContent として現れるDOM実装での誤検出を避ける）。
+ *
+ * @param {Element|null} node - 判定対象のノード
+ * @param {string|undefined} text - trim 済みの textContent
+ * @returns {boolean} 内容として表示すべきなら true
+ */
+function hasMeaningfulNodeText(node, text) {
+  if (!node || node.children.length !== 0 || !text) return false;
+
+  let attrsText = '';
+  for (let i = 0; i < node.attributes.length; i++) {
+    attrsText += node.attributes[i].value;
+  }
+  return text !== attrsText.trim();
+}
+
+/**
  * 編集ボタンHTMLを生成する（編集対象はモデルAのみ）。
  * id属性を持たない断面子要素はパスアドレッシングで特定する。
- * クリック処理は EditMode.js のイベントデリゲーションが担当する。
+ * クリック処理は editMode（editModeToggle.js）のイベントデリゲーションが担当する。
  * @param {Element|null} nodeA - モデルAのXML要素（B側要素は編集不可）
  * @param {string} editType - 要素タイプ（タグ名から 'Stb' を除いたもの）
  * @param {string} attrName - 属性名
@@ -448,7 +360,7 @@ export function renderComparisonRecursive(
   rowsHtml += `<tr class="element-row" data-id="${rowId}"${
     parentId ? ` data-parent="${parentId}"` : ''
   }>`;
-  let elementCell = `<td style="${indentStyle} white-space: nowrap;">`;
+  let elementCell = `<td style="${indentStyle}">`;
   elementCell += `<span class="toggle-btn" data-target-id="${rowId}" style="margin-right:5px;display:inline-block;width:1em;text-align:center;font-weight:var(--font-weight-bold);cursor:pointer;color:#666;">-</span>`;
   elementCell += `<span class="tag-name">${escapeHtml(displayTagName)}</span>`;
   if (tagNameA && tagNameB && tagNameA !== tagNameB) {
@@ -623,23 +535,8 @@ export function renderComparisonRecursive(
   // --- テキストコンテンツを表示する行 ---
   const textA = nodeA?.textContent?.trim();
   const textB = nodeB?.textContent?.trim();
-  let hasMeaningfulTextA = false;
-  let hasMeaningfulTextB = false;
-
-  if (nodeA && nodeA.children.length === 0 && textA) {
-    let attrsTextA = '';
-    for (let i = 0; i < nodeA.attributes.length; i++) {
-      attrsTextA += nodeA.attributes[i].value;
-    }
-    if (textA !== attrsTextA.trim()) hasMeaningfulTextA = true;
-  }
-  if (nodeB && nodeB.children.length === 0 && textB) {
-    let attrsTextB = '';
-    for (let i = 0; i < nodeB.attributes.length; i++) {
-      attrsTextB += nodeB.attributes[i].value;
-    }
-    if (textB !== attrsTextB.trim()) hasMeaningfulTextB = true;
-  }
+  const hasMeaningfulTextA = hasMeaningfulNodeText(nodeA, textA);
+  const hasMeaningfulTextB = hasMeaningfulNodeText(nodeB, textB);
   const textRowDisplay = '';
   if (hasMeaningfulTextA || hasMeaningfulTextB) {
     if (showSingleColumn) {
@@ -651,16 +548,6 @@ export function renderComparisonRecursive(
       rowsHtml += `<td style="${attrIndentStyle}"><span class="text-label">(内容)</span></td>`;
       rowsHtml += `<td><span class="text-content">${displayText}</span></td>`;
       rowsHtml += '</tr>';
-
-      // ノードIDリストの座標展開
-      rowsHtml += renderNodeIdListCoordinateRows(
-        displayTagName,
-        hasMeaningfulTextA ? textA : null,
-        hasMeaningfulTextB ? textB : null,
-        showSingleColumn,
-        attrIndentStyle,
-        rowId,
-      );
     } else {
       // 比較表示の場合（従来通り）
       const displayTextA = hasMeaningfulTextA
@@ -677,17 +564,17 @@ export function renderComparisonRecursive(
       rowsHtml += `<td${highlightClass}><span class="text-content">${displayTextA}</span></td>`;
       rowsHtml += `<td${highlightClass}><span class="text-content">${displayTextB}</span></td>`;
       rowsHtml += '</tr>';
-
-      // ノードIDリストの座標展開
-      rowsHtml += renderNodeIdListCoordinateRows(
-        displayTagName,
-        hasMeaningfulTextA ? textA : null,
-        hasMeaningfulTextB ? textB : null,
-        showSingleColumn,
-        attrIndentStyle,
-        rowId,
-      );
     }
+
+    // ノードIDリストの座標展開（単一表示・比較表示で共通）
+    rowsHtml += renderNodeIdListCoordinateRows(
+      displayTagName,
+      hasMeaningfulTextA ? textA : null,
+      hasMeaningfulTextB ? textB : null,
+      showSingleColumn,
+      attrIndentStyle,
+      rowId,
+    );
   }
 
   // --- 子要素の行を再帰的に生成して追加 ---
@@ -698,87 +585,39 @@ export function renderComparisonRecursive(
     idB: effectiveValidationIdB,
   };
 
+  // 子要素の再帰描画（第3引数以降は全呼び出しで共通。null は自動判定させるため）
+  const renderChild = (childA, childB) =>
+    renderComparisonRecursive(
+      childA,
+      childB,
+      level + 1,
+      rowId,
+      showSingleColumn,
+      modelSource,
+      null,
+      childValidationContext,
+    );
+
+  // タグ名が異なる場合は別々に表示（通常は発生しないはず）
+  const renderChildPair = (childA, childB) =>
+    childA && childB && childA.tagName !== childB.tagName
+      ? renderChild(childA, null) + renderChild(null, childB)
+      : renderChild(childA, childB);
+
   // pos属性によるマッチングが必要かどうかを判定
   if (shouldUsePosMatching(childrenA, childrenB)) {
     // pos属性でマッチングして比較
     const matchedPairs = matchChildrenByPos(childrenA, childrenB);
 
     for (const { childA, childB } of matchedPairs) {
-      if (childA && childB && childA.tagName !== childB.tagName) {
-        // タグ名が異なる場合は別々に表示（通常は発生しないはず）
-        rowsHtml += renderComparisonRecursive(
-          childA,
-          null,
-          level + 1,
-          rowId,
-          showSingleColumn,
-          modelSource,
-          null, // 子要素では自動判定させる
-          childValidationContext,
-        );
-        rowsHtml += renderComparisonRecursive(
-          null,
-          childB,
-          level + 1,
-          rowId,
-          showSingleColumn,
-          modelSource,
-          null, // 子要素では自動判定させる
-          childValidationContext,
-        );
-      } else {
-        rowsHtml += renderComparisonRecursive(
-          childA,
-          childB,
-          level + 1,
-          rowId,
-          showSingleColumn,
-          modelSource,
-          null, // 子要素では自動判定させる
-          childValidationContext,
-        );
-      }
+      rowsHtml += renderChildPair(childA, childB);
     }
   } else {
     // 従来のインデックスベースの比較
     const maxLen = Math.max(childrenA.length, childrenB.length);
 
     for (let i = 0; i < maxLen; i++) {
-      const childA = childrenA[i] ?? null;
-      const childB = childrenB[i] ?? null;
-      if (childA && childB && childA.tagName !== childB.tagName) {
-        rowsHtml += renderComparisonRecursive(
-          childA,
-          null,
-          level + 1,
-          rowId,
-          showSingleColumn,
-          modelSource,
-          null, // 子要素では自動判定させる
-          childValidationContext,
-        );
-        rowsHtml += renderComparisonRecursive(
-          null,
-          childB,
-          level + 1,
-          rowId,
-          showSingleColumn,
-          modelSource,
-          null, // 子要素では自動判定させる
-          childValidationContext,
-        );
-      } else {
-        rowsHtml += renderComparisonRecursive(
-          childA,
-          childB,
-          level + 1,
-          rowId,
-          showSingleColumn,
-          modelSource,
-          null, // 子要素では自動判定させる
-          childValidationContext,
-        );
-      }
+      rowsHtml += renderChildPair(childrenA[i] ?? null, childrenB[i] ?? null);
     }
   }
 

@@ -11,7 +11,7 @@ import {
   setDisplayElementInfoFn,
   setCurrentEditingElement,
   getCurrentEditingElement,
-} from './EditMode.js';
+} from './editMode/index.js';
 import { buildSingleModelTitle, resolveElementInfoModelSide } from './DisplayModelResolver.js';
 import { escapeHtml } from '../../../utils/htmlUtils.js';
 import {

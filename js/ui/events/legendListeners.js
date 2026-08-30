@@ -13,6 +13,37 @@ import { createLogger } from '../../utils/logger.js';
 const log = createLogger('ui:events:legendListeners');
 const legendPanel = document.getElementById('legendPanel');
 
+/** 全凡例に共通の操作方法セクション */
+const CONTROLS_LEGEND_HTML = `
+      <hr />
+      <div class="legend-item">
+        <span><b>操作方法:</b></span>
+      </div>
+      <div class="legend-item">
+        <span>回転: 左ドラッグ</span>
+      </div>
+      <div class="legend-item">
+        <span>平行移動: 右ドラッグ</span>
+      </div>
+      <div class="legend-item">
+        <span>ズーム: ホイール</span>
+      </div>
+    `;
+
+/**
+ * 色見本付きの凡例項目を生成する
+ * @param {string} color - 見本の色
+ * @param {string} label - 項目名
+ * @returns {string} 凡例項目のHTML
+ */
+function legendItem(color, label) {
+  return `
+      <div class="legend-item">
+        <span class="legend-color" style="background-color: ${color};"></span>
+        <span>${label}</span>
+      </div>`;
+}
+
 /**
  * Toggle legend visibility
  */
@@ -90,29 +121,9 @@ function updateImportanceLegend(container) {
         const html = `
         <div class="panel-header">重要度別凡例</div>
         ${categories
-          .map(({ name, level }) => {
-            const color = colorManager.getImportanceColor(level);
-            return `
-            <div class="legend-item">
-              <span class="legend-color" style="background-color: ${color};"></span>
-              <span>${name}</span>
-            </div>
-          `;
-          })
+          .map(({ name, level }) => legendItem(colorManager.getImportanceColor(level), name))
           .join('')}
-        <hr />
-        <div class="legend-item">
-          <span><b>操作方法:</b></span>
-        </div>
-        <div class="legend-item">
-          <span>回転: 左ドラッグ</span>
-        </div>
-        <div class="legend-item">
-          <span>平行移動: 右ドラッグ</span>
-        </div>
-        <div class="legend-item">
-          <span>ズーム: ホイール</span>
-        </div>
+        ${CONTROLS_LEGEND_HTML}
       `;
         container.innerHTML = html;
       });
@@ -129,28 +140,9 @@ function updateElementLegend(container) {
     const html = `
       <div class="panel-header">部材別凡例</div>
       ${Object.entries(elementColors)
-        .map(
-          ([type, color]) => `
-        <div class="legend-item">
-          <span class="legend-color" style="background-color: ${color};"></span>
-          <span>${type}</span>
-        </div>
-      `,
-        )
+        .map(([type, color]) => legendItem(color, type))
         .join('')}
-      <hr />
-      <div class="legend-item">
-        <span><b>操作方法:</b></span>
-      </div>
-      <div class="legend-item">
-        <span>回転: 左ドラッグ</span>
-      </div>
-      <div class="legend-item">
-        <span>平行移動: 右ドラッグ</span>
-      </div>
-      <div class="legend-item">
-        <span>ズーム: ホイール</span>
-      </div>
+      ${CONTROLS_LEGEND_HTML}
     `;
     container.innerHTML = html;
   });
@@ -164,27 +156,9 @@ function updateSchemaLegend(container) {
     const schemaColors = getSchemaColors();
     const html = `
       <div class="panel-header">スキーマ検証凡例</div>
-      <div class="legend-item">
-        <span class="legend-color" style="background-color: ${schemaColors.valid};"></span>
-        <span>正常要素</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-color" style="background-color: ${schemaColors.error};"></span>
-        <span>エラー要素</span>
-      </div>
-      <hr />
-      <div class="legend-item">
-        <span><b>操作方法:</b></span>
-      </div>
-      <div class="legend-item">
-        <span>回転: 左ドラッグ</span>
-      </div>
-      <div class="legend-item">
-        <span>平行移動: 右ドラッグ</span>
-      </div>
-      <div class="legend-item">
-        <span>ズーム: ホイール</span>
-      </div>
+      ${legendItem(schemaColors.valid, '正常要素')}
+      ${legendItem(schemaColors.error, 'エラー要素')}
+      ${CONTROLS_LEGEND_HTML}
     `;
     container.innerHTML = html;
   });
@@ -198,31 +172,10 @@ function updateDiffLegend(container) {
   import('../../viewer/rendering/colorManager.js').then(({ colorManager }) => {
     const html = `
       <div class="panel-header">凡例</div>
-      <div class="legend-item">
-        <span class="legend-color" style="background-color: ${colorManager.getDiffColor('matched')};"></span>
-        <span>一致要素</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-color" style="background-color: ${colorManager.getDiffColor('onlyA')};"></span>
-        <span>モデルAのみ</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-color" style="background-color: ${colorManager.getDiffColor('onlyB')};"></span>
-        <span>モデルBのみ</span>
-      </div>
-      <hr />
-      <div class="legend-item">
-        <span><b>操作方法:</b></span>
-      </div>
-      <div class="legend-item">
-        <span>回転: 左ドラッグ</span>
-      </div>
-      <div class="legend-item">
-        <span>平行移動: 右ドラッグ</span>
-      </div>
-      <div class="legend-item">
-        <span>ズーム: ホイール</span>
-      </div>
+      ${legendItem(colorManager.getDiffColor('matched'), '一致要素')}
+      ${legendItem(colorManager.getDiffColor('onlyA'), 'モデルAのみ')}
+      ${legendItem(colorManager.getDiffColor('onlyB'), 'モデルBのみ')}
+      ${CONTROLS_LEGEND_HTML}
     `;
     container.innerHTML = html;
   });

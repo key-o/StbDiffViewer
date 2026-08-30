@@ -1,16 +1,16 @@
 /**
- * @fileoverview RC柱断面リストPDF出力モジュール
+ * @fileoverview 断面リストPDF出力モジュール
  *
- * html2canvasとjsPDFを使用してテーブルをPDFとして出力します。
+ * html2canvasとjsPDFを使用して柱・梁断面リストテーブルをPDFとして出力します。
  *
- * @module ui/sectionList/ColumnSectionListExporter
+ * @module ui/sectionList/SectionListPdfExporter
  */
 
 import { createLogger } from '../../../utils/logger.js';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
-const log = createLogger('ui/ColumnSectionListExporter');
+const log = createLogger('ui/SectionListPdfExporter');
 
 /**
  * テーブル要素をPDFとして出力
@@ -25,8 +25,10 @@ export async function exportToPdf(tableElement, filename = 'section-list.pdf') {
 
   log.info('Starting PDF export...');
 
-  // グリッドレイアウトか判定
-  const isGridLayout = tableElement.classList.contains('column-section-grid-table');
+  // グリッドレイアウトか判定（柱・梁共通）
+  const isGridLayout =
+    tableElement.classList.contains('column-section-grid-table') ||
+    tableElement.classList.contains('beam-section-grid-table');
 
   // テーブルのクローンを作成してスタイルを調整
   const wrapper = document.createElement('div');

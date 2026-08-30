@@ -24,5 +24,10 @@ export { BeamSectionListRenderer } from './BeamSectionListRenderer.js';
 
 export { BaseSectionListRenderer } from './BaseSectionListRenderer.js';
 
-export { exportToPdf, svgToImage } from './ColumnSectionListExporter.js';
-export { exportColumnSectionListToDxf } from './SectionListDxfExporter.js';
+export { BaseSectionListPanel } from './BaseSectionListPanel.js';
+
+export { exportToPdf, svgToImage } from './SectionListPdfExporter.js';
+export {
+  exportColumnSectionListToDxf,
+  exportBeamSectionListToDxf,
+} from './SectionListDxfExporter.js';

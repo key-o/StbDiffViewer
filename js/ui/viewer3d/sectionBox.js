@@ -2,33 +2,74 @@
  * @fileoverview セクションボックスUI統合モジュール
  *
  * セクションボックスのトグル制御と既存クリッピングとの連携を管理する。
+ * Renderable再生成後のclipping/stencil同期もこの境界で行う。
  *
  * @module ui/viewer3d/sectionBox
  */
 
 import * as THREE from 'three';
 import {
-  SectionBox,
   scene,
   getActiveCamera,
   renderer,
   controls,
   getModelBounds,
-  clearClippingPlanes,
   getCameraContext,
   getCameraMode,
+  elementGroups,
+  LifecycleSectionBox,
 } from '../../viewer/index.js';
+import { RenderableLifecycleEvents } from '../../constants/renderableLifecycleEvents.js';
 import { scheduleRender } from '../../utils/renderScheduler.js';
 import { showWarning } from '../common/toast.js';
 import { createLogger } from '../../utils/logger.js';
 import { eventBus } from '../../data/events/eventBus.js';
-import { ViewEvents } from '../../constants/eventTypes.js';
+import {
+  FinalizationEvents,
+  ModelEvents,
+  ViewEvents,
+} from '../../constants/eventTypes.js';
 import { CAMERA_CONTEXTS, CAMERA_MODES } from '../../constants/displayModes.js';
+import { resolveDrawingDepthAxis } from './sectionBoxHandleVisibility.js';
 
 const log = createLogger('ui:sectionBox');
 
-/** @type {SectionBox|null} */
+/** @type {LifecycleSectionBox|null} */
 let sectionBoxInstance = null;
+let lifecycleSyncQueued = false;
+let listenersInitialized = false;
+let currentViewDirection = null;
+
+function createSectionBoxInstance() {
+  return new LifecycleSectionBox(
+    scene,
+    () => getActiveCamera(),
+    renderer,
+    renderer.domElement,
+    controls,
+    // ClippingはScene全体へ適用する。elementGroups外にあるGridHelper等も
+    // 3D空間上の位置がSectionBox外なら描画させない。
+    () => scene,
+    // StencilCapは構造要素だけを入力とし、GridHelperや計測補助線を断面生成へ混ぜない。
+    () => elementGroups,
+  );
+}
+
+/**
+ * Geometry/Materialのバッチ更新後にSectionBox状態を1回だけ同期する。
+ * 複数イベントが同一tickで発生してもStencil再生成を重複させない。
+ */
+function queueSectionBoxLifecycleSync() {
+  if (lifecycleSyncQueued) return;
+  lifecycleSyncQueued = true;
+
+  globalThis.queueMicrotask(() => {
+    lifecycleSyncQueued = false;
+    if (!sectionBoxInstance?.isActive()) return;
+    sectionBoxInstance.syncRenderables();
+    scheduleRender();
+  });
+}
 
 /**
  * セクションボックスのON/OFFを切り替える
@@ -39,14 +80,14 @@ export function toggleSectionBox() {
     return;
   }
 
-  // 既存のクリッピング平面を解除
-  clearClippingPlanes();
-
   const modelBounds = getModelBounds();
   if (!modelBounds || modelBounds.isEmpty()) {
     showWarning('モデルが読み込まれていません');
     return;
   }
+
+  // 通常クリッピングはClippingStateManager側で保持する。
+  // SectionBox開始時にclearしないことで、解除時に元状態へ復帰できる。
 
   // モデル範囲に5%のマージンを追加
   const size = modelBounds.getSize(new THREE.Vector3());
@@ -55,17 +96,9 @@ export function toggleSectionBox() {
   expandedBox.min.sub(margin);
   expandedBox.max.add(margin);
 
-  const domElement = renderer.domElement;
-
-  sectionBoxInstance = new SectionBox(
-    scene,
-    () => getActiveCamera(),
-    renderer,
-    domElement,
-    controls,
-  );
+  sectionBoxInstance = createSectionBoxInstance();
   sectionBoxInstance.activate(expandedBox);
-  updateZHandleVisibility();
+  updateDepthHandleVisibility();
 
   updateToggleButtonState(true);
   updateHintVisibility(true);
@@ -122,9 +155,11 @@ export function activateSectionBoxForBounds(boundsData) {
     }
   }
 
-  // 既存インスタンスがある場合は範囲のみ更新（再生成コストを避ける）
+  // 既存インスタンスがある場合は範囲のみ更新（再生成コストを避ける）。
+  // updateBox()はhandle geometryを再生成するため、図面表示の奥行きhandle非表示も再適用する。
   if (sectionBoxInstance && sectionBoxInstance.isActive()) {
     sectionBoxInstance.updateBox(box3);
+    updateDepthHandleVisibility();
     scheduleRender();
     log.info('Section box updated for bounds', boundsData.type);
     return;
@@ -136,16 +171,9 @@ export function activateSectionBoxForBounds(boundsData) {
     sectionBoxInstance = null;
   }
 
-  const domElement = renderer.domElement;
-  sectionBoxInstance = new SectionBox(
-    scene,
-    () => getActiveCamera(),
-    renderer,
-    domElement,
-    controls,
-  );
+  sectionBoxInstance = createSectionBoxInstance();
   sectionBoxInstance.activate(box3);
-  updateZHandleVisibility();
+  updateDepthHandleVisibility();
 
   updateToggleButtonState(true);
   updateHintVisibility(true);
@@ -181,9 +209,11 @@ export function activateSectionBoxForBox(box3) {
   expandedBox.min.sub(margin);
   expandedBox.max.add(margin);
 
-  // 既存インスタンスがある場合は範囲のみ更新
+  // 既存インスタンスがある場合は範囲のみ更新。
+  // updateBox()でhandleが再生成されるため、現在の図面方向に応じた非表示も再適用する。
   if (sectionBoxInstance && sectionBoxInstance.isActive()) {
     sectionBoxInstance.updateBox(expandedBox);
+    updateDepthHandleVisibility();
     scheduleRender();
     log.info('Section box updated for selection');
     return;
@@ -195,19 +225,9 @@ export function activateSectionBoxForBox(box3) {
     sectionBoxInstance = null;
   }
 
-  // 既存のクリッピング平面を解除
-  clearClippingPlanes();
-
-  const domElement = renderer.domElement;
-  sectionBoxInstance = new SectionBox(
-    scene,
-    () => getActiveCamera(),
-    renderer,
-    domElement,
-    controls,
-  );
+  sectionBoxInstance = createSectionBoxInstance();
   sectionBoxInstance.activate(expandedBox);
-  updateZHandleVisibility();
+  updateDepthHandleVisibility();
 
   updateToggleButtonState(true);
   updateHintVisibility(true);
@@ -256,16 +276,48 @@ function updateHintVisibility(visible) {
   }
 }
 
+function getCameraDirection() {
+  const camera = getActiveCamera();
+  if (!camera) return null;
+  const direction = new THREE.Vector3();
+  camera.getWorldDirection(direction);
+  return direction;
+}
+
 /**
- * 正投影モード時に視線方向のハンドルを非表示にする
- * @param {string} [mode] - CAMERA_MODES.PERSPECTIVE または CAMERA_MODES.ORTHOGRAPHIC（省略時は現在のモードを使用）
+ * 図面表示（正投影）では、画面奥行きと平行なSectionBoxハンドルは
+ * 画面上のドラッグで変位を決められないため非表示にする。
+ *
+ * Top/Bottom: Z、Front/Back: Y、Right/Left: X を隠す。
+ * Iso/斜めビューでは単一world axisが奥行きにならないため全ハンドルを表示する。
+ * viewTypeが未通知の初期化経路では実カメラ方向からaxis-alignedの場合だけfallback判定する。
+ *
+ * @param {string} [mode]
+ * @param {string} [context]
+ * @param {string|null} [viewType]
  */
-function updateZHandleVisibility(mode, context = getCameraContext()) {
+function updateDepthHandleVisibility(
+  mode = getCameraMode(),
+  context = getCameraContext(),
+  viewType = currentViewDirection,
+) {
   if (!sectionBoxInstance || !sectionBoxInstance.isActive()) return;
-  const currentMode = mode ?? getCameraMode();
+
+  // 3D/立体表示へ戻した場合を含め、まず全方向を操作可能状態へ戻す。
+  for (const axis of ['x', 'y', 'z']) {
+    sectionBoxInstance.setHandleVisibilityByAxis(axis, true);
+  }
+
   const isDrawingOrthographic =
-    currentMode === CAMERA_MODES.ORTHOGRAPHIC && context === CAMERA_CONTEXTS.DRAWING;
-  sectionBoxInstance.setHandleVisibilityByAxis('z', !isDrawingOrthographic);
+    mode === CAMERA_MODES.ORTHOGRAPHIC && context === CAMERA_CONTEXTS.DRAWING;
+
+  if (isDrawingOrthographic) {
+    const depthAxis = resolveDrawingDepthAxis(viewType, getCameraDirection());
+    if (depthAxis) {
+      sectionBoxInstance.setHandleVisibilityByAxis(depthAxis, false);
+    }
+  }
+
   scheduleRender();
 }
 
@@ -273,7 +325,33 @@ function updateZHandleVisibility(mode, context = getCameraContext()) {
  * セクションボックスのイベントリスナーを初期化する
  */
 export function initSectionBoxEventListeners() {
+  if (listenersInitialized) return;
+  listenersInitialized = true;
+
   eventBus.on(ViewEvents.CAMERA_MODE_CHANGED, ({ mode, context }) => {
-    updateZHandleVisibility(mode, context);
+    updateDepthHandleVisibility(mode, context);
+  });
+
+  eventBus.on(ViewEvents.VIEW_DIRECTION_CHANGED, ({ viewType }) => {
+    currentViewDirection = viewType ?? null;
+    updateDepthHandleVisibility(undefined, undefined, currentViewDirection);
+  });
+
+  // group再生成完了単位のGeometryChangedを購読する。
+  eventBus.on(RenderableLifecycleEvents.GEOMETRY_CHANGED, queueSectionBoxLifecycleSync);
+
+  // Material差替えが同期・非同期を問わず完了した時点でStencil/Capを再構築する。
+  // COLOR_MODE_CHANGEDはUI状態通知として扱い、SectionBoxの完了判定には使用しない。
+  eventBus.on(RenderableLifecycleEvents.MATERIALS_CHANGED, queueSectionBoxLifecycleSync);
+
+  // モデル最終化後はMesh集合が入れ替わるため、現在のRenderable集合から
+  // clipping/stencilを再構築する。
+  eventBus.on(FinalizationEvents.COMPLETED, queueSectionBoxLifecycleSync);
+
+  // モデルclear時に旧geometryを参照するStencilを残さない。
+  eventBus.on(ModelEvents.CLEARED, () => {
+    if (sectionBoxInstance?.isActive()) {
+      deactivateSectionBox();
+    }
   });
 }

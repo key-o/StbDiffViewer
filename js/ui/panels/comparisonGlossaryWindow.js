@@ -90,60 +90,49 @@ function createGlossaryBodyHTML() {
         この範囲内であれば「一致」とみなします。オフセットを加算した後の最終座標に対して適用されます。
       </p>
 
-      <h4 class="glossary-h">断面の判定基準</h4>
+      <h4 class="glossary-h">断面の対応付け基準</h4>
       <p>
-        配置要素の対応が取れたペアについて、参照している断面を「同じ断面」とみなす条件です。
-        <strong>何を対応の拠り所にするか</strong>で3系統に分かれます。
+        配置要素の対応が取れたペアについて、参照している断面どうしを対応付けるための条件です。
+        形状や属性が一致したかどうかは、この設定とは別に対応付け後の比較結果へ表示します。
       </p>
       <div class="glossary-table-wrap">
         <table class="glossary-table">
           <thead>
-            <tr><th>系統</th><th>選択肢</th><th>拠り所・判定ロジック</th></tr>
+            <tr><th>選択肢</th><th>対応付けロジック</th></tr>
           </thead>
           <tbody>
             <tr>
-              <td rowspan="2"><strong>A. 配置要素に紐づく</strong></td>
               <td><strong>配置対応を継承</strong></td>
               <td>上段「配置要素の対応判定」で同一と判定されたペアの断面を同一とみなす（断面差は型差分として表示）</td>
             </tr>
             <tr>
-              <td><strong>配置対応を継承＋第一Node所属階</strong></td>
-              <td>上記に加え、配置要素の<strong>第一Node</strong>（線材=始点/下端、面材=頂点列先頭、点=自身）が所属する<strong>階名</strong>も一致条件に加える</td>
-            </tr>
-            <tr>
-              <td><strong>B. GUIDに紐づく</strong></td>
-              <td><strong>断面GUID</strong></td>
-              <td>断面要素の <code>guid</code> 属性で対応（同一ソフト・同一モデル向け。異ソフト間では一致しない）</td>
-            </tr>
-            <tr>
-              <td rowspan="5"><strong>C. 断面要素で独立</strong></td>
-              <td><strong>断面id</strong></td>
-              <td>断面参照ID <code>id_section</code> で対応（同一ソフト・同一モデル向け）</td>
-            </tr>
-            <tr>
               <td><strong>断面名称</strong></td>
-              <td>断面 <code>name</code>（符号）で対応（同符号・別形状は型差分として検出）</td>
+              <td>断面 <code>name</code>（符号）で対応</td>
             </tr>
             <tr>
-              <td><strong>名称＋階正準化（異ソフト間）</strong></td>
-              <td>断面名称で対応しつつ、断面定義ツリーの階を <code>StbStory</code> 標高で正準化し
-                  階名の表記差（1 / 1FL / Z01 等）を吸収する（別ソフト出力の同一建物比較向け）</td>
+              <td><strong>断面名称＋StbSecのFloor</strong></td>
+              <td>断面 <code>name</code> と断面要素自身の <code>floor</code> 属性で対応</td>
             </tr>
             <tr>
-              <td><strong>同一ジオメトリ形状</strong></td>
-              <td>生成される3D立体の外形（<strong>GSS</strong>）で対応。下記参照</td>
+              <td><strong>断面名称＋配置部材の所属階名</strong></td>
+              <td>断面 <code>name</code> と、配置要素の<strong>第一Node</strong>（線材=始点/下端、面材=頂点列先頭、点=自身）が所属する <code>StbStory</code> の階名で対応</td>
             </tr>
             <tr>
-              <td><strong>全属性</strong></td>
-              <td>断面の全構成属性（種別・寸法・材質・強度・鉄筋等）が一致する場合のみ同一とみなす</td>
+              <td><strong>断面GUID</strong></td>
+              <td>断面要素の <code>guid</code> 属性で対応（異ソフト間では通常一致しない）</td>
             </tr>
           </tbody>
         </table>
       </div>
       <p class="glossary-note">
         <strong>GSS（Geometry Shape Signature ＝ 同一ジオメトリ形状）</strong>:
-        断面から生成される3D立体の外形（RC外形／S形鋼プロファイル／SRC複合）が一致すれば同一断面とみなす指標です。
-        鉄筋配置・材質・強度・断面名は無視し、寸法は0.1mm精度で厳密一致を判定します。
+        対応付け後に、断面から生成される3D立体の外形（RC外形／S形鋼プロファイル／SRC複合）が
+        一致するかを示す比較結果です。鉄筋配置・材質・強度・断面名は無視し、寸法は0.1mm精度で判定します。
+        全構成属性の差分は別の比較結果として表示します。
+      </p>
+      <p class="glossary-note">
+        <strong>異ソフト間の階名表記差を吸収する</strong>は、断面定義の比較結果に使う独立した正規化設定です。
+        5つの断面対応付け基準そのものは変更しません。
       </p>
     </div>
   `;

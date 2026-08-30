@@ -2,332 +2,114 @@
  * @fileoverview RC柱断面リストパネル
  *
  * フローティングウィンドウとしてRC柱断面リストを表示するパネルコンポーネント。
- * FloatingWindowManagerを使用してウィンドウ管理を行います。
+ * 共通ロジックは BaseSectionListPanel が提供します。
  *
  * @module ui/sectionList/ColumnSectionListPanel
  */
 
-import { floatingWindowManager } from '../floatingWindowManager.js';
+import { BaseSectionListPanel } from './BaseSectionListPanel.js';
 import { extractColumnSectionGrid } from '../../../data/extractors/columnSectionListExtractor.js';
-import { ColumnSectionListRenderer } from './ColumnSectionListRenderer.js';
-import { exportToPdf } from './ColumnSectionListExporter.js';
+import { ConfiguredColumnSectionListRenderer } from './ConfiguredColumnSectionListRenderer.js';
 import { exportColumnSectionListToDxf } from './SectionListDxfExporter.js';
+import {
+  BASELINE_COLUMN_COVER_FACES,
+  normalizeColumnCoverFaces,
+} from './columnSectionCover.js';
 import { createLogger } from '../../../utils/logger.js';
-import { getState } from '../../../data/state/globalState.js';
-import { showWarning, showError } from '../../common/toast.js';
 
 const log = createLogger('ui/ColumnSectionListPanel');
-
-const WINDOW_ID = 'column-section-list-window';
+const COVER_KEYS = ['startX', 'endX', 'startY', 'endY'];
+const COVER_LABELS = {
+  startX: 'X始',
+  endX: 'X終',
+  startY: 'Y始',
+  endY: 'Y終',
+};
 
 /**
  * RC柱断面リストパネルクラス
  */
-export class ColumnSectionListPanel {
+export class ColumnSectionListPanel extends BaseSectionListPanel {
   constructor() {
-    this.renderer = new ColumnSectionListRenderer();
-    this.currentData = null;
-    this.currentDoc = null;
-    this.currentSource = 'A';
-    this.isInitialized = false;
-  }
-
-  /**
-   * パネルを初期化
-   */
-  init() {
-    if (this.isInitialized) return;
-
-    // ウィンドウHTMLを生成
-    this.createWindowElement();
-
-    // FloatingWindowManagerに登録
-    floatingWindowManager.registerWindow({
-      windowId: WINDOW_ID,
+    super({
+      windowId: 'column-section-list-window',
+      idPrefix: 'column-section-list',
+      title: 'RC柱断面リスト',
+      windowClass: 'column-section-list-window',
       toggleButtonId: 'showColumnSectionListBtn',
-      closeButtonId: `close-${WINDOW_ID}-btn`,
-      headerId: `${WINDOW_ID}-header`,
-      draggable: true,
-      resizable: true,
-      autoShow: false,
-      onShow: () => this.onShow(),
-      onHide: () => this.onHide(),
+      exportBaseName: 'rc-column-section-list',
+      tableSelectors: ['.column-section-grid-table', '.column-section-list-table'],
+      renderer: new ConfiguredColumnSectionListRenderer({
+        scaleDenominator: 40,
+        coverFaces: BASELINE_COLUMN_COVER_FACES,
+      }),
+      log,
     });
-
-    // イベントリスナーを設定
-    this.setupEventListeners();
-
-    this.isInitialized = true;
-    log.info('ColumnSectionListPanel initialized');
+    this.renderSettings.coverFaces = { ...BASELINE_COLUMN_COVER_FACES };
   }
 
-  /**
-   * ウィンドウ要素を生成
-   */
-  createWindowElement() {
-    const windowEl = document.createElement('div');
-    windowEl.id = WINDOW_ID;
-    windowEl.className = 'floating-window column-section-list-window hidden';
-    windowEl.innerHTML = `
-      <div class="float-window-header" id="${WINDOW_ID}-header">
-        <span class="float-window-title">RC柱断面リスト</span>
-        <div class="float-window-controls">
-          <button class="float-window-btn section-list-export-btn" id="section-list-export-pdf-btn" title="PDF出力">
-            PDF
-          </button>
-          <button class="float-window-btn section-list-export-btn" id="section-list-export-dxf-btn" title="DXF出力">
-            DXF
-          </button>
-          <button class="float-window-btn section-list-refresh-btn" id="section-list-refresh-btn" title="更新">
-            ↻
-          </button>
-          <button class="float-window-btn" id="close-${WINDOW_ID}-btn">✕</button>
-        </div>
-      </div>
-      <div class="float-window-content section-list-content">
-        <div class="section-list-toolbar">
-          <div class="section-list-source-selector">
-            <label>
-              <input type="radio" name="section-list-source" value="A" checked>
-              モデルA
-            </label>
-            <label>
-              <input type="radio" name="section-list-source" value="B">
-              モデルB
-            </label>
-          </div>
-          <div class="section-list-info" id="section-list-info"></div>
-        </div>
-        <div class="section-list-table-wrapper" id="section-list-table-container">
-          <div class="section-list-loading">データを読み込んでいます...</div>
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(windowEl);
+  /** @inheritdoc */
+  extractGrid(xmlDoc) {
+    return extractColumnSectionGrid(xmlDoc);
   }
 
-  /**
-   * イベントリスナーを設定
-   */
-  setupEventListeners() {
-    // PDF出力ボタン
-    const exportBtn = document.getElementById('section-list-export-pdf-btn');
-    if (exportBtn) {
-      exportBtn.addEventListener('click', () => this.handleExportPdf());
-    }
+  /** @inheritdoc */
+  getExtraSettingsHtml() {
+    const inputs = COVER_KEYS.map(
+      (key) => `
+        <label title="コンクリート面から外周HOOP芯までの作図かぶり (mm)">
+          ${COVER_LABELS[key]}
+          <input
+            id="${this.config.idPrefix}-cover-${key}"
+            type="number"
+            min="0"
+            step="1"
+            value="${BASELINE_COLUMN_COVER_FACES[key]}"
+            style="width:4.5em"
+          >
+        </label>`,
+    ).join('');
+    return `<span class="column-section-cover-settings">かぶり ${inputs}</span>`;
+  }
 
-    // DXF出力ボタン
-    const exportDxfBtn = document.getElementById('section-list-export-dxf-btn');
-    if (exportDxfBtn) {
-      exportDxfBtn.addEventListener('click', () => this.handleExportDxf());
-    }
-
-    // 更新ボタン
-    const refreshBtn = document.getElementById('section-list-refresh-btn');
-    if (refreshBtn) {
-      refreshBtn.addEventListener('click', () => this.refresh());
-    }
-
-    // ソース切り替え
-    const sourceRadios = document.querySelectorAll('input[name="section-list-source"]');
-    sourceRadios.forEach((radio) => {
-      radio.addEventListener('change', (e) => this.handleSourceChange(e.target.value));
+  /** @inheritdoc */
+  setupExtraListeners() {
+    COVER_KEYS.forEach((key) => {
+      const input = document.getElementById(`${this.config.idPrefix}-cover-${key}`);
+      input?.addEventListener('change', () => {
+        this.updateRenderSettingsFromControls();
+        this.rerenderCurrentData();
+      });
     });
   }
 
-  /**
-   * ウィンドウ表示時のコールバック
-   */
-  onShow() {
-    log.info('ColumnSectionListPanel shown');
-    this.refresh();
+  readCoverFacesFromControls() {
+    const values = Object.fromEntries(
+      COVER_KEYS.map((key) => {
+        const input = document.getElementById(`${this.config.idPrefix}-cover-${key}`);
+        return [key, input?.value];
+      }),
+    );
+    return normalizeColumnCoverFaces(values, this.renderSettings.coverFaces);
   }
 
-  /**
-   * ウィンドウ非表示時のコールバック
-   */
-  onHide() {
-    log.info('ColumnSectionListPanel hidden');
+  /** @inheritdoc */
+  applyExtraRenderSettings() {
+    this.renderSettings.coverFaces = this.readCoverFacesFromControls();
+    this.renderer.setCoverFaces(this.renderSettings.coverFaces);
   }
 
-  /**
-   * データソースを変更
-   * @param {string} source - 'A' または 'B'
-   */
-  handleSourceChange(source) {
-    this.currentSource = source;
-    log.info(`Source changed to: ${source}`);
-    this.refresh(source);
+  /** @inheritdoc */
+  getExtraInfoParts() {
+    const c = this.renderSettings.coverFaces;
+    return [`かぶり X始${c.startX}/X終${c.endX}/Y始${c.startY}/Y終${c.endY} mm`];
   }
 
-  /**
-   * データを更新・再描画
-   * @param {string} [source] - データソース（'A' または 'B'）
-   */
-  refresh(source) {
-    const container = document.getElementById('section-list-table-container');
-    const infoEl = document.getElementById('section-list-info');
-
-    if (!container) return;
-
-    // ソースを取得
-    if (!source) {
-      const checkedRadio = document.querySelector('input[name="section-list-source"]:checked');
-      source = checkedRadio ? checkedRadio.value : 'A';
-    }
-
-    // XMLドキュメントを取得
-    const xmlDoc = source === 'A' ? getState('models.documentA') : getState('models.documentB');
-
-    if (!xmlDoc) {
-      const emptyDiv = document.createElement('div');
-      emptyDiv.className = 'section-list-empty';
-      emptyDiv.textContent = `モデル${source}が読み込まれていません`;
-      container.innerHTML = '';
-      container.appendChild(emptyDiv);
-      if (infoEl) infoEl.textContent = '';
-      return;
-    }
-
-    // ローディング表示
-    const loadingDiv = document.createElement('div');
-    loadingDiv.className = 'section-list-loading';
-    loadingDiv.textContent = 'データを抽出しています...';
-    container.innerHTML = '';
-    container.appendChild(loadingDiv);
-
-    // 非同期で処理（UIブロックを避ける）
-    setTimeout(() => {
-      try {
-        // グリッド形式でデータを抽出
-        this.currentData = extractColumnSectionGrid(xmlDoc);
-        this.currentDoc = xmlDoc;
-
-        // 情報を更新（階 × 符号の形式）
-        if (infoEl) {
-          const floorCount = this.currentData.stories?.length || 0;
-          const symbolCount = this.currentData.symbols?.length || 0;
-          infoEl.textContent = `${floorCount}階 × ${symbolCount}符号`;
-        }
-
-        // コンテナにgrid-modeクラスを追加（CSS用）
-        container.classList.add('grid-mode');
-
-        // グリッド形式でテーブルをレンダリング
-        this.renderer.renderGrid(this.currentData, container);
-
-        log.info('Section grid rendered', {
-          floors: this.currentData.stories?.length,
-          symbols: this.currentData.symbols?.length,
-          totalCells:
-            (this.currentData.stories?.length || 0) * (this.currentData.symbols?.length || 0),
-        });
-      } catch (error) {
-        log.error('Error rendering section grid:', error);
-        const errorDiv = document.createElement('div');
-        errorDiv.className = 'section-list-error';
-        errorDiv.textContent = `エラー: ${error.message}`;
-        container.innerHTML = '';
-        container.appendChild(errorDiv);
-      }
-    }, 10);
-  }
-
-  /**
-   * PDF出力を処理
-   */
-  async handleExportPdf() {
-    const tableContainer = document.getElementById('section-list-table-container');
-    const table =
-      tableContainer?.querySelector('.column-section-grid-table') ||
-      tableContainer?.querySelector('.column-section-list-table');
-
-    if (!table) {
-      showWarning('出力するテーブルがありません。');
-      return;
-    }
-
-    const exportBtn = document.getElementById('section-list-export-pdf-btn');
-    if (exportBtn) {
-      exportBtn.disabled = true;
-      exportBtn.textContent = '...';
-    }
-
-    try {
-      await exportToPdf(table, 'rc-column-section-list.pdf');
-      log.info('PDF exported successfully');
-    } catch (error) {
-      log.error('PDF export failed:', error);
-      showError(`PDF出力に失敗しました: ${error.message}`);
-    } finally {
-      if (exportBtn) {
-        exportBtn.disabled = false;
-        exportBtn.textContent = 'PDF';
-      }
-    }
-  }
-
-  /**
-   * DXF出力を処理
-   */
-  async handleExportDxf() {
-    if (!this.currentData) {
-      showWarning('出力するデータがありません。');
-      return;
-    }
-
-    const exportBtn = document.getElementById('section-list-export-dxf-btn');
-    if (exportBtn) {
-      exportBtn.disabled = true;
-      exportBtn.textContent = '...';
-    }
-
-    try {
-      const source = this.currentSource || 'A';
-      const fileKey = source === 'A' ? 'files.originalFileA' : 'files.originalFileB';
-      const file = getState(fileKey);
-      const stbName = file?.name ? file.name.replace(/\.[^/.]+$/, '') : '';
-      await exportColumnSectionListToDxf(this.currentData, 'rc-column-section-list', stbName);
-      log.info('DXF exported successfully');
-    } catch (error) {
-      log.error('DXF export failed:', error);
-      showError(`DXF出力に失敗しました: ${error.message}`);
-    } finally {
-      if (exportBtn) {
-        exportBtn.disabled = false;
-        exportBtn.textContent = 'DXF';
-      }
-    }
-  }
-
-  /**
-   * パネルを表示
-   */
-  show() {
-    floatingWindowManager.showWindow(WINDOW_ID);
-  }
-
-  /**
-   * パネルを非表示
-   */
-  hide() {
-    floatingWindowManager.hideWindow(WINDOW_ID);
-  }
-
-  /**
-   * パネルの表示/非表示を切り替え
-   */
-  toggle() {
-    floatingWindowManager.toggleWindow(WINDOW_ID);
-  }
-
-  /**
-   * パネルが表示されているか確認
-   * @returns {boolean}
-   */
-  isVisible() {
-    return floatingWindowManager.isWindowVisible(WINDOW_ID);
+  /** @inheritdoc */
+  async exportDxf(gridData, filename, stbName) {
+    await exportColumnSectionListToDxf(gridData, filename, stbName, {
+      coverFaces: this.renderSettings.coverFaces,
+    });
   }
 }
 

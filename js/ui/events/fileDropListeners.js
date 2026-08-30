@@ -59,7 +59,7 @@ function extractAcceptedFiles(dataTransfer) {
  */
 function assignFileToInput(inputId, file) {
   const input = document.getElementById(inputId);
-  if (!input) {
+  if (!input || input.disabled) {
     return false;
   }
 
@@ -146,6 +146,7 @@ function setupCanvasDropHint() {
 
   // 中央の読込ボタン: 既存の比較フロー（compareButton）に委譲する
   loadBtn?.addEventListener('click', () => {
+    if (document.getElementById('compareButton')?.disabled) return;
     if (typeof window.handleCompareModelsClick === 'function') {
       window.handleCompareModelsClick();
     } else {

@@ -234,7 +234,7 @@ export class FilterStatusIndicator {
   }
 
   addStyles() {
-    // スタイルは stb-diff-viewer/style/components/importance.css で定義
+    // スタイルは style/components/importance-*.css で定義
   }
 
   setupEventListeners() {

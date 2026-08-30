@@ -16,33 +16,12 @@ import {
   requestStbSaveFileHandle,
 } from '../../../common-stb/export/xmlFormatter.js';
 import { createLogger } from '../../../utils/logger.js';
+import {
+  normalizeStbVersion as normalizeVersion,
+  toStbVersionFilenameToken as versionToFilenameToken,
+} from '../../../common-stb/version/stbVersion.js';
 
 const log = createLogger('ui:events:exportHandlers:stbExportHandler');
-
-/**
- * バージョン文字列を正規化
- * @param {string} version - バージョン文字列
- * @returns {string} 正規化されたバージョン
- */
-function normalizeVersion(version) {
-  const v = version.toLowerCase().replace(/^v/, '');
-  if (v === '202' || v === '2.0' || v.startsWith('2.0.')) return '2.0.2';
-  if (v === '210' || v === '2.1' || v.startsWith('2.1.')) return '2.1.0';
-  return v;
-}
-
-/**
- * バージョン文字列をファイル名用トークンに変換
- * @param {string} version - バージョン文字列
- * @returns {string} ファイル名用トークン
- */
-function versionToFilenameToken(version) {
-  const normalized = normalizeVersion(version);
-  if (normalized === '2.0.2') return 'v202';
-  if (normalized === '2.1.0') return 'v210';
-  if (normalized === '2.1.1') return 'v211';
-  return normalized ? `v${normalized.replace(/\D/g, '')}` : '';
-}
 
 /**
  * 正規表現用に文字列をエスケープ

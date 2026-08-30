@@ -39,12 +39,19 @@ export function initializeContextMenu() {
 
   // グローバルクリックでメニューを閉じる
   document.addEventListener('click', hideContextMenu);
-  document.addEventListener('contextmenu', (e) => {
-    // メニュー外での右クリックは閉じる
-    if (menuElement && !menuElement.contains(e.target)) {
-      hideContextMenu();
-    }
-  });
+  // メニュー外での右クリックは閉じる。
+  // captureフェーズで登録: バブリングだと、canvas等のcontextmenuハンドラーが
+  // showContextMenu() した直後に同じイベントがdocumentへ到達して即閉じてしまい、
+  // メニューが一度も表示されない。captureなら「閉じる判定→表示」の順になる。
+  document.addEventListener(
+    'contextmenu',
+    (e) => {
+      if (menuElement && !menuElement.contains(e.target)) {
+        hideContextMenu();
+      }
+    },
+    true,
+  );
 
   // ESCキーでメニューを閉じる
   document.addEventListener('keydown', (e) => {

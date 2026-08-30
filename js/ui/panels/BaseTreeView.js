@@ -8,6 +8,7 @@
 
 import { createSearchUI } from './treeSearch.js';
 import { initializeContextMenu } from '../common/contextMenu.js';
+import { VirtualScrollManager } from '../common/virtualScroll.js';
 import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('ui:panels:BaseTreeView');
@@ -90,10 +91,7 @@ export class BaseTreeView {
   clearTreeContent() {
     if (!this.treeContainer) return;
 
-    for (const manager of this.virtualScrollManagers.values()) {
-      manager.destroy();
-    }
-    this.virtualScrollManagers.clear();
+    this._destroyAllVirtualScrollManagers();
 
     const children = Array.from(this.treeContainer.children);
     children.forEach((child) => {
@@ -107,6 +105,8 @@ export class BaseTreeView {
    * ツリー全体をクリア
    */
   clearTree() {
+    this._destroyAllVirtualScrollManagers();
+
     if (this.treeContainer) {
       while (this.treeContainer.firstChild) {
         this.treeContainer.removeChild(this.treeContainer.firstChild);
@@ -128,6 +128,87 @@ export class BaseTreeView {
     if (this.searchUI) {
       this.searchUI.updateResultCount(filtered, total);
     }
+  }
+
+  /**
+   * 要素一覧を通常描画または仮想スクロール描画する。
+   *
+   * @param {HTMLElement} container - 描画先コンテナ
+   * @param {Array} items - 描画対象
+   * @param {Object} options - 描画オプション
+   * @param {string} options.managerKey - マネージャー登録キー
+   * @param {Function} options.renderItem - 1件分のDOMを生成する関数
+   * @param {number} [options.threshold=this.config.virtualScrollThreshold] - 適用閾値
+   * @param {number} [options.itemHeight=this.config.virtualItemHeight] - 1件の高さ
+   * @param {number} [options.bufferSize] - 表示領域外のバッファ件数
+   * @param {boolean} [options.lazyInitialize=false] - 初回展開まで初期化を遅延するか
+   * @param {Object} [options.virtualContainerStyle] - 仮想スクロール時のコンテナstyle
+   * @returns {VirtualScrollManager|null} 仮想スクロールを使う場合のマネージャー
+   */
+  _renderItemCollection(container, items, options) {
+    const {
+      managerKey,
+      renderItem,
+      threshold = this.config.virtualScrollThreshold,
+      itemHeight = this.config.virtualItemHeight,
+      bufferSize,
+      lazyInitialize = false,
+      virtualContainerStyle = {},
+    } = options;
+
+    this._destroyVirtualScrollManager(managerKey);
+
+    if (items.length < threshold) {
+      items.forEach((item, index) => {
+        const node = renderItem(item, index);
+        if (node) container.appendChild(node);
+      });
+      return null;
+    }
+
+    Object.assign(container.style, virtualContainerStyle);
+    const manager = new VirtualScrollManager(container, {
+      threshold,
+      itemHeight,
+      bufferSize,
+      renderItem,
+    });
+    this._registerVirtualScrollManager(managerKey, manager);
+
+    if (!lazyInitialize) {
+      manager.initialize(items);
+    }
+    return manager;
+  }
+
+  /** @param {string} key @param {VirtualScrollManager} manager */
+  _registerVirtualScrollManager(key, manager) {
+    this.virtualScrollManagers.set(key, manager);
+  }
+
+  /** @param {string} key */
+  _destroyVirtualScrollManager(key) {
+    const manager = this.virtualScrollManagers.get(key);
+    if (manager) {
+      manager.destroy();
+      this.virtualScrollManagers.delete(key);
+    }
+  }
+
+  _destroyAllVirtualScrollManagers() {
+    for (const manager of this.virtualScrollManagers.values()) {
+      manager.destroy();
+    }
+    this.virtualScrollManagers.clear();
+  }
+
+  /**
+   * 複数の識別子から衝突しないマネージャーキーを作成する。
+   * @param {...string} parts - キーを構成する識別子
+   * @returns {string} マネージャーキー
+   */
+  _createVirtualScrollManagerKey(...parts) {
+    return JSON.stringify(parts);
   }
 
   // --- テンプレートメソッド（サブクラスでオーバーライド） ---

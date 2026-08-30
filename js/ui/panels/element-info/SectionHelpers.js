@@ -209,14 +209,14 @@ export function extractSectionData(sectionNode) {
 }
 
 /**
- * 選択中の断面一致基準を示す小行を生成する（F1: 表示を設定に追従）。
+ * 選択中の断面対応付け基準を示す小行を生成する（F1: 表示を設定に追従）。
  * criterionLabel が無い場合は空文字（Phase 1 の後方互換）。
  * @param {string|null} criterionLabel - 断面一致基準の表示名
  * @returns {string} HTML（テーブルセル内の div 行）
  */
 function renderSelectedCriterionLine(criterionLabel) {
   if (!criterionLabel) return '';
-  return `<div style="margin-top: 2px; color: #777; font-size: var(--font-size-sm);">断面一致基準（設定）: <strong>${escapeHtml(
+  return `<div style="margin-top: 2px; color: #777; font-size: var(--font-size-sm);">断面の対応付け基準（設定）: <strong>${escapeHtml(
     criterionLabel,
   )}</strong></div>`;
 }
@@ -272,7 +272,7 @@ export function generateGeometryEquivalenceSection(geom, criterionLabel = null) 
  */
 export function generateEquivalenceSection(result, criterionLabel = null) {
   const statusColor = result.isEquivalent ? '#28a745' : '#dc3545';
-  const statusText = result.isEquivalent ? '✓ 等価' : '✗ 非等価';
+  const statusText = result.isEquivalent ? '✓ 概略属性等価' : '✗ 概略属性非等価';
   const statusBg = result.isEquivalent ? 'rgba(40, 167, 69, 0.1)' : 'rgba(220, 53, 69, 0.1)';
 
   let html = `
@@ -284,7 +284,8 @@ export function generateEquivalenceSection(result, criterionLabel = null) {
             <span style="margin-left: 10px; color: #666; font-size: var(--font-size-sm);">${result.summary} (${result.passRate}%)</span>
           </div>
         </div>
-        <div style="margin-top: 4px; color: #555; font-size: var(--font-size-sm);">断面判定基準: <strong>断面種別・寸法・材質・強度</strong></div>
+        <div style="margin-top: 4px; color: #555; font-size: var(--font-size-sm);">概略属性の判定基準: <strong>断面種別・寸法・材質・強度</strong></div>
+        <div style="color: #777; font-size: var(--font-size-sm);">全構成属性の差分は下の比較表に表示します</div>
         ${renderSelectedCriterionLine(criterionLabel)}
       </td>
     </tr>

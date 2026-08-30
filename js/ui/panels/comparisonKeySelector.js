@@ -37,16 +37,18 @@ export function initializeComparisonKeySelector(containerSelector, onKeyTypeChan
     return;
   }
 
-  // 現在の設定を取得（異ソフト間は断面一致基準 NAME_FLOOR_CANONICAL が crossSoftwareConfig を同期）
+  // 現在の配置要素・断面対応・通り芯階の各基準を取得
   const currentKeyType = comparisonKeyManager.getKeyType();
   const currentSectionCriterion = comparisonKeyManager.getSectionMatchCriterion();
   const currentStoryAxisCriterion = comparisonKeyManager.getStoryAxisMatchCriterion();
+  const currentCrossSoftwareMode = comparisonKeyManager.getCrossSoftwareMode();
 
   // UIを作成
   const selectorHTML = createSelectorHTML(
     currentKeyType,
     currentSectionCriterion,
     currentStoryAxisCriterion,
+    currentCrossSoftwareMode,
   );
   container.innerHTML = selectorHTML;
 
@@ -99,7 +101,12 @@ function createRadioGroupHTML(enumObj, labels, descriptions, radioName, currentV
  * @param {string} currentKeyType - 現在のキータイプ
  * @returns {string} HTML文字列
  */
-function createSelectorHTML(currentKeyType, currentSectionCriterion, currentStoryAxisCriterion) {
+function createSelectorHTML(
+  currentKeyType,
+  currentSectionCriterion,
+  currentStoryAxisCriterion,
+  currentCrossSoftwareMode,
+) {
   return `
     <div class="comparison-key-selector">
       <div class="selector-header">
@@ -124,7 +131,7 @@ function createSelectorHTML(currentKeyType, currentSectionCriterion, currentStor
           <label class="selector-label">断面比較</label>
         </div>
         <div class="selector-subheader">
-          <label class="selector-sublabel">断面の判定基準（部材）:</label>
+          <label class="selector-sublabel">断面の対応付け基準（部材）:</label>
         </div>
         <div class="selector-options">
           ${createRadioGroupHTML(
@@ -134,6 +141,24 @@ function createSelectorHTML(currentKeyType, currentSectionCriterion, currentStor
             'sectionMatchCriterion',
             currentSectionCriterion,
           )}
+        </div>
+        <div class="selector-info">
+          <small>
+            ※ 対応付け後の「同一ジオメトリ形状」「全属性の差分」は、設定条件ではなく比較結果として表示します
+          </small>
+        </div>
+      </div>
+
+      <div class="selector-group selector-group-cross-software">
+        <div class="selector-header">
+          <label class="selector-label">断面定義の結果正規化:</label>
+        </div>
+        <label class="checkbox-label">
+          <input type="checkbox" name="crossSoftwareMode" ${currentCrossSoftwareMode ? 'checked' : ''} />
+          <span>異ソフト間の階名表記差を吸収する</span>
+        </label>
+        <div class="selector-info">
+          <small>StbSec.floor を StbStory の標高・順序で正規化します（断面の対応付け基準とは独立）</small>
         </div>
       </div>
 
@@ -204,6 +229,20 @@ function setupEventListeners(container, onKeyTypeChanged) {
   document.addEventListener(COMPARISON_KEY_EVENTS.SECTION_MATCH_CRITERION_CHANGED, (event) => {
     const { newCriterion } = event.detail;
     updateUISelection(container, 'sectionMatchCriterion', newCriterion);
+  });
+
+  const crossSoftwareCheckbox = container.querySelector('input[name="crossSoftwareMode"]');
+  crossSoftwareCheckbox?.addEventListener('change', (event) => {
+    const success = comparisonKeyManager.setCrossSoftwareMode(event.target.checked);
+    if (!success) {
+      event.target.checked = comparisonKeyManager.getCrossSoftwareMode();
+      showError('階名正規化設定の変更に失敗しました。');
+    }
+  });
+
+  document.addEventListener(COMPARISON_KEY_EVENTS.CROSS_SOFTWARE_MODE_CHANGED, (event) => {
+    const checkbox = container.querySelector('input[name="crossSoftwareMode"]');
+    if (checkbox) checkbox.checked = event.detail.enabled;
   });
 
   // 通り芯・階の判定基準のラジオ

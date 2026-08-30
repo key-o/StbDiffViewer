@@ -9,71 +9,60 @@
 import { scheduleRender } from '../../utils/renderScheduler.js';
 import { setModelVisibility } from '../../app/viewModes/index.js';
 
-// --- UI Element References ---
-const toggleModelACheckbox = document.getElementById('toggleModelA');
-const toggleModelBCheckbox = document.getElementById('toggleModelB');
+function createModelToggleDefinition(model) {
+  return {
+    model,
+    checkbox: document.getElementById(`toggleModel${model}`),
+    handleChange(event) {
+      setModelVisibility(model, event.target.checked, scheduleRender);
+    },
+  };
+}
+
+const modelToggleDefinitions = [createModelToggleDefinition('A'), createModelToggleDefinition('B')];
+
+function getModelToggleDefinition(model) {
+  return modelToggleDefinitions.find((definition) => definition.model === model);
+}
 
 /**
  * Setup model visibility toggle listeners
  */
 export function setupModelVisibilityListeners() {
-  if (toggleModelACheckbox) {
-    toggleModelACheckbox.addEventListener('change', handleModelAToggle);
-  }
-
-  if (toggleModelBCheckbox) {
-    toggleModelBCheckbox.addEventListener('change', handleModelBToggle);
-  }
+  modelToggleDefinitions.forEach(({ checkbox, handleChange }) => {
+    checkbox?.addEventListener('change', handleChange);
+  });
 }
 
 /**
  * Teardown model visibility toggle listeners
  */
 export function teardownModelVisibilityListeners() {
-  if (toggleModelACheckbox) {
-    toggleModelACheckbox.removeEventListener('change', handleModelAToggle);
-  }
-  if (toggleModelBCheckbox) {
-    toggleModelBCheckbox.removeEventListener('change', handleModelBToggle);
-  }
+  modelToggleDefinitions.forEach(({ checkbox, handleChange }) => {
+    checkbox?.removeEventListener('change', handleChange);
+  });
 }
 
-/**
- * Handle Model A visibility toggle
- * @param {Event} event - Change event
- */
-function handleModelAToggle(event) {
-  const isVisible = event.target.checked;
-  setModelVisibility('A', isVisible, scheduleRender);
-}
-
-/**
- * Handle Model B visibility toggle
- * @param {Event} event - Change event
- */
-function handleModelBToggle(event) {
-  const isVisible = event.target.checked;
-  setModelVisibility('B', isVisible, scheduleRender);
+function toggleModelVisibility(model) {
+  const checkbox = getModelToggleDefinition(model)?.checkbox;
+  if (checkbox) {
+    checkbox.checked = !checkbox.checked;
+    checkbox.dispatchEvent(new Event('change'));
+  }
 }
 
 /**
  * Toggle Model A visibility programmatically
  */
 export function toggleModelAVisibility() {
-  if (toggleModelACheckbox) {
-    toggleModelACheckbox.checked = !toggleModelACheckbox.checked;
-    toggleModelACheckbox.dispatchEvent(new Event('change'));
-  }
+  toggleModelVisibility('A');
 }
 
 /**
  * Toggle Model B visibility programmatically
  */
 export function toggleModelBVisibility() {
-  if (toggleModelBCheckbox) {
-    toggleModelBCheckbox.checked = !toggleModelBCheckbox.checked;
-    toggleModelBCheckbox.dispatchEvent(new Event('change'));
-  }
+  toggleModelVisibility('B');
 }
 
 /**
@@ -81,8 +70,10 @@ export function toggleModelBVisibility() {
  * @returns {{ modelA: boolean, modelB: boolean }} Visibility status
  */
 export function getModelVisibilityStatus() {
+  const modelA = getModelToggleDefinition('A');
+  const modelB = getModelToggleDefinition('B');
   return {
-    modelA: !!toggleModelACheckbox,
-    modelB: !!toggleModelBCheckbox,
+    modelA: !!modelA?.checkbox,
+    modelB: !!modelB?.checkbox,
   };
 }

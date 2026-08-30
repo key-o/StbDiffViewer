@@ -141,6 +141,7 @@ export class VirtualScrollManager {
    * @private
    */
   _updateContainerHeight() {
+    if (!this.viewport) return;
     this.containerHeight = this.viewport.clientHeight;
   }
 
@@ -149,6 +150,7 @@ export class VirtualScrollManager {
    * @private
    */
   _onScroll() {
+    if (!this.viewport) return;
     this.scrollTop = this.viewport.scrollTop;
     this._render();
   }
@@ -321,20 +323,26 @@ export class VirtualScrollManager {
    */
   _debounce(func, wait) {
     let timeout;
-    return function executedFunction(...args) {
+    const debounced = function executedFunction(...args) {
       const later = () => {
-        clearTimeout(timeout);
+        timeout = undefined;
         func(...args);
       };
       clearTimeout(timeout);
       timeout = setTimeout(later, wait);
     };
+    debounced.cancel = () => {
+      clearTimeout(timeout);
+      timeout = undefined;
+    };
+    return debounced;
   }
 
   /**
    * クリーンアップ
    */
   destroy() {
+    this.handleScroll.cancel?.();
     if (this.viewport) {
       this.viewport.removeEventListener('scroll', this.handleScroll);
     }

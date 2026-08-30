@@ -12,7 +12,7 @@
  * 保守性とパフォーマンスを向上させます。
  */
 
-import { getState, setState } from '../../data/state/globalState.js';
+import { getState } from '../../data/state/globalState.js';
 import { getAllLabels, addLabelsToGlobalState, removeLabelsForElementType } from '../state.js';
 import { getCurrentStorySelection } from './selectors.js';
 import { renderingController } from '../../app/controllers/renderingController.js';
@@ -49,72 +49,18 @@ export function initializeLabelManager(options = {}) {
 
   regenerateAllLabelsImpl = options.regenerateAllLabels || regenerateAllLabelsImpl;
 
-  // ラベル内容選択リスナーを設定
-  setupLabelContentListener();
-
-  // 各要素タイプのラベル表示/非表示リスナーを設定
-  setupLabelToggleListeners();
-
   log.info('[LabelManager] Label management system initialized');
 }
 
 /**
- * ラベル内容変更リスナーを設定
+ * 注入済みの実装で全ラベルを再生成する
  */
-function setupLabelContentListener() {
-  const labelContentSelector = document.getElementById('labelContentSelector');
-
-  if (labelContentSelector) {
-    labelContentSelector.addEventListener('change', handleLabelContentChange);
-    log.info('[LabelManager] Label content listener setup complete');
-  } else {
-    log.warn('[LabelManager] Label content selector not found');
-  }
-}
-
-/**
- * 各要素タイプのラベル表示/非表示リスナーを設定
- * LABEL_ELEMENTSはelementTypes.jsで定義（SSOT）
- */
-function setupLabelToggleListeners() {
-  LABEL_ELEMENTS.forEach((type) => {
-    const checkbox = document.getElementById(`toggleLabel-${type}`);
-    if (checkbox) {
-      checkbox.addEventListener('change', () => handleLabelToggleChange(type));
-    }
-  });
-
-  log.info('[LabelManager] Label toggle listeners setup complete');
-}
-
-/**
- * ラベル内容変更を処理
- * @param {Event} event - 変更イベント
- */
-function handleLabelContentChange(event) {
-  const newContentType = event.target.value;
-  log.info(`[LabelManager] Label content changed to: ${newContentType}`);
-
-  // グローバル状態を更新
-  setState('ui.labelContentType', newContentType);
-
-  // 全ラベルを再生成・更新（初期化時に注入された実装を使用）
+export function regenerateAllLabels() {
   if (regenerateAllLabelsImpl) {
     regenerateAllLabelsImpl();
   } else {
     log.warn('[LabelManager] regenerateAllLabels が未注入のため再生成をスキップ');
   }
-}
-
-/**
- * ラベル表示/非表示変更を処理
- * @param {string} elementType - 要素タイプ
- */
-function handleLabelToggleChange(elementType) {
-  log.info(`[LabelManager] Label toggle changed for: ${elementType}`);
-
-  // 該当要素タイプのラベル表示を更新
-  updateLabelVisibilityForType(elementType);
 }
 
 // generateLabelText, generateIdLabel, generateNameLabel, generateSectionLabel は
@@ -176,34 +122,6 @@ function performLabelVisibilityUpdate() {
   if (visibleCount > 0 || hiddenCount > 0) {
     log.info(`[LabelManager] Updated: ${visibleCount} shown, ${hiddenCount} hidden`);
   }
-
-  // 再描画をリクエスト
-  scheduleRender();
-}
-
-/**
- * 特定要素タイプのラベル表示を更新
- * @param {string} elementType - 要素タイプ
- */
-function updateLabelVisibilityForType(elementType) {
-  const allLabels = getAllLabels();
-  const typeLabels = allLabels.filter(
-    (label) => label && label.userData && label.userData.elementType === elementType,
-  );
-
-  const isVisible = isLabelTypeVisible(elementType);
-
-  typeLabels.forEach((label) => {
-    if (label.userData.labelBaseVisible !== isVisible || label.visible !== isVisible) {
-      setLabelBaseVisibility(label, isVisible);
-    }
-  });
-
-  log.info(
-    `[LabelManager] Updated ${
-      typeLabels.length
-    } ${elementType} labels to ${isVisible ? 'visible' : 'hidden'}`,
-  );
 
   // 再描画をリクエスト
   scheduleRender();
@@ -295,8 +213,7 @@ function isLabelModelVisible(label) {
   return true;
 }
 
-// regenerateAllLabels は ui/viewer3d/labelRegeneration.js が実体を提供する
-// （旧ラッパーは labelRegeneration との循環依存解消のため削除）
+// regenerateAllLabels の実体は循環依存を避けるため初期化時に注入される
 
 /**
  * ラベル内容タイプの説明を取得

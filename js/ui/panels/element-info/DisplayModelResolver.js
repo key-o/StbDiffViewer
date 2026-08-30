@@ -179,5 +179,7 @@ export function buildSingleColumnHeaderHtml(labelColumnText, modelSide) {
  * @returns {string}
  */
 export function buildComparisonHeaderHtml(labelColumnText) {
-  return `<thead><tr><th style="width: 40%;">${labelColumnText}</th><th style="width: 30%;">モデル A</th><th style="width: 30%;">モデル B</th></tr></thead>`;
+  const labelA = escapeHtml(getElementInfoModelLabel('A'));
+  const labelB = escapeHtml(getElementInfoModelLabel('B'));
+  return `<thead><tr><th style="width: 40%;">${labelColumnText}</th><th style="width: 30%;">${labelA}</th><th style="width: 30%;">${labelB}</th></tr></thead>`;
 }

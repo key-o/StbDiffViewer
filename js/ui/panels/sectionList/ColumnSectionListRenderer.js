@@ -18,12 +18,20 @@ export class ColumnSectionListRenderer extends BaseSectionListRenderer {
     const svgRenderer = new RcColumnVisualRenderer({
       maxWidth: options.svgWidth || 120,
       maxHeight: options.svgHeight || 120,
-      padding: options.svgPadding || 20,
+      padding: options.svgPadding || 15,
       barScale: options.barScale || 0.5,
       showDimensions: false,
     });
 
     super(svgRenderer);
+
+    this.scaleOptions = {
+      scaleDenominator:
+        Number(options.scaleDenominator) > 0 ? Number(options.scaleDenominator) : 40,
+      previewDpi: Number(options.previewDpi) > 0 ? Number(options.previewDpi) : 96,
+    };
+    this.lastComputedScale = null;
+    this.sectionSlotCounts = new WeakMap();
 
     this.options = {
       showCoreBar: options.showCoreBar !== false,
@@ -55,6 +63,18 @@ export class ColumnSectionListRenderer extends BaseSectionListRenderer {
     return { dedupeId: id, labelId: id };
   }
 
+  /** @override */
+  onBeforeGridRender(data) {
+    this.lastComputedScale = this.computeFixedScale();
+    this.indexSymbolSlotCounts(data);
+  }
+
+  /** @override */
+  onEmptyGrid() {
+    this.lastComputedScale = null;
+    this.sectionSlotCounts = new WeakMap();
+  }
+
   // --- Column-specific methods ---
 
   /**
@@ -69,8 +89,12 @@ export class ColumnSectionListRenderer extends BaseSectionListRenderer {
 
     if (!sections || sections.length === 0) {
       container.innerHTML = '<div class="section-list-empty">RC柱断面データがありません</div>';
+      this.onEmptyGrid();
       return;
     }
+
+    this.lastComputedScale = this.computeFixedScale();
+    this.indexListSlotCounts(sections);
 
     const table = document.createElement('table');
     table.className = 'column-section-list-table';
@@ -141,65 +165,51 @@ export class ColumnSectionListRenderer extends BaseSectionListRenderer {
    */
   renderSectionCell(sectionData) {
     const parts = [];
+    const arrangements = this.getArrangements(sectionData);
+    const isMultiple = arrangements.length > 1;
 
     // ラッパーdivで囲む（flexboxレイアウト用）
-    parts.push('<div class="section-cell-content">');
+    parts.push('<div class="section-cell-content column-section-cell">');
 
     // 符号名（例: "9C1, 10C1"）
-    parts.push(`<div class="section-cell-name">${this.escapeHtml(sectionData.symbolNames)}</div>`);
-
-    // 断面図（SVG）
-    const svgData = this.prepareSvgData(sectionData);
-    const svgString = this.svgRenderer.renderToString(svgData);
-    parts.push(`<div class="section-cell-diagram">${svgString}</div>`);
-
-    // 詳細情報テーブル
-    parts.push('<div class="section-cell-specs">');
-    parts.push('<table class="section-specs-table">');
-
-    // コンクリート寸法・強度
-    const dimText = this.formatDimensions(sectionData);
-    const concreteStrength = sectionData.concrete?.strength || 'Fc21';
     parts.push(
-      `<tr><td class="spec-label">B×D</td><td class="spec-value">${dimText} (${concreteStrength})</td></tr>`,
+      `<div class="section-cell-name">${this.escapeHtml(sectionData.symbolNames || '')}</div>`,
     );
 
-    // 主筋
-    const mainBarText = this.formatMainBar(sectionData);
-    parts.push(
-      `<tr><td class="spec-label">主筋</td><td class="spec-value">${mainBarText}</td></tr>`,
-    );
+    parts.push(`<div class="column-arrangements-container${isMultiple ? ' is-multiple' : ''}">`);
 
-    // 材料（主筋）
-    if (sectionData.mainBar?.grade) {
-      parts.push(
-        `<tr><td class="spec-label">材料</td><td class="spec-value">${sectionData.mainBar.grade}</td></tr>`,
-      );
-    }
+    const positionTotals = arrangements.reduce((counts, arrangement) => {
+      counts[arrangement.position] = (counts[arrangement.position] || 0) + 1;
+      return counts;
+    }, {});
+    const positionIndexes = {};
 
-    // 1段目dt
-    const dtText = this.formatDt(sectionData);
-    if (dtText) {
-      parts.push(
-        `<tr><td class="spec-label">1段目dt</td><td class="spec-value">${dtText}</td></tr>`,
-      );
-    }
+    arrangements.forEach((arrangement) => {
+      parts.push('<div class="column-arrangement-item">');
 
-    // 芯鉄筋
-    if (this.options.showCoreBar && sectionData.coreBar) {
-      const coreBarText = this.formatCoreBar(sectionData);
-      if (coreBarText) {
+      if (isMultiple || arrangement.position !== 'SAME') {
+        positionIndexes[arrangement.position] = (positionIndexes[arrangement.position] || 0) + 1;
         parts.push(
-          `<tr><td class="spec-label">芯鉄筋</td><td class="spec-value">${coreBarText}</td></tr>`,
+          `<div class="column-arrangement-label">${this.getPositionLabel(
+            arrangement.position,
+            positionIndexes[arrangement.position],
+            positionTotals[arrangement.position],
+          )}</div>`,
         );
       }
-    }
 
-    // 帯筋
-    const hoopText = this.formatHoop(sectionData);
-    parts.push(`<tr><td class="spec-label">帯筋</td><td class="spec-value">${hoopText}</td></tr>`);
+      // 断面図（SVG）
+      const svgData = this.prepareSvgData(sectionData, arrangement);
+      const svgString = this.svgRenderer.renderToString(svgData, {
+        fixedScale: this.lastComputedScale?.scale,
+        sharedSlotCounts: this.sectionSlotCounts.get(sectionData) || null,
+      });
+      parts.push(`<div class="section-cell-diagram">${svgString}</div>`);
 
-    parts.push('</table>');
+      parts.push(this.renderArrangementSpecs(sectionData, arrangement));
+      parts.push('</div>');
+    });
+
     parts.push('</div>');
 
     // ラッパー閉じタグ
@@ -209,35 +219,269 @@ export class ColumnSectionListRenderer extends BaseSectionListRenderer {
   }
 
   /**
+   * 位置別配筋を正規化する
+   * @param {Object} sectionData - 断面データ
+   * @returns {Array<Object>} 位置別配筋
+   */
+  getArrangements(sectionData) {
+    if (Array.isArray(sectionData.arrangements) && sectionData.arrangements.length > 0) {
+      const order = { TOP: 0, BOTTOM: 1, SAME: 2 };
+      return sectionData.arrangements
+        .map((arrangement) => ({
+          ...arrangement,
+          position: arrangement.position || 'SAME',
+        }))
+        .sort((a, b) => (order[a.position] ?? 99) - (order[b.position] ?? 99));
+    }
+
+    return [
+      {
+        position: 'SAME',
+        mainBar: sectionData.mainBar || null,
+        hoop: sectionData.hoop || null,
+        coreBar: sectionData.coreBar || null,
+        cover: sectionData.cover,
+      },
+    ];
+  }
+
+  /**
+   * 位置ラベルを返す
+   * @param {string} position - SAME/TOP/BOTTOM
+   * @param {number} [index=1] - 同位置内の連番
+   * @param {number} [total=1] - 同位置の総数
+   * @returns {string} 日本語ラベル
+   */
+  getPositionLabel(position, index = 1, total = 1) {
+    const label =
+      {
+        TOP: '柱頭',
+        BOTTOM: '柱脚',
+        SAME: '全断面',
+      }[position] || this.escapeHtml(position || '全断面');
+    return total > 1 ? `${label}${index}` : label;
+  }
+
+  /**
+   * 位置別の仕様表をレンダリングする
+   * @param {Object} sectionData - 断面データ
+   * @param {Object} arrangement - 位置別配筋
+   * @returns {string} HTML文字列
+   */
+  renderArrangementSpecs(sectionData, arrangement) {
+    const parts = [
+      '<div class="section-cell-specs column-arrangement-specs">',
+      '<table class="section-specs-table">',
+    ];
+
+    const dimText = this.formatDimensions(sectionData);
+    const concreteStrength = sectionData.concrete?.strength;
+    const concreteText = `${dimText} / ${concreteStrength ? this.escapeHtml(concreteStrength) : '—'}`;
+    parts.push(
+      `<tr><td class="spec-label">B×D / Fc</td><td class="spec-value">${concreteText}</td></tr>`,
+    );
+
+    parts.push(
+      `<tr><td class="spec-label">主筋</td><td class="spec-value">${this.formatMainBar(sectionData, arrangement)}</td></tr>`,
+    );
+
+    parts.push(
+      `<tr><td class="spec-label">主筋材料</td><td class="spec-value">${this.formatMainGrade(arrangement.mainBar)}</td></tr>`,
+    );
+
+    const dtText = this.formatDt(sectionData, arrangement);
+    if (dtText) {
+      parts.push(
+        `<tr><td class="spec-label">1段目dt</td><td class="spec-value">${dtText}</td></tr>`,
+      );
+    }
+
+    if (this.options.showCoreBar && arrangement.coreBar) {
+      parts.push(
+        `<tr><td class="spec-label">芯鉄筋</td><td class="spec-value">${this.formatCoreBar(sectionData, arrangement)}</td></tr>`,
+      );
+    }
+
+    parts.push(
+      `<tr><td class="spec-label">帯筋</td><td class="spec-value">${this.formatHoop(sectionData, arrangement)}</td></tr>`,
+    );
+
+    parts.push('</table>', '</div>');
+    return parts.join('');
+  }
+
+  /**
    * SVGレンダリング用のデータを準備
    * @param {Object} sectionData - 断面データ
    * @returns {Object} SVGレンダラー用データ
    */
-  prepareSvgData(sectionData) {
+  prepareSvgData(sectionData, arrangement = this.getArrangements(sectionData)[0]) {
+    const mainBar = arrangement.mainBar || null;
+    const cover = arrangement.cover ?? sectionData.cover;
+
     if (sectionData.isCircular || sectionData.diameter > 0) {
       return {
         diameter: sectionData.diameter,
-        cover: sectionData.cover || 50,
-        mainBar: {
-          count: sectionData.mainBar?.count || sectionData.mainBar?.countX || 8,
-          dia: sectionData.mainBar?.dia || 'D25',
-        },
-        hoop: sectionData.hoop,
+        cover,
+        mainBar: mainBar
+          ? {
+              count: mainBar.countTotal ?? mainBar.count,
+              countTotal: mainBar.countTotal,
+              dia: mainBar.dia,
+              center: mainBar.center ?? mainBar.dt,
+            }
+          : null,
+        hoop: arrangement.hoop || null,
+        coreBar: arrangement.coreBar || null,
       };
     } else {
       return {
         width: sectionData.width,
         height: sectionData.height,
-        cover: sectionData.cover || 50,
-        mainBar: {
-          countX: sectionData.mainBar?.countX || 4,
-          countY: sectionData.mainBar?.countY || 4,
-          dia: sectionData.mainBar?.dia || 'D25',
-        },
-        hoop: sectionData.hoop,
-        coreBar: sectionData.coreBar,
+        cover,
+        mainBar: mainBar
+          ? {
+              countX: mainBar.countX,
+              countY: mainBar.countY,
+              countTotal: mainBar.countTotal,
+              dia: mainBar.dia,
+              diaSub: mainBar.diaSub,
+              mainDirection: mainBar.mainDirection,
+              layers: mainBar.layers,
+              firstLayerExtraGroups: mainBar.firstLayerExtraGroups,
+              secondLayer: mainBar.secondLayer,
+              centerStartX: mainBar.centerStartX,
+              centerEndX: mainBar.centerEndX,
+              centerStartY: mainBar.centerStartY,
+              centerEndY: mainBar.centerEndY,
+              dtX: mainBar.dtX,
+              dtY: mainBar.dtY,
+            }
+          : null,
+        hoop: arrangement.hoop || null,
+        coreBar: arrangement.coreBar || null,
       };
     }
+  }
+
+  /**
+   * 現在の描画縮尺ラベルを取得する。
+   * @returns {string}
+   */
+  getScaleLabel() {
+    return this.lastComputedScale ? `縮尺 1/${this.lastComputedScale.effectiveDenominator}` : '';
+  }
+
+  /**
+   * 縮尺分母を設定する。
+   * @param {number} denominator - 1/n の n
+   */
+  setScaleDenominator(denominator) {
+    const value = Number(denominator);
+    if (Number.isFinite(value) && value > 0) this.scaleOptions.scaleDenominator = value;
+  }
+
+  /**
+   * CSS px換算の固定縮尺を返す。
+   * @returns {{scale:number,effectiveDenominator:string}}
+   */
+  computeFixedScale() {
+    return {
+      scale: this.scaleOptions.previewDpi / 25.4 / this.scaleOptions.scaleDenominator,
+      effectiveDenominator: this.scaleOptions.scaleDenominator.toString(),
+    };
+  }
+
+  /**
+   * 同一符号の全階・全位置から方向別最大スロット数を求める。
+   * @param {Object} data - 柱断面グリッド
+   */
+  indexSymbolSlotCounts(data) {
+    this.sectionSlotCounts = new WeakMap();
+    const { stories = [], symbols = [], grid } = data || {};
+    if (!(grid instanceof Map)) return;
+
+    symbols.forEach((symbol) => {
+      const sections = stories.flatMap((story) => {
+        const value = grid.get(story.id)?.get(symbol);
+        return value ? (Array.isArray(value) ? value : [value]) : [];
+      });
+      const maximum = sections.reduce(
+        (result, sectionData) => {
+          const counts = this.collectSectionSlotCounts(sectionData);
+          return { x: Math.max(result.x, counts.x), y: Math.max(result.y, counts.y) };
+        },
+        { x: 0, y: 0 },
+      );
+      sections.forEach((sectionData) => this.sectionSlotCounts.set(sectionData, maximum));
+    });
+  }
+
+  /**
+   * 旧リスト形式でも符号別の方向別最大スロット数を関連付ける。
+   * @param {Array<Object>} rows - 柱断面リスト行
+   */
+  indexListSlotCounts(rows) {
+    this.sectionSlotCounts = new WeakMap();
+    const sectionsBySymbol = new Map();
+    (rows || []).forEach((row) => {
+      if (!row?.sectionData) return;
+      const sections = sectionsBySymbol.get(row.symbol) || [];
+      sections.push(row.sectionData);
+      sectionsBySymbol.set(row.symbol, sections);
+    });
+
+    sectionsBySymbol.forEach((sections) => {
+      const maximum = sections.reduce(
+        (result, sectionData) => {
+          const counts = this.collectSectionSlotCounts(sectionData);
+          return { x: Math.max(result.x, counts.x), y: Math.max(result.y, counts.y) };
+        },
+        { x: 0, y: 0 },
+      );
+      sections.forEach((sectionData) => this.sectionSlotCounts.set(sectionData, maximum));
+    });
+  }
+
+  /**
+   * 1断面の主筋各段と帯筋から方向別最大本数を返す。
+   * @param {Object} sectionData - 柱断面データ
+   * @returns {{x:number,y:number}}
+   */
+  collectSectionSlotCounts(sectionData) {
+    const result = { x: 0, y: 0 };
+    this.getArrangements(sectionData).forEach((arrangement) => {
+      const mainBar = arrangement.mainBar || {};
+      const extras = Array.isArray(mainBar.firstLayerExtraGroups)
+        ? mainBar.firstLayerExtraGroups
+        : [];
+      result.x = Math.max(
+        result.x,
+        (Number(mainBar.countX) || 0) +
+          extras.reduce((sum, group) => sum + (Number(group.countX) || 0), 0),
+      );
+      result.y = Math.max(
+        result.y,
+        (Number(mainBar.countY) || 0) +
+          extras.reduce((sum, group) => sum + (Number(group.countY) || 0), 0),
+      );
+      const secondGroups = mainBar.secondLayer?.groups?.length
+        ? mainBar.secondLayer.groups
+        : mainBar.secondLayer
+          ? [mainBar.secondLayer]
+          : [];
+      result.x = Math.max(
+        result.x,
+        secondGroups.reduce((sum, group) => sum + (Number(group.countX) || 0), 0),
+      );
+      result.y = Math.max(
+        result.y,
+        secondGroups.reduce((sum, group) => sum + (Number(group.countY) || 0), 0),
+      );
+      result.x = Math.max(result.x, Number(arrangement.hoop?.countY) || 0);
+      result.y = Math.max(result.y, Number(arrangement.hoop?.countX) || 0);
+    });
+    return result;
   }
 
   /**
@@ -247,9 +491,11 @@ export class ColumnSectionListRenderer extends BaseSectionListRenderer {
    */
   formatDimensions(sectionData) {
     if (sectionData.isCircular || sectionData.diameter > 0) {
-      return `φ${sectionData.diameter}`;
+      return sectionData.diameter > 0 ? `φ${sectionData.diameter}` : '—';
     } else {
-      return `${sectionData.width}×${sectionData.height}`;
+      return sectionData.width > 0 && sectionData.height > 0
+        ? `${sectionData.width}×${sectionData.height}`
+        : '—';
     }
   }
 
@@ -258,20 +504,80 @@ export class ColumnSectionListRenderer extends BaseSectionListRenderer {
    * @param {Object} sectionData - 断面データ
    * @returns {string}
    */
-  formatMainBar(sectionData) {
-    const { mainBar } = sectionData;
-    if (!mainBar) return '-';
+  formatMainBar(sectionData, arrangement = this.getArrangements(sectionData)[0]) {
+    const mainBar = arrangement.mainBar;
+    if (!mainBar) return '—';
 
-    if (sectionData.isCircular || sectionData.diameter > 0) {
-      // 円形断面: 従来通り
-      return `${mainBar.count}-${mainBar.dia}`;
-    } else {
-      // 矩形断面: 常にX/Y方向を分けて表示
-      const x = mainBar.countX || 0;
-      const y = mainBar.countY || 0;
-      const dia = mainBar.dia || 'D25';
-      return `X: ${x}-${dia} / Y: ${y}-${dia}`;
+    const countX = this.toPositiveNumber(mainBar.countX);
+    const countY = this.toPositiveNumber(mainBar.countY);
+    let total = this.toPositiveNumber(mainBar.countTotal ?? mainBar.count);
+
+    if (!total && countX && countY) {
+      total = countX * 2 + countY * 2 - 4;
     }
+
+    if (!total || !mainBar.dia) return '—';
+
+    const layers = Array.isArray(mainBar.layers) ? mainBar.layers : [];
+    const hasLayerDetail =
+      layers.length > 1 || layers.some((layer) => (layer.groups?.length || 0) > 1);
+    if (hasLayerDetail) {
+      const layerText = layers
+        .map((layer) => {
+          const groups = (layer.groups || [])
+            .map(
+              (group) =>
+                `${this.escapeHtml(group.dia || '—')} X${group.countX || 0}/Y${group.countY || 0}`,
+            )
+            .join(' + ');
+          return `${layer.step}段目 ${groups}`;
+        })
+        .join(' / ');
+      return `総数 ${total} <span class="bar-direction-note">（${layerText}）</span>`;
+    }
+
+    if (
+      !(sectionData.isCircular || sectionData.diameter > 0) &&
+      mainBar.diaSub &&
+      mainBar.diaSub !== mainBar.dia
+    ) {
+      const diaX = mainBar.mainDirection === 'Y' ? mainBar.diaSub : mainBar.dia;
+      const diaY = mainBar.mainDirection === 'Y' ? mainBar.dia : mainBar.diaSub;
+      return `X: ${countX}-${this.escapeHtml(diaX)} / Y: ${countY}-${this.escapeHtml(diaY)} <span class="bar-direction-note">（片側）</span>`;
+    }
+
+    let text = `${total}-${this.escapeHtml(mainBar.dia)}`;
+    if (
+      !(sectionData.isCircular || sectionData.diameter > 0) &&
+      countX &&
+      countY &&
+      countX !== countY
+    ) {
+      text += ` <span class="bar-direction-note">（X: ${countX} / Y: ${countY}）</span>`;
+    }
+    return text;
+  }
+
+  formatMainGrade(mainBar) {
+    if (!mainBar?.grade) return '—';
+    const layers = Array.isArray(mainBar.layers) ? mainBar.layers : [];
+    const layerGrades = [
+      ...new Set(
+        layers.flatMap((layer) => (layer.groups || []).map((group) => group.grade).filter(Boolean)),
+      ),
+    ];
+    if (layerGrades.length > 1)
+      return layerGrades.map((grade) => this.escapeHtml(grade)).join(' / ');
+    if (mainBar.diaSub && mainBar.gradeSub && mainBar.gradeSub !== mainBar.grade) {
+      const gradeX = mainBar.mainDirection === 'Y' ? mainBar.gradeSub : mainBar.grade;
+      const gradeY = mainBar.mainDirection === 'Y' ? mainBar.grade : mainBar.gradeSub;
+      return `X: ${this.escapeHtml(gradeX)} / Y: ${this.escapeHtml(gradeY)}`;
+    }
+    let text = this.escapeHtml(mainBar.grade);
+    if (mainBar.secondLayer?.grade && mainBar.secondLayer.grade !== mainBar.grade) {
+      text += ` / 2段目: ${this.escapeHtml(mainBar.secondLayer.grade)}`;
+    }
+    return text;
   }
 
   /**
@@ -279,8 +585,8 @@ export class ColumnSectionListRenderer extends BaseSectionListRenderer {
    * @param {Object} sectionData - 断面データ
    * @returns {string}
    */
-  formatDt(sectionData) {
-    const { mainBar } = sectionData;
+  formatDt(sectionData, arrangement = this.getArrangements(sectionData)[0]) {
+    const mainBar = arrangement.mainBar;
     if (!mainBar) return '';
 
     if (sectionData.isCircular || sectionData.diameter > 0) {
@@ -303,21 +609,20 @@ export class ColumnSectionListRenderer extends BaseSectionListRenderer {
    * @param {Object} sectionData - 断面データ
    * @returns {string}
    */
-  formatCoreBar(sectionData) {
-    const { coreBar } = sectionData;
-    if (!coreBar) return '';
+  formatCoreBar(sectionData, arrangement = this.getArrangements(sectionData)[0]) {
+    const coreBar = arrangement.coreBar;
+    if (!coreBar) return '—';
 
-    const parts = [];
+    const legacyTotal =
+      (this.toPositiveNumber(coreBar.countX) || 0) + (this.toPositiveNumber(coreBar.countY) || 0);
+    const total = this.toPositiveNumber(coreBar.total) || legacyTotal;
+    if (!total || !coreBar.dia) return '—';
 
-    if (coreBar.countX > 0 || coreBar.countY > 0) {
-      if (coreBar.countX === coreBar.countY) {
-        parts.push(`${coreBar.countX}-${coreBar.dia}`);
-      } else {
-        if (coreBar.countX > 0) parts.push(`X: ${coreBar.countX}-${coreBar.dia}`);
-        if (coreBar.countY > 0) parts.push(`Y: ${coreBar.countY}-${coreBar.dia}`);
-      }
+    const parts = [`${total}-${this.escapeHtml(coreBar.dia)}`];
+    parts.push(coreBar.grade ? this.escapeHtml(coreBar.grade) : '—');
+    if (coreBar.placementEstimated) {
+      parts.push('<span class="placement-estimated-note">配置推定</span>');
     }
-
     if (coreBar.position > 0) {
       parts.push(`位置: ${coreBar.position}mm`);
     }
@@ -330,28 +635,42 @@ export class ColumnSectionListRenderer extends BaseSectionListRenderer {
    * @param {Object} sectionData - 断面データ
    * @returns {string}
    */
-  formatHoop(sectionData) {
-    const { hoop } = sectionData;
-    if (!hoop) return '-';
+  formatHoop(sectionData, arrangement = this.getArrangements(sectionData)[0]) {
+    const hoop = arrangement.hoop;
+    if (!hoop || !hoop.dia || !this.toPositiveNumber(hoop.pitch)) return '—';
 
-    let text = '';
-
-    // X/Y方向の本数を追加
-    if (hoop.countX > 0 || hoop.countY > 0) {
-      text += `X: ${hoop.countX || 0}本 / Y: ${hoop.countY || 0}本 `;
+    const countX = this.toPositiveNumber(hoop.countX);
+    const countY = this.toPositiveNumber(hoop.countY);
+    let legText = '';
+    if (countX && countY) {
+      legText = countX === countY ? `${countX}-` : `X${countX}・Y${countY}-`;
+    } else if (countX) {
+      legText = `X${countX}-`;
+    } else if (countY) {
+      legText = `Y${countY}-`;
     }
 
-    text += `${hoop.dia}@${hoop.pitch}`;
+    let text = `${legText}${this.escapeHtml(hoop.dia)}@${hoop.pitch}`;
 
     if (hoop.dia2 && hoop.pitch2) {
-      text += ` / ${hoop.dia2}@${hoop.pitch2}`;
+      text += ` / ${this.escapeHtml(hoop.dia2)}@${hoop.pitch2}`;
     }
 
     if (this.options.showStirrupGrade && hoop.grade) {
-      text += ` (${hoop.grade})`;
+      text += ` / ${this.escapeHtml(hoop.grade)}`;
     }
 
     return text;
+  }
+
+  /**
+   * 正の有限数へ変換する
+   * @param {*} value - 入力値
+   * @returns {number|null} 正の数、またはnull
+   */
+  toPositiveNumber(value) {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? number : null;
   }
 }
 
