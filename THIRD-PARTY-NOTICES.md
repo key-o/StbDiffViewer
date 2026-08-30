@@ -1,31 +1,31 @@
 # Third-Party Notices
 
 This product includes third-party software components. The StbDiffViewer
-application itself is proprietary commercial software; third-party components
-remain governed by their own licenses.
+the application code is governed by the accompanying distribution license;
+third-party components remain governed by their own licenses.
 
 ## Runtime Components
 
-| Component | Version | License | Purpose |
-| --- | --- | --- | --- |
-| three | 0.160.x | MIT | 3D rendering |
-| camera-controls | 3.1.x | MIT | Camera controls |
-| dxf-parser | 1.1.2 | MIT | DXF parsing |
-| encoding-japanese | 2.2.0 | MIT | Japanese character encoding conversion |
-| html2canvas | 1.4.1 | MIT | DOM capture for reports/PDF output |
-| jspdf | 4.2.x | MIT | PDF generation |
-| ajv | 8.17.x | MIT | JSON Schema validation |
-| ajv-formats | 3.0.x | MIT | JSON Schema format validation |
-| web-ifc / web-ifc.wasm | 0.0.74 | MPL-2.0 | IFC parsing and conversion |
+| Component              | Version | License | Purpose                                |
+| ---------------------- | ------- | ------- | -------------------------------------- |
+| three                  | 0.160.x | MIT     | 3D rendering                           |
+| camera-controls        | 3.1.x   | MIT     | Camera controls                        |
+| dxf-parser             | 1.1.2   | MIT     | DXF parsing                            |
+| encoding-japanese      | 2.2.0   | MIT     | Japanese character encoding conversion |
+| html2canvas            | 1.4.1   | MIT     | DOM capture for reports/PDF output     |
+| jspdf                  | 4.2.x   | MIT     | PDF generation                         |
+| ajv                    | 8.17.x  | MIT     | JSON Schema validation                 |
+| ajv-formats            | 3.0.x   | MIT     | JSON Schema format validation          |
+| web-ifc / web-ifc.wasm | 0.0.74  | MPL-2.0 | IFC parsing and conversion             |
 
 ## Notable Transitive Runtime Components
 
-| Component | Version | License | Used By |
-| --- | --- | --- | --- |
-| dompurify | 3.4.x | MPL-2.0 OR Apache-2.0 | jspdf |
-| fast-png | 6.4.x | MIT | jspdf |
-| fflate | 0.8.x | MIT | jspdf |
-| @babel/runtime | 7.29.x | MIT | jspdf |
+| Component      | Version | License               | Used By |
+| -------------- | ------- | --------------------- | ------- |
+| dompurify      | 3.4.x   | MPL-2.0 OR Apache-2.0 | jspdf   |
+| fast-png       | 6.4.x   | MIT                   | jspdf   |
+| fflate         | 0.8.x   | MIT                   | jspdf   |
+| @babel/runtime | 7.29.x  | MIT                   | jspdf   |
 
 ## License Obligations
 
