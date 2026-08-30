@@ -13,6 +13,7 @@ import { NUMERIC_TOLERANCE } from '../../config/geometryConfig.js';
 import { getCategoryCounts } from '../../data/normalizeComparisonResult.js';
 import { COMPARISON_CATEGORY } from '../../constants/comparisonCategories.js';
 import { extractAllSections } from '../../common-stb/import/extractor/sectionExtractor.js';
+import { getSectionDataFromMap } from '../../data/accessors/sectionMapAccessor.js';
 
 /**
  * @typedef {Object} ElementTypeStats
@@ -544,31 +545,6 @@ function collectReferencedSectionIds(comparisonResults) {
   }
 
   return references;
-}
-
-function getSectionDataFromMap(sectionMap, sectionId) {
-  if (!(sectionMap instanceof Map) || !sectionId) return null;
-
-  const candidates = new Set([sectionId, String(sectionId)]);
-  const numericId = Number(sectionId);
-  if (!Number.isNaN(numericId)) {
-    candidates.add(numericId);
-    candidates.add(String(numericId));
-  }
-
-  const parsedInteger = Number.parseInt(sectionId, 10);
-  if (!Number.isNaN(parsedInteger)) {
-    candidates.add(parsedInteger);
-    candidates.add(String(parsedInteger));
-  }
-
-  for (const candidate of candidates) {
-    if (sectionMap.has(candidate)) {
-      return sectionMap.get(candidate);
-    }
-  }
-
-  return null;
 }
 
 function getDiffPaths(valueA, valueB) {
