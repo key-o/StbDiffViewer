@@ -185,7 +185,7 @@ export const SECTION_CONFIG = {
   // ==========================================================================
 
   Pile: {
-    selectors: ['StbSecPile_RC', 'StbSecPile_S', 'StbSecPileProduct'],
+    selectors: ['StbSecPile_RC', 'StbSecPile_S', 'StbSecPileProduct', 'StbSecPilePrecast'],
     steelFigures: ['StbSecSteelFigurePile_S', 'StbSecFigurePile_S'],
     concreteFigures: [
       'StbSecFigurePile_RC',

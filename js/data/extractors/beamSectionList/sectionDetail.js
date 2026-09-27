@@ -15,6 +15,13 @@ import {
 } from './figureExtractors.js';
 import { extractBeamBarArrangement } from './legacyBarArrangement.js';
 
+function readBooleanAttribute(element, name) {
+  const value = String(element?.getAttribute?.(name) ?? '')
+    .trim()
+    .toLowerCase();
+  return value === 'true' || value === '1';
+}
+
 /**
  * RC梁断面の詳細情報を抽出（STB v2.0.2と v2.1の両対応）
  * @param {Element} sectionElement - StbSecBeam_RC または StbSecGirder_RC要素
@@ -25,11 +32,15 @@ export function extractRcBeamSectionDetail(sectionElement) {
   const name = sectionElement.getAttribute('name');
   const strengthConcrete = sectionElement.getAttribute('strength_concrete') || null;
   const kindBeam = sectionElement.getAttribute('kind_beam') || 'GIRDER';
+  const isFoundation = readBooleanAttribute(sectionElement, 'isFoundation');
+  const isCanti = readBooleanAttribute(sectionElement, 'isCanti');
 
   const result = {
     id,
     name,
     beamType: kindBeam,
+    isFoundation,
+    isCanti,
     concrete: {
       strength: strengthConcrete,
     },

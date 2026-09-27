@@ -16,7 +16,6 @@ const log = createLogger('ui:events:fileDropListeners');
 
 /**
  * 受け付ける拡張子（#fileA/#fileB の accept 属性と同一・fileTypeConfig が単一の情報源）。
- * SS7 等の無効な形式は featureFlags 経由で除外されるため、ここでも自動的に外れる。
  * @returns {string[]}
  */
 function getAcceptedExtensions() {

@@ -10,7 +10,11 @@ import {
   toggleGridVisibility,
 } from './eventHandlers.js';
 import { getLoadDisplayManager, LOAD_DISPLAY_MODE } from '../../viewer/index.js';
-import { initializeRebarDisplaySync, setRebarDisplayVisible } from '../viewModes/rebarDisplay.js';
+import {
+  initializeRebarDisplaySync,
+  setRebarMemberVisible,
+} from '../viewModes/rebarMeshRetentionController.js';
+import { setRebarSelectionModeActive } from '../controllers/interaction/rebarSelectionMode.js';
 import {
   initializeThemeSystem,
   initializeSharedPanels,
@@ -21,11 +25,6 @@ import {
 
 const log = createLogger('uiInitializer');
 
-/**
- * UIコンポーネントを初期化
- * @param {Function} scheduleRender - 再描画関数
- * @param {Object} elementGroups - 要素グループ
- */
 export function initializeUIComponents(scheduleRender, elementGroups) {
   initializeThemeSystem();
   initializeSharedPanels();
@@ -34,19 +33,11 @@ export function initializeUIComponents(scheduleRender, elementGroups) {
   initializeSectionListPanels();
 }
 
-/**
- * ボタンイベントリスナーをセットアップ
- */
 export function setupButtonEventListeners() {
-  // 比較ボタン
   const compareBtn = document.getElementById('compareButton');
-  if (compareBtn) {
-    compareBtn.addEventListener('click', window.handleCompareModelsClick);
-  } else {
-    log.error('比較ボタンが見つかりません。');
-  }
+  if (compareBtn) compareBtn.addEventListener('click', window.handleCompareModelsClick);
+  else log.error('比較ボタンが見つかりません。');
 
-  // 原点軸（XYZ）表示切り替え
   const originAxesToggle = document.getElementById('toggleOriginAxes');
   if (originAxesToggle) {
     originAxesToggle.addEventListener('change', (event) => {
@@ -54,11 +45,8 @@ export function setupButtonEventListeners() {
       toggleOriginAxesVisibility(isVisible);
       log.info(`原点軸の表示状態を設定しました: ${isVisible}`);
     });
-  } else {
-    log.warn('原点軸切り替えボタンが見つかりません。');
-  }
+  } else log.warn('原点軸切り替えボタンが見つかりません。');
 
-  // 配置基準線表示切り替え
   const placementLinesToggle = document.getElementById('togglePlacementLines');
   if (placementLinesToggle) {
     placementLinesToggle.addEventListener('change', (event) => {
@@ -66,11 +54,8 @@ export function setupButtonEventListeners() {
       togglePlacementLinesVisibility(isVisible);
       log.info(`配置基準線の表示状態を設定しました: ${isVisible}`);
     });
-  } else {
-    log.warn('配置基準線切り替えボタンが見つかりません。');
-  }
+  } else log.warn('配置基準線切り替えボタンが見つかりません。');
 
-  // 荷重表示切り替え
   const gridToggle = document.getElementById('toggleViewerGrid');
   if (gridToggle) {
     gridToggle.addEventListener('change', (event) => {
@@ -78,9 +63,7 @@ export function setupButtonEventListeners() {
       toggleGridVisibility(isVisible);
       log.info(`グリッドの表示状態を設定しました: ${isVisible}`);
     });
-  } else {
-    log.warn('グリッド切替用のチェックボックスが見つかりません');
-  }
+  } else log.warn('グリッド切替用のチェックボックスが見つかりません');
 
   const loadDisplayToggle = document.getElementById('toggleLoadDisplay');
   const loadCaseSelector = document.getElementById('loadCaseSelector');
@@ -89,15 +72,11 @@ export function setupButtonEventListeners() {
     loadDisplayToggle.addEventListener('change', (event) => {
       const isVisible = event.target.checked;
       const loadManager = getLoadDisplayManager();
-
       if (loadManager) {
         if (isVisible) {
-          // データ存在チェック
           const calDataA = getState('models.calDataA');
           const calDataB = getState('models.calDataB');
-
           if (!calDataA && !calDataB) {
-            // 警告を表示
             import('../../ui/common/toast.js')
               .then(({ showWarning }) => {
                 showWarning(
@@ -105,93 +84,97 @@ export function setupButtonEventListeners() {
                 );
               })
               .catch(() => {
-                // toast.jsがない場合はalertで代替
                 alert('荷重データがありません。StbCalDataを含むSTBファイルを読み込んでください。');
               });
             event.target.checked = false;
             log.warn('荷重データが見つからないため、表示を無効にしました');
             return;
           }
-
           loadManager.setDisplayMode(LOAD_DISPLAY_MODE.ARROW);
         } else {
           loadManager.setDisplayMode(LOAD_DISPLAY_MODE.NONE);
         }
-        if (isVisible) {
-          log.info('荷重表示を有効化しました');
-        } else {
-          log.info('荷重表示を無効化しました');
-        }
-
-        // 荷重ケースセレクターの表示を切り替え
-        if (loadCaseSelector) {
-          loadCaseSelector.style.display = isVisible ? 'inline-block' : 'none';
-        }
-
-        // 再描画をリクエスト
-        if (typeof window.requestRender === 'function') {
-          window.requestRender();
-        }
-      } else {
-        log.warn('LoadDisplayManagerが初期化されていません');
-      }
+        log.info(`荷重表示を${isVisible ? '有効化' : '無効化'}しました`);
+        if (loadCaseSelector) loadCaseSelector.style.display = isVisible ? 'inline-block' : 'none';
+        if (typeof window.requestRender === 'function') window.requestRender();
+      } else log.warn('LoadDisplayManagerが初期化されていません');
     });
-  } else {
-    log.warn('荷重表示切り替えボタンが見つかりません。');
-  }
+  } else log.warn('荷重表示切り替えボタンが見つかりません。');
 
-  // 荷重ケースセレクター
   if (loadCaseSelector) {
     loadCaseSelector.addEventListener('change', (event) => {
       const loadCaseId = event.target.value || null;
       const loadManager = getLoadDisplayManager();
-
       if (loadManager) {
         loadManager.selectLoadCase(loadCaseId);
         log.info(`荷重ケースを選択しました: ${loadCaseId || '全て'}`);
-
-        // 再描画をリクエスト
-        if (typeof window.requestRender === 'function') {
-          window.requestRender();
-        }
+        if (typeof window.requestRender === 'function') window.requestRender();
       }
     });
   }
 
   setupRebarDisplayListeners();
-
   log.info('ボタンイベントリスナーをセットアップしました');
 }
 
-/**
- * 3D配筋表示のイベントリスナーをセットアップ
- * @private
- */
 function setupRebarDisplayListeners() {
   const coverInput = document.getElementById('rebarCoverInput');
+  const selectionModeToggle = document.getElementById('toggleRebarSelectionMode');
 
-  /**
-   * かぶり入力欄から配置設定を作る
-   * @returns {Object} setRebarDisplayVisible へ渡す設定
-   */
+  if (selectionModeToggle) {
+    selectionModeToggle.addEventListener('change', (event) => {
+      const active = setRebarSelectionModeActive(event.target.checked);
+      log.info(`鉄筋選択モードを${active ? '有効化' : '無効化'}しました`);
+    });
+  }
+
+  // project detailingはrebarDisplay側で各rebuild時にruntime sourceから再取得する。
+  // ここではsnapshotをoptionsへ保持せず、モデル切替後に古いworld座標を再利用しない。
   const readOptions = () => {
     const value = coverInput ? Number.parseFloat(coverInput.value) : NaN;
     return Number.isFinite(value) && value >= 0 ? { coverMm: value } : {};
   };
 
-  /** 種別ごとのチェックボックスと文言 */
   const toggles = [
     {
-      key: 'main',
-      element: document.getElementById('toggleRebarDisplay'),
-      label: '鉄筋表示',
-      emptyMessage: '配筋情報を持つRC柱・RC梁が見つかりませんでした。',
+      key: 'column',
+      element: document.getElementById('toggleColumnRebarDisplay'),
+      label: '柱の鉄筋表示',
     },
     {
-      key: 'hoop',
-      element: document.getElementById('toggleHoopDisplay'),
-      label: '帯筋・あばら筋表示',
-      emptyMessage: '帯筋・あばら筋のピッチを持つRC柱・RC梁が見つかりませんでした。',
+      key: 'girder',
+      element: document.getElementById('toggleGirderRebarDisplay'),
+      label: '大梁の鉄筋表示',
+    },
+    {
+      key: 'beam',
+      element: document.getElementById('toggleBeamRebarDisplay'),
+      label: '小梁の鉄筋表示',
+    },
+    {
+      key: 'pile',
+      element: document.getElementById('togglePileRebarDisplay'),
+      label: '杭の鉄筋表示',
+    },
+    {
+      key: 'slab',
+      element: document.getElementById('toggleSlabRebarDisplay'),
+      label: 'スラブの鉄筋表示',
+    },
+    {
+      key: 'wall',
+      element: document.getElementById('toggleWallRebarDisplay'),
+      label: '壁の鉄筋表示',
+    },
+    {
+      key: 'footing',
+      element: document.getElementById('toggleFootingRebarDisplay'),
+      label: '基礎の鉄筋表示',
+    },
+    {
+      key: 'stripFooting',
+      element: document.getElementById('toggleStripFootingRebarDisplay'),
+      label: '布基礎の鉄筋表示',
     },
   ].filter((toggle) => {
     if (toggle.element) return true;
@@ -204,36 +187,26 @@ function setupRebarDisplayListeners() {
   for (const toggle of toggles) {
     toggle.element.addEventListener('change', (event) => {
       const requested = event.target.checked;
-      const shown = setRebarDisplayVisible(requested, readOptions(), toggle.key);
-
-      if (requested && !shown) {
-        event.target.checked = false;
-        import('../../ui/common/toast.js')
-          .then(({ showWarning }) => showWarning(toggle.emptyMessage))
-          .catch(() => {});
-        log.warn(`配筋情報が無いため、${toggle.label}を無効にしました`);
-        return;
-      }
+      setRebarMemberVisible(requested, readOptions(), toggle.key);
       log.info(`${toggle.label}を${requested ? '有効化' : '無効化'}しました`);
     });
   }
 
   if (coverInput) {
     coverInput.addEventListener('change', () => {
-      // かぶりはループ芯・主筋芯の両方の基準なので、表示中の種別すべてへ反映する
       for (const toggle of toggles) {
         if (!toggle.element.checked) continue;
-        setRebarDisplayVisible(true, readOptions(), toggle.key);
+        setRebarMemberVisible(true, readOptions(), toggle.key);
       }
       log.info('かぶり厚さの変更を鉄筋表示へ反映しました');
     });
   }
 
-  // モデル再読み込み後の追従（新モデルに配筋が無ければチェックを戻す）
-  initializeRebarDisplaySync((kindKey) => {
-    const toggle = toggles.find((item) => item.key === kindKey);
+  initializeRebarDisplaySync((memberKey) => {
+    const toggle = toggles.find((item) => item.key === memberKey);
     if (!toggle) return;
-    toggle.element.checked = false;
-    log.warn(`新しいモデルに配筋情報が無いため、${toggle.label}を無効にしました`);
+    log.warn(
+      `新しいモデルに表示できる配筋情報が無いため、${toggle.label}はチェック状態を維持したまま非表示です`,
+    );
   });
 }

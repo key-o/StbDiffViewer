@@ -28,8 +28,9 @@ export {
 } from './editHistory.js';
 
 export { editAttributeValue } from './attributeEdit.js';
+export { applyBatchPropertyEdit, inspectBatchPropertyTargets } from './batchPropertyEdit.js';
 
-export { addNewMember, getNewMemberDefinitions } from './memberAdd.js';
+export { addNewMember, getNewMemberDefinitions } from './memberAddWorkingCommand.js';
 
 export { getNodeLinkTargets, linkNodesToExisting } from './nodeLink.js';
 
@@ -38,6 +39,33 @@ export {
   addNewJointElement,
   getCompatibleJointEndpoints202,
   assignJointDefinition202,
+} from './jointWorkingCommand.js';
+export {
+  addOpenWithAssignment,
+  reassignOpenArrangement,
+  deleteOpenArrangement,
+} from './openArrangementWorkingCommand.js';
+export {
   addJointArrangement,
-} from './jointAdd.js';
-export { addOpenWithAssignment } from './openAdd.js';
+  reassignJointArrangement,
+  deleteJointArrangement,
+  getCompatibleJointDefinitions21,
+} from './jointArrangementPublicCommand.js';
+
+// Working Document 編集API。現段階ではUIから自動起動せず、明示利用に限定する。
+export { default as editingSession } from '../../../../app/editing/editingSession.js';
+export {
+  WorkingNodeVectorView,
+  generateWorkingSolidMeshes,
+  replaceWorkingSolidElement,
+} from '../../../../app/editing/workingSolidGenerator.js';
+
+export {
+  getSemanticGrips,
+  getSemanticGripsForSelections,
+} from '../../../../app/editing/semanticGripProvider.js';
+
+// Phase 4 command core。Property panel の自動切替は旧 Add/Delete 経路の移行完了まで行わない。
+export { createSetAttributeCommand } from '../../../../app/editing/setAttributeCommand.js';
+export { createSetMemberOffsetCommand } from '../../../../app/editing/setMemberOffsetCommand.js';
+export { createChangeSectionCommand } from '../../../../app/editing/changeSectionCommand.js';

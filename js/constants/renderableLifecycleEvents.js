@@ -9,4 +9,8 @@ export const RenderableLifecycleEvents = Object.freeze({
   GEOMETRY_CHANGED: 'render:geometryChanged',
   /** Material差替えバッチが完了し、現在Renderableの表示Materialが確定した */
   MATERIALS_CHANGED: 'render:materialsChanged',
+  /** element-ID局所再生成でRenderable参照が差し替わった */
+  RENDERABLES_REPLACED: 'render:renderablesReplaced',
+  /** 配筋meshが非表示または再生成で除去された */
+  REBAR_MESHES_REMOVED: 'render:rebarMeshesRemoved',
 });

@@ -38,8 +38,7 @@ const uiPresenter = new BeamSectionListRenderer();
 const BEAM_INFO_ROWS = [
   {
     label: 'B x D',
-    format: (p) =>
-      Number(p?.width) > 0 && Number(p?.depth) > 0 ? `${p.width}×${p.depth}` : '-',
+    format: (p) => (Number(p?.width) > 0 && Number(p?.depth) > 0 ? `${p.width}×${p.depth}` : '-'),
   },
   { label: '上端筋', format: (p) => uiPresenter.formatBarCountText(p?.topBar) },
   { label: '下端筋', format: (p) => uiPresenter.formatBarCountText(p?.bottomBar) },
@@ -52,17 +51,11 @@ function getCell(grid, storyId, symbol) {
   return Array.isArray(raw) ? raw[0] : raw;
 }
 
-function drawBeamSectionEntities(
-  lines2D,
-  circles2D,
-  positionData,
-  cx,
-  cy,
-  options = {},
-) {
+function drawBeamSectionEntities(lines2D, circles2D, positionData, cx, cy, options = {}) {
   const scheduleProfile = resolveRcScheduleProfile(options.scheduleProfile || {});
   const geometry = buildBeamScheduleGeometry(positionData, {
-    drawingCoverOverride: Number(options.coverThickness) > 0 ? Number(options.coverThickness) : null,
+    drawingCoverOverride:
+      Number(options.coverThickness) > 0 ? Number(options.coverThickness) : null,
     profile: scheduleProfile,
   });
   if (!geometry) return;
@@ -97,26 +90,14 @@ function drawBeamSectionEntities(
   }
 
   geometry.mainBars.forEach((bar) => {
-    addRebarSymbol(
-      lines2D,
-      circles2D,
-      bar.dia,
-      dx(bar.x),
-      dy(bar.y),
-      LAYERS.REBAR,
-      { profile: scheduleProfile },
-    );
+    addRebarSymbol(lines2D, circles2D, bar.dia, dx(bar.x), dy(bar.y), LAYERS.REBAR, {
+      profile: scheduleProfile,
+    });
   });
   geometry.webBars.forEach((bar) => {
-    addRebarSymbol(
-      lines2D,
-      circles2D,
-      bar.dia,
-      dx(bar.x),
-      dy(bar.y),
-      LAYERS.REBAR,
-      { profile: scheduleProfile },
-    );
+    addRebarSymbol(lines2D, circles2D, bar.dia, dx(bar.x), dy(bar.y), LAYERS.REBAR, {
+      profile: scheduleProfile,
+    });
   });
 }
 
@@ -211,7 +192,10 @@ export async function exportBeamSectionListToDxf(
         return;
       }
 
-      const entries = uiPresenter.getRenderablePositionEntries(cell.positions, cell.positionPattern);
+      const entries = uiPresenter.getRenderablePositionEntries(
+        cell.positions,
+        cell.positionPattern,
+      );
       entries.forEach((entry, positionIndex) => {
         const positionData = entry.data;
         const drawingPositionData = {
@@ -220,21 +204,12 @@ export async function exportBeamSectionListToDxf(
           // coverオブジェクトに保持したsourceCover/mainCentersメタデータも同じ参照で渡す。
           cover: positionData?.cover || cell.cover || null,
         };
-        const posCx = getSectionListSlotCenter(
-          cellLeftX,
-          cellWidth,
-          entries.length,
-          positionIndex,
-        );
+        const posCx = getSectionListSlotCenter(cellLeftX, cellWidth, entries.length, positionIndex);
 
-        drawBeamSectionEntities(
-          lines2D,
-          circles2D,
-          drawingPositionData,
-          posCx,
-          sectionCenterY,
-          { ...options, scheduleProfile },
-        );
+        drawBeamSectionEntities(lines2D, circles2D, drawingPositionData, posCx, sectionCenterY, {
+          ...options,
+          scheduleProfile,
+        });
 
         drawSectionListInfoValues({
           texts2D,

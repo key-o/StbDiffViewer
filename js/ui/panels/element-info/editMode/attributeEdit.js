@@ -1,8 +1,9 @@
 /**
  * @fileoverview 属性値編集（ParameterEditor モーダル・ライブプレビュー・prompt フォールバック）
  *
- * 属性値の編集フローを担当する。id のリナンバーは `idRenumber.handleIdRenumber` へ、
- * 実際の文書更新は `editAppliers.applyAttributeEditToDocument` へ委譲する。
+ * 属性値の編集フローを担当する。Working Session 有効時は ST-Bridge semantic Command へ
+ * 確定処理をルーティングし、source document へは fallback しない。旧セッション未開始時のみ
+ * 従来の documentA mutation 経路を維持する。
  */
 
 import { createLogger } from '../../../../utils/logger.js';
@@ -13,12 +14,108 @@ import {
 } from '../../../../common-stb/import/parser/jsonSchemaLoader.js';
 import { eventBus, EditEvents } from '../../../../data/events/index.js';
 import { getParameterEditor, getSuggestionEngine } from '../ElementInfoProviders.js';
+import { showError } from '../../../common/toast.js';
+import editingSession from '../../../../app/editing/editingSession.js';
+import { resolveElementTagName } from '../../../../app/editing/attributeCommandUtils.js';
+import {
+  captureWorkingValidationBaseline,
+  createIncrementalWorkingValidator,
+} from '../../../../app/editing/workingEditValidation.js';
 import { applyAttributeEditToDocument } from './editAppliers.js';
 import { buildIdentityEditConfig, handleIdRenumber } from './idRenumber.js';
 import { updateEditingSummary } from './editHistory.js';
-import { getModifications, redisplayCurrentEditingElement } from './editState.js';
+import {
+  getModifications,
+  getCurrentEditingElement,
+  redisplayCurrentEditingElement,
+} from './editState.js';
 
 const log = createLogger('viewer:edit-mode');
+
+const SECTION_REFERENCE_ATTRIBUTES = new Set(['id_section', 'id_section_FD', 'id_section_WR']);
+const CHANGE_SECTION_ELEMENT_TYPES = new Set([
+  'Column',
+  'Post',
+  'Girder',
+  'Beam',
+  'Brace',
+  'Slab',
+  'Wall',
+  'ShearWall',
+  'Footing',
+  'StripFooting',
+  'Pile',
+  'FoundationColumn',
+  'Parapet',
+]);
+const MEMBER_OFFSET_ELEMENT_TYPES = new Set([
+  'Column',
+  'Post',
+  'Girder',
+  'Beam',
+  'Brace',
+  'Footing',
+  'StripFooting',
+  'Pile',
+  'FoundationColumn',
+  'Parapet',
+]);
+
+function isWorkingSessionActive() {
+  return editingSession.getState()?.active === true;
+}
+
+function createWorkingValidationGate() {
+  const workingDocument = editingSession.getWorkingDocument();
+  if (!workingDocument) {
+    throw new Error('Working Document がありません。');
+  }
+  const baseline = captureWorkingValidationBaseline(workingDocument);
+  return createIncrementalWorkingValidator(baseline);
+}
+
+export function commitWorkingAttributeEdit(
+  elementType,
+  elementId,
+  attributeName,
+  newValue,
+  editPath,
+) {
+  const validate = createWorkingValidationGate();
+
+  if (attributeName === 'id' && !editPath) {
+    return editingSession.renumberId(elementType, elementId, newValue, { validate });
+  }
+
+  if (
+    !editPath &&
+    SECTION_REFERENCE_ATTRIBUTES.has(attributeName) &&
+    CHANGE_SECTION_ELEMENT_TYPES.has(elementType)
+  ) {
+    return editingSession.changeSection(elementType, elementId, newValue, {
+      attributeName,
+      validate,
+    });
+  }
+
+  if (
+    !editPath &&
+    MEMBER_OFFSET_ELEMENT_TYPES.has(elementType) &&
+    /^offset(?:_|$)/.test(attributeName)
+  ) {
+    return editingSession.setMemberOffset(
+      elementType,
+      elementId,
+      { [attributeName]: newValue },
+      { validate },
+    );
+  }
+
+  return editingSession.setAttribute(elementType, elementId, attributeName, newValue, {
+    editPath,
+    validate,
+  });
+}
 
 /**
  * 属性値を編集（ParameterEditorモーダル、失敗時はprompt()フォールバック）
@@ -36,8 +133,8 @@ export async function editAttributeValue(
   options = {},
 ) {
   const editPath = options.path || null;
+  const workingSessionAtStart = isWorkingSessionActive();
 
-  // 編集開始イベントを発行
   eventBus.emit(EditEvents.EDIT_STARTED, {
     elementType,
     elementId,
@@ -47,62 +144,62 @@ export async function editAttributeValue(
   });
 
   let newValue = null;
-  // プレビュー状態（try/catch をまたいで参照するためスコープを外に出す）
   let provisionalApplied = false;
   let previewTimer = null;
 
   try {
     const suggestionEngine = getSuggestionEngine();
     const parameterEditor = getParameterEditor();
+    const tagName = resolveElementTagName(elementType) || `Stb${elementType}`;
 
-    // サジェスト候補を取得
     const suggestions = suggestionEngine
-      ? suggestionEngine.getSuggestions(elementType, attributeName, { currentValue, elementId })
+      ? suggestionEngine.getSuggestions(elementType, attributeName, {
+          currentValue,
+          elementId,
+          tagName,
+        })
       : [];
 
-    // 属性情報を取得
-    const tagName = elementType === 'Node' ? 'StbNode' : `Stb${elementType}`;
     const attrInfo = getAttributeInfo(tagName, attributeName);
 
-    // ParameterEditorの設定
     const coordinateAttrNames = ['x', 'y', 'z'];
     const forceFreeText =
       elementType === 'Node' && coordinateAttrNames.includes((attributeName || '').toLowerCase());
 
-    // プレビュー: 入力中の値をデバウンス付きで仮適用（modifications には追記しない）
-    const onPreview = (previewValue) => {
-      clearTimeout(previewTimer);
-      previewTimer = setTimeout(() => {
-        applyAttributeEditToDocument(elementType, elementId, attributeName, previewValue, editPath);
-        provisionalApplied = true;
-      }, 400);
-    };
+    const onPreview = workingSessionAtStart
+      ? undefined
+      : (previewValue) => {
+          clearTimeout(previewTimer);
+          previewTimer = setTimeout(() => {
+            applyAttributeEditToDocument(
+              elementType,
+              elementId,
+              attributeName,
+              previewValue,
+              editPath,
+            );
+            provisionalApplied = true;
+          }, 400);
+        };
 
-    // 自己同一性属性（id / guid）は「既存値から選ぶ」のではなく「一意な新規値を入力・生成する」用途。
-    // 既存値サジェストは重複を誘発するため使わず、直接入力＋自動生成（id は空き番号採番・重複検証付き）を提供する。
     const identity = buildIdentityEditConfig(attributeName, tagName, elementId);
-
-    // id のリナンバーは参照追従を伴う確定処理として扱うため、入力中のライブ仮適用は行わない。
     const isIdRenumber = attributeName === 'id' && !editPath;
 
     const config = {
       attributeName,
       currentValue: currentValue || '',
-      // 識別子は既存値サジェスト（＝重複候補）を出さない
       suggestions: identity ? [] : suggestions,
       elementType,
       elementId,
-      // スキーマ定義（型・制約・列挙値）。ParameterEditor が入力コントロールの種別を決定する
+      schemaTagName: tagName,
       schema: attrInfo,
       allowFreeText:
         !!identity || forceFreeText || !attrInfo || !suggestions.length || suggestions.length > 10,
       required: attrInfo ? attrInfo.required : false,
       onPreview: isIdRenumber ? undefined : onPreview,
-      // 識別子用の専用入力（直接入力＋自動生成ボタン）を有効化する
       ...(identity || {}),
     };
 
-    // ParameterEditorモーダルを表示
     if (!parameterEditor) {
       log.warn('ParameterEditor not available');
       return;
@@ -111,18 +208,14 @@ export async function editAttributeValue(
     clearTimeout(previewTimer);
 
     if (newValue !== null && suggestionEngine) {
-      // 使用統計を記録
       suggestionEngine.recordUsage(elementType, attributeName, newValue);
     }
   } catch (error) {
     log.error('属性編集中にエラーが発生しました:', error);
-
-    // フォールバック: 従来のprompt()を使用
     newValue = prompt(`属性「${attributeName}」の新しい値を入力してください:`, currentValue || '');
 
-    // XSDバリデーション
     if (newValue !== null && isSchemaLoaded()) {
-      const tagName = elementType === 'Node' ? 'StbNode' : `Stb${elementType}`;
+      const tagName = resolveElementTagName(elementType) || `Stb${elementType}`;
       const validation = validateAttributeValue(tagName, attributeName, newValue);
 
       if (!validation.valid) {
@@ -137,7 +230,6 @@ export async function editAttributeValue(
   }
 
   if (newValue === null) {
-    // プレビューで仮適用済みなら元の値に rollback
     if (provisionalApplied) {
       applyAttributeEditToDocument(
         elementType,
@@ -147,7 +239,6 @@ export async function editAttributeValue(
         editPath,
       );
     }
-    // 編集キャンセルイベントを発行
     eventBus.emit(EditEvents.EDIT_CANCELLED, {
       elementType,
       elementId,
@@ -157,13 +248,46 @@ export async function editAttributeValue(
     return;
   }
 
-  // id のリナンバー（自己IDの変更）は参照追従更新と確認ダイアログを伴う専用処理へ委譲する。
+  if (isWorkingSessionActive()) {
+    try {
+      const result = commitWorkingAttributeEdit(
+        elementType,
+        elementId,
+        attributeName,
+        newValue,
+        editPath,
+      );
+
+      if (attributeName === 'id' && !editPath && result?.changed === true) {
+        const currentEditingElement = getCurrentEditingElement();
+        if (currentEditingElement && String(currentEditingElement.idA) === String(elementId)) {
+          currentEditingElement.idA = String(newValue);
+        }
+      }
+    } catch (error) {
+      log.error('Working Document の属性編集を確定できませんでした:', error);
+      showError(`編集を確定できませんでした: ${error.message}`);
+      eventBus.emit(EditEvents.EDIT_CANCELLED, {
+        elementType,
+        elementId,
+        attributeName,
+        timestamp: Date.now(),
+      });
+      redisplayCurrentEditingElement();
+      updateEditingSummary();
+      return;
+    }
+
+    redisplayCurrentEditingElement();
+    updateEditingSummary();
+    return;
+  }
+
   if (attributeName === 'id' && !editPath) {
     handleIdRenumber(elementType, elementId, currentValue, newValue);
     return;
   }
 
-  // 修正を記録
   getModifications().push({
     op: 'attr',
     elementType,
@@ -174,7 +298,6 @@ export async function editAttributeValue(
     newValue: newValue,
   });
 
-  // XMLドキュメントを直接更新（モデルAのみ編集可能）
   const success = applyAttributeEditToDocument(
     elementType,
     elementId,
@@ -187,9 +310,6 @@ export async function editAttributeValue(
     log.warn('XML更新に失敗しましたが、修正履歴には記録されました');
   }
 
-  // UIを更新（現在の要素を再表示）
-  // 再表示は親部材（currentEditingElement）のタイプとIDで行う（断面ノード編集後も親部材パネルに戻す）
   redisplayCurrentEditingElement();
-
   updateEditingSummary();
 }

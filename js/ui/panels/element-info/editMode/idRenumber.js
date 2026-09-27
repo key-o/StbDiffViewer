@@ -2,17 +2,20 @@
  * @fileoverview id リナンバー（要素自身の id 変更）と識別子入力設定
  *
  * id / guid の専用入力設定の構築、id の一意性検証、参照追従を伴う id 変更（確認ダイアログ付き）を担当する。
- * 実際の文書書き換えは `editAppliers.applyIdRenumber` に委譲する。
+ * Working Session 中の入力候補・重複検証は active Working Document を参照し、legacy 確定処理だけを
+ * `editAppliers.applyIdRenumber` に委譲する。
  */
 
 import { eventBus, EditEvents } from '../../../../data/events/index.js';
 import { getState } from '../../../../data/state/globalState.js';
+import editDocumentProvider from '../../../../app/editing/editDocumentProvider.js';
 import { showSuccess, showError, showWarning } from '../../../common/toast.js';
 import { generateStbGuid } from '../../../../common-stb/utils/guidUtil.js';
 import { countIdReferences } from '../../../../common-stb/edit/idReferenceUpdater.js';
 import { generateNextId } from './domHelpers.js';
 import { applyIdRenumber } from './editAppliers.js';
 import { updateEditingSummary } from './editHistory.js';
+import { getLegacyMutationBlockedReason } from './legacyMutationGate.js';
 import {
   getModifications,
   getCurrentEditingElement,
@@ -25,6 +28,7 @@ import {
  * これらは「既存値から選択する」参照属性（id_section / id_node 等）とは意図が逆で、
  * 「重複しない一意な新規値を入力・生成する」用途。ParameterEditor へ generate（自動生成）
  * と extraValidate（id の一意性検証）を渡し、直接入力＋自動生成ボタンの専用入力を有効化する。
+ * Working Session active 中は採番・重複検証とも Working Document を対象とする。
  * @param {string} attributeName - 属性名
  * @param {string} tagName - STB タグ名（例: 'StbColumn'）
  * @param {string} elementId - 編集対象の現在の id（自身との重複を許容するため）
@@ -43,7 +47,7 @@ export function buildIdentityEditConfig(attributeName, tagName, elementId) {
   if (attributeName === 'id') {
     return {
       generate: () => {
-        const doc = getState('models.documentA');
+        const doc = editDocumentProvider.getActiveEditDocument();
         return doc ? generateNextId(doc, tagName) : '';
       },
       generateLabel: '🔢 空き番号',
@@ -58,6 +62,7 @@ export function buildIdentityEditConfig(attributeName, tagName, elementId) {
 /**
  * 編集後の id が同種要素（同一タグ名）の中で一意かを検証する。
  * 値が現在の id から変わっておらず、または重複が無ければ null、重複していればメッセージを返す。
+ * Working Session active 中は Working Document を対象とする。
  * @param {string} tagName - STB タグ名
  * @param {string} currentId - 編集前の id
  * @param {string} value - 入力された新しい id
@@ -66,7 +71,7 @@ export function buildIdentityEditConfig(attributeName, tagName, elementId) {
 function validateUniqueId(tagName, currentId, value) {
   const v = String(value ?? '').trim();
   if (!v || v === String(currentId ?? '')) return null;
-  const doc = getState('models.documentA');
+  const doc = editDocumentProvider.getActiveEditDocument();
   if (!doc) return null;
   const dup = doc.querySelector(`${tagName}[id="${v.replace(/"/g, '\\"')}"]`);
   return dup ? `ID ${v} は既に ${tagName} で使用されています` : null;
@@ -77,12 +82,26 @@ function validateUniqueId(tagName, currentId, value) {
  * 節点・断面の id 変更時は、これを参照する部材等（id_node 系属性・StbNodeId・
  * StbNodeIdOrder・id_section 系属性）を同一ドキュメント内で同時に更新し、整合した STB を保つ。
  * 履歴には {op:'renumberId'} を記録し、Undo で逆方向のリナンバーとして取り消す。
+ * Working Session 中は semantic RenumberIdCommand を利用するため、この legacy source mutation は
+ * fail-closed とする。
  * @param {string} elementType - 要素タイプ（'Node' / 'Column' / 'SecColumn_RC' 等）
  * @param {string} oldId - 変更前の id
  * @param {string} currentValue - 現在の id（oldId と同じ。比較用）
  * @param {string} newId - 変更後の id
  */
 export function handleIdRenumber(elementType, oldId, currentValue, newId) {
+  const blocked = getLegacyMutationBlockedReason('ID変更');
+  if (blocked) {
+    showWarning(blocked);
+    eventBus.emit(EditEvents.EDIT_CANCELLED, {
+      elementType,
+      elementId: String(oldId ?? ''),
+      attributeName: 'id',
+      timestamp: Date.now(),
+    });
+    return;
+  }
+
   const old = String(currentValue ?? oldId ?? '');
   const nw = String(newId ?? '');
   if (!nw || old === nw) return; // 変更なし

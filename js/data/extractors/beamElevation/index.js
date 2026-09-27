@@ -3,5 +3,5 @@
  * @module data/extractors/beamElevation
  */
 
-export { extractBeamElevationData } from './beamElevationData.js';
+export { extractBeamElevationData } from './beamElevationColumnOffset.js';
 export { computeRebarLayout, createDefaultRebarSettings } from './rebarLayout.js';

@@ -13,7 +13,6 @@ let clearInProgress = false;
 const DROP_HINT_LABELS = {
   stb: 'STB',
   ifc: 'IFC',
-  ss7: 'SS7 / CSV',
 };
 
 /**
@@ -51,8 +50,6 @@ export function getFilePickerAcceptAttribute(navigatorLike = globalThis.navigato
 
 /**
  * 有効なファイルタイプに応じて accept 属性・ドロップ案内を同期する。
- * SS7 等の無効な形式は featureFlags 経由で fileTypeConfig から外れるため、
- * 公開ビルドでは自動的に UI から除外される。
  *
  * @param {Navigator|Object|undefined} navigatorLike - 判定対象の Navigator 互換オブジェクト
  * @param {Document|Object} documentLike - 更新対象の Document 互換オブジェクト

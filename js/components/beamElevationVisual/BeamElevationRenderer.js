@@ -339,8 +339,9 @@ export function renderBeamElevationSvg(data, options = {}) {
 
   // 梁せい寸法（右端）
   const lastSupport = visibleSupports[visibleSupports.length - 1];
+  const lastColumnCenterMm = lastSupport.columnCenterMm ?? lastSupport.positionMm;
   drawDepthDimension(svg, {
-    x: mmToX(lastSupport.positionMm) + (lastSupport.depthAlongBeam / 2) * scale + 20,
+    x: mmToX(lastColumnCenterMm) + (lastSupport.depthAlongBeam / 2) * scale + 20,
     beamTop,
     beamBottom,
     depth: viewMaxDepth,
@@ -386,13 +387,14 @@ function drawSupports(svg, ctx) {
   const { supports, mmToX, beamTop, beamBottom, depthPx, columnOverhang, scale, axisMarkY } = ctx;
 
   for (const support of supports) {
-    const centerX = mmToX(support.positionMm);
+    const axisX = mmToX(support.positionMm);
+    const columnCenterX = mmToX(support.columnCenterMm ?? support.positionMm);
     const colW = support.depthAlongBeam * scale;
 
     if (colW > 0) {
       addRect(
         svg,
-        centerX - colW / 2,
+        columnCenterX - colW / 2,
         beamTop - columnOverhang,
         colW,
         depthPx + columnOverhang * 2,
@@ -404,8 +406,8 @@ function drawSupports(svg, ctx) {
       );
     }
 
-    // 柱芯線
-    addLine(svg, centerX, axisMarkY + AXIS_MARK_RADIUS, centerX, beamBottom + columnOverhang, {
+    // 通り芯線（StbNode位置）。柱矩形は部材オフセット後の実柱芯位置に描く。
+    addLine(svg, axisX, axisMarkY + AXIS_MARK_RADIUS, axisX, beamBottom + columnOverhang, {
       stroke: COLORS.axis,
       width: 0.8,
       dash: '12 3 3 3',
@@ -415,7 +417,7 @@ function drawSupports(svg, ctx) {
     if (support.axisName) {
       svg.appendChild(
         svgEl('circle', {
-          cx: centerX,
+          cx: axisX,
           cy: axisMarkY,
           r: AXIS_MARK_RADIUS,
           fill: '#ffffff',
@@ -423,7 +425,7 @@ function drawSupports(svg, ctx) {
           'stroke-width': 1.2,
         }),
       );
-      addText(svg, centerX, axisMarkY + 5, support.axisName, {
+      addText(svg, axisX, axisMarkY + 5, support.axisName, {
         size: FONT_SIZES.small,
         anchor: 'middle',
         fill: COLORS.axis,
@@ -439,7 +441,7 @@ function drawSupports(svg, ctx) {
       .filter(Boolean)
       .join(' ');
     if (label) {
-      addText(svg, centerX, beamBottom + columnOverhang + 16, label, {
+      addText(svg, columnCenterX, beamBottom + columnOverhang + 16, label, {
         size: FONT_SIZES.small,
         anchor: 'middle',
       });

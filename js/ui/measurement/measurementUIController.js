@@ -15,6 +15,7 @@ let _isActive = false;
 let _unsubscribers = [];
 /** @type {(event: MouseEvent) => void | null} カーソルツールチップ用mousemoveハンドラ */
 let _tooltipMouseMoveRef = null;
+let _isPointerOnMeasurementSurface = false;
 
 /**
  * 測定UIを破棄する（テスト・再初期化時のクリーンアップ用）
@@ -68,6 +69,7 @@ function _setupEventListeners() {
   on(MeasurementEvents.FIRST_POINT_PICKED, _onFirstPointPicked);
   on(MeasurementEvents.MEASUREMENT_COMPLETED, _onMeasurementCompleted);
   on(MeasurementEvents.MEASUREMENT_DELETED, _onMeasurementDeleted);
+  on(MeasurementEvents.SEQUENCE_RESET, _onSequenceReset);
   on(MeasurementEvents.ALL_CLEARED, _onAllCleared);
 }
 
@@ -85,7 +87,7 @@ function _onModeEntered() {
   }
   const canvas = document.getElementById('three-canvas');
   if (canvas) canvas.classList.add('measurement-mode');
-  _setHint('面または点をクリックして1点目を選択');
+  _setHint('面・点またはSTB図面の線をクリックして1点目を選択');
   _showStepIndicator();
   _setStep(1);
   _addCursorTooltipListener();
@@ -121,7 +123,7 @@ function _onFirstPointPicked({ elementInfo } = {}) {
 }
 
 function _onMeasurementCompleted({ id, distance }) {
-  _setHint('面または点をクリックして次の測定を開始');
+  _setHint('面・点またはSTB図面の線をクリックして次の測定を開始');
   _setStep(1);
   _setCursorTooltip('1点目をクリック');
   _clearStep1Info();
@@ -131,6 +133,14 @@ function _onMeasurementCompleted({ id, distance }) {
 function _onMeasurementDeleted({ id }) {
   const item = document.querySelector(`#measurement-list [data-id="${id}"]`);
   if (item) item.remove();
+}
+
+function _onSequenceReset() {
+  if (!_isActive) return;
+  _setHint('面・点またはSTB図面の線をクリックして1点目を選択');
+  _setStep(1);
+  _setCursorTooltip('1点目をクリック');
+  _clearStep1Info();
 }
 
 function _onAllCleared() {
@@ -207,35 +217,44 @@ function _clearStep1Info() {
 // カーソル追従ツールチップ
 // -------------------------------------------------------
 
+function _isMeasurementSurface(target) {
+  const canvas = document.getElementById('three-canvas');
+  if (target === canvas) return true;
+  return Boolean(target?.closest?.('#pdf-overlay-stage'));
+}
+
 function _addCursorTooltipListener() {
   _removeCursorTooltipListener();
-  const canvas = document.getElementById('three-canvas');
-  if (!canvas) return;
   _tooltipMouseMoveRef = (e) => {
     const tooltip = document.getElementById('measurement-cursor-tooltip');
-    if (tooltip && !tooltip.classList.contains('hidden')) {
+    if (!tooltip) return;
+    _isPointerOnMeasurementSurface = _isMeasurementSurface(e.target);
+    if (_isPointerOnMeasurementSurface && _isActive) {
       tooltip.style.left = `${e.clientX}px`;
       tooltip.style.top = `${e.clientY}px`;
+      tooltip.classList.remove('hidden');
+    } else {
+      tooltip.classList.add('hidden');
     }
   };
-  canvas.addEventListener('mousemove', _tooltipMouseMoveRef, { passive: true });
+  document.addEventListener('pointermove', _tooltipMouseMoveRef, { passive: true });
 }
 
 function _removeCursorTooltipListener() {
-  if (!_tooltipMouseMoveRef) return;
-  const canvas = document.getElementById('three-canvas');
-  if (canvas) canvas.removeEventListener('mousemove', _tooltipMouseMoveRef);
+  if (_tooltipMouseMoveRef) document.removeEventListener('pointermove', _tooltipMouseMoveRef);
   _tooltipMouseMoveRef = null;
+  _isPointerOnMeasurementSurface = false;
 }
 
 function _setCursorTooltip(text) {
   const tooltip = document.getElementById('measurement-cursor-tooltip');
   if (!tooltip) return;
   tooltip.textContent = text;
-  tooltip.classList.remove('hidden');
+  tooltip.classList.toggle('hidden', !_isPointerOnMeasurementSurface);
 }
 
 function _hideCursorTooltip() {
+  _isPointerOnMeasurementSurface = false;
   const tooltip = document.getElementById('measurement-cursor-tooltip');
   if (tooltip) tooltip.classList.add('hidden');
 }
@@ -256,7 +275,7 @@ function _addListItem(id, distance) {
   btn.type = 'button';
   btn.title = '削除';
   btn.textContent = '✕';
-  btn.addEventListener('click', () => _deps?.deleteById(id));
+  btn.addEventListener('click', () => eventBus.emit(MeasurementEvents.DELETE_REQUESTED, { id }));
 
   item.appendChild(span);
   item.appendChild(btn);

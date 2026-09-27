@@ -9,7 +9,7 @@
  */
 
 import { createLogger } from '../../../utils/logger.js';
-import { getState } from '../../../data/state/globalState.js';
+import editDocumentProvider from '../../../app/editing/editDocumentProvider.js';
 import { showError } from '../../common/toast.js';
 import {
   buildTemplateNode,
@@ -39,7 +39,8 @@ function directChildrenByName(initialChildren, name) {
 
 function renderNode(elementName, host, options) {
   const node = buildTemplateNode(elementName);
-  const initialState = options.initialState?.elementName === elementName ? options.initialState : null;
+  const initialState =
+    options.initialState?.elementName === elementName ? options.initialState : null;
   if (!node) return { collect: () => ({ elementName, attrs: {}, children: [] }) };
 
   const fieldCtrls = [];
@@ -332,7 +333,7 @@ function sourceElementsForRoot(doc, containerName, rootName) {
  */
 export function openSchemaElementBuilder(config) {
   return new Promise((resolve) => {
-    const docA = getState('models.documentA');
+    const docA = editDocumentProvider.getActiveEditDocument();
     if (!docA) {
       showError('モデルAが読み込まれていません');
       resolve(null);
@@ -415,7 +416,11 @@ export function openSchemaElementBuilder(config) {
       blank.value = '';
       blank.textContent = config.emptyCopyLabel || '（コピーしない：空の要素から作成）';
       sourceRow.select.appendChild(blank);
-      for (const source of sourceElementsForRoot(docA, config.schemaContainerName, rootRow.select.value)) {
+      for (const source of sourceElementsForRoot(
+        docA,
+        config.schemaContainerName,
+        rootRow.select.value,
+      )) {
         const option = document.createElement('option');
         option.value = source.getAttribute('id');
         const name = source.getAttribute('name') || source.getAttribute('joint_name');
@@ -465,7 +470,7 @@ export function openSchemaElementBuilder(config) {
     requestAnimationFrame(() => overlay.classList.add('show'));
 
     const onSubmit = () => {
-      const doc = getState('models.documentA');
+      const doc = editDocumentProvider.getActiveEditDocument();
       if (!doc || !rootCtrl) return;
       const formState = rootCtrl.collect();
       const errors = validateFormStateTree(formState);
@@ -490,7 +495,9 @@ export function openSchemaElementBuilder(config) {
     };
 
     closeBtn.addEventListener('click', () => close(null));
-    buttonArea.querySelector('.parameter-editor-cancel')?.addEventListener('click', () => close(null));
+    buttonArea
+      .querySelector('.parameter-editor-cancel')
+      ?.addEventListener('click', () => close(null));
     buttonArea.querySelector('.parameter-editor-ok')?.addEventListener('click', onSubmit);
     overlay.addEventListener('click', (event) => {
       if (event.target === overlay) close(null);

@@ -7,7 +7,7 @@
  * @module ui/panels/element-info/addMemberForm/formSummary
  */
 
-import { getState } from '../../../../data/state/globalState.js';
+import editDocumentProvider from '../../../../app/editing/editDocumentProvider.js';
 import { validateNewMember, validateNodeLink } from '../addMemberValidation.js';
 import { getNewMemberDefinitions } from '../editMode/index.js';
 import { PANEL_MEMBER_TYPES, POINT_MEMBER_TYPES } from '../memberCategories.js';
@@ -27,7 +27,7 @@ import { formState } from './formState.js';
  */
 export function getLinkedNodeIds(elementType, targetId) {
   const tagName = VALIDATION_TAG_OVERRIDES[elementType] || `Stb${elementType}`;
-  const doc = getState('models.documentA');
+  const doc = editDocumentProvider.getActiveEditDocument();
   if (!targetId || !doc) return [];
   const el = doc.querySelector(`${tagName}[id="${String(targetId).replace(/"/g, '\\"')}"]`);
   if (!el) return [];

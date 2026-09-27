@@ -14,6 +14,8 @@ import {
   resolveElementInfoModelSide,
   shouldUseSingleColumnElementInfo,
 } from './DisplayModelResolver.js';
+import { renderQuantityInfoFromStores } from './QuantityInfoRenderer.js';
+import { renderElementInfoTabs, setupElementInfoTabs } from './ElementInfoTabs.js';
 import { generateValidationInfoHtml } from '../../../common-stb/validation/validationHtmlRenderer.js';
 import { escapeHtml, valueToSafeHtml } from '../../../utils/htmlUtils.js';
 
@@ -237,7 +239,7 @@ export function tryFallbackDisplay(elementType, idA, idB, contentDiv) {
       const metaPairs = Object.entries(ud.profileMeta || {})
         .map(([key, v]) => `${escapeHtml(key)}: ${escapeHtml(v)}`)
         .join('<br>');
-      contentDiv.innerHTML = `
+      const derivedHtml = `
         <div style="font-weight:var(--font-weight-bold);margin-bottom:4px;">${escapeHtml(elementType)} (Mesh UserData)</div>
         <div><strong>ID:</strong> ${valueToSafeHtml(ud.elementId, '-')}</div>
         <div><strong>Section Type:</strong> ${valueToSafeHtml(
@@ -254,6 +256,12 @@ export function tryFallbackDisplay(elementType, idA, idB, contentDiv) {
           '-',
         )}</div>
       `;
+      contentDiv.innerHTML = renderElementInfoTabs({
+        stbHtml: '<div class="element-info-tab-empty">STB XML情報は利用できません。</div>',
+        derivedHtml,
+        preferredTab: 'derived',
+      });
+      setupElementInfoTabs(contentDiv);
 
       return true;
     }
@@ -366,22 +374,29 @@ export function showJointMeshDataOnly(
     hasModelB,
   });
 
-  let content = renderElementInfoTitleHtml(title);
-  content += '<table class="unified-comparison-table">';
+  const titleHtml = renderElementInfoTitleHtml(title);
+  let derivedContent = '<table class="unified-comparison-table">';
 
   if (showSingleColumn) {
-    content += buildSingleColumnHeaderHtml('属性', displayModelSide);
+    derivedContent += buildSingleColumnHeaderHtml('属性', displayModelSide);
   } else {
-    content += buildComparisonHeaderHtml('属性');
+    derivedContent += buildComparisonHeaderHtml('属性');
   }
 
-  content += '<tbody>';
-  content += renderJointParentInfo(jointMeshDataA, jointMeshDataB, showSingleColumn, null);
-  content += '</tbody></table>';
-  content +=
+  derivedContent += '<tbody>';
+  derivedContent += renderJointParentInfo(jointMeshDataA, jointMeshDataB, showSingleColumn, null);
+  derivedContent += '</tbody></table>';
+  derivedContent +=
     '<p style="color: orange; font-size: var(--font-size-sm); margin-top: 8px;">※ XML内に継手定義が見つかりませんでした。メッシュデータのみを表示しています。</p>';
 
-  contentDiv.innerHTML = content;
+  contentDiv.innerHTML =
+    titleHtml +
+    renderElementInfoTabs({
+      stbHtml: '<div class="element-info-tab-empty">STB XML内に継手定義が見つかりません。</div>',
+      derivedHtml: derivedContent,
+      preferredTab: 'derived',
+    });
+  setupElementInfoTabs(contentDiv);
 
   const tbody = contentDiv.querySelector('tbody');
   if (tbody) {
@@ -417,7 +432,8 @@ export function showInfo(
   const idA = nodeA ? nodeA.getAttribute('id') : null;
   const idB = nodeB ? nodeB.getAttribute('id') : null;
 
-  let content = renderElementInfoTitleHtml(title);
+  const titleHtml = renderElementInfoTitleHtml(title);
+  let content = '';
 
   const hasModelA = !!getState('models.documentA');
   const hasModelB = !!getState('models.documentB');
@@ -468,6 +484,22 @@ export function showInfo(
   }
 
   content += '</tbody></table>';
+
+  const editingState = getState('models.editing');
+  const suppressAReason =
+    editingState?.active &&
+    (editingState.dirty || editingState.untrackedDirty || Number(editingState.workingRevision) > 0)
+      ? '編集中のモデルA数量は増分再計算未対応のため、stale値を表示していません。'
+      : null;
+  const derivedContent = renderQuantityInfoFromStores({
+    storeA: getState('models.derivedQuantitiesA'),
+    storeB: getState('models.derivedQuantitiesB'),
+    nodeA,
+    nodeB,
+    showSingleColumn,
+    displayModelSide,
+    suppressAReason,
+  });
 
   const elementId = idA || idB;
   const displayedValidationIds = new Set();
@@ -523,7 +555,13 @@ export function showInfo(
     }
   }
 
-  contentDiv.innerHTML = content;
+  contentDiv.innerHTML =
+    titleHtml +
+    renderElementInfoTabs({
+      stbHtml: content,
+      derivedHtml: derivedContent,
+    });
+  setupElementInfoTabs(contentDiv);
 
   const tbody = contentDiv.querySelector('#element-info-tbody');
   setupCollapseHandlers(tbody);

@@ -33,6 +33,9 @@ import {
   displayElementInfo,
   displayMultiSelectionSummary,
 } from '../panels/element-info/ElementInfoDisplay.js';
+import { displayRebarInfo } from '../panels/element-info/RebarElementInfo.js';
+import { mountBatchPropertyEditor } from '../panels/element-info/editMode/batchPropertyEditor.js';
+import { mountCadOperationPanel } from '../panels/element-info/editMode/cadOperationPanel.js';
 import { activateSectionBoxForBox } from '../viewer3d/sectionBox.js';
 import {
   getLoadingIndicator,
@@ -73,11 +76,19 @@ export function setupAppEventBridge() {
     InteractionEvents.DISPLAY_ELEMENT_INFO,
     ({ idA, idB, elementType, modelSource } = {}) => {
       displayElementInfo(idA, idB, elementType, modelSource);
+      mountCadOperationPanel();
     },
   );
 
+  eventBus.on(InteractionEvents.DISPLAY_REBAR_INFO, (rebarInfo = {}) => {
+    displayElementInfo(null, null, null);
+    displayRebarInfo(rebarInfo);
+  });
+
   eventBus.on(InteractionEvents.DISPLAY_MULTI_SELECTION_INFO, (summaryData = {}) => {
     displayMultiSelectionSummary(summaryData);
+    mountBatchPropertyEditor();
+    mountCadOperationPanel();
   });
 
   eventBus.on(

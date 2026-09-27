@@ -48,6 +48,8 @@ body {
   background-color: var(--bg-panel); /* Light background for the panel */
   border-left: var(--border-width) solid var(--border-color); /* 左に境界線を追加 */
   flex-shrink: 0; /* Prevent panel from shrinking */
+  position: relative;
+  z-index: var(--z-panel, 10);
   scrollbar-gutter: stable;
   transition:
     width var(--transition-base),
@@ -128,6 +130,7 @@ body.overlay-collapsed .canvas-drop-hint {
   background-color: var(--bg-canvas);
   outline: 2px dashed rgba(255, 255, 255, 0.08);
   position: relative; /* キャンバス要素の絶対配置用 */
+  z-index: var(--z-base, 1);
   overflow: hidden;
 }
 

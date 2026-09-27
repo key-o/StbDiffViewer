@@ -37,7 +37,9 @@ const ELEMENT_TYPE_INFO = Object.fromEntries(
 );
 
 function getTypeInfo(type) {
-  return ELEMENT_TYPE_INFO[type] || DXF_ONLY_TYPE_INFO[type] || { name: ELEMENT_LABELS[type] || type };
+  return (
+    ELEMENT_TYPE_INFO[type] || DXF_ONLY_TYPE_INFO[type] || { name: ELEMENT_LABELS[type] || type }
+  );
 }
 
 function getTypeColor(type) {

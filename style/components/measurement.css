@@ -184,3 +184,105 @@
   color: #ffffff;
   border-color: var(--color-primary, #2255cc);
 }
+
+
+/* PDF図面ワークスペースでも同じ寸法測定UIを利用する */
+#pdf-overlay-stage.measurement-mode {
+  cursor: crosshair;
+}
+
+body.workspace-view-active #measurement-panel {
+  right: calc(var(--panel-width) + 16px);
+}
+
+body.workspace-view-active .measurement-step-indicator {
+  left: calc((100vw - var(--panel-width)) / 2);
+}
+
+/* 右サイドバーを折り畳んだ場合は、実際のworkspace幅に合わせて測定UIも復帰させる */
+body.workspace-view-active.overlay-collapsed #measurement-panel {
+  right: 16px;
+}
+
+body.workspace-view-active.overlay-collapsed .measurement-step-indicator {
+  left: 50%;
+}
+
+@media (max-width: 900px) {
+  body.workspace-view-active #measurement-panel {
+    right: 16px;
+    top: auto;
+    bottom: 16px;
+    min-width: 0;
+    max-width: min(260px, calc(100vw - 32px));
+    max-height: 40vh;
+  }
+
+  body.workspace-view-active .measurement-step-indicator {
+    left: 50%;
+  }
+}
+
+/* PDF上に重ねるSTB線寸法 */
+.pdf-overlay-measurements {
+  color: var(--color-primary);
+}
+
+.pdf-overlay-measurement-source-line {
+  stroke: var(--color-primary);
+  stroke-width: 4;
+  opacity: 0.75;
+}
+
+.pdf-overlay-measurement-normal,
+.pdf-overlay-measurement-extension {
+  stroke: var(--color-primary-light);
+  stroke-width: 1.25;
+  stroke-dasharray: 4 3;
+}
+
+.pdf-overlay-measurement-dimension {
+  stroke: var(--color-primary);
+  stroke-width: 2;
+  pointer-events: stroke;
+}
+
+.pdf-overlay-measurement-draggable {
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.pdf-overlay-measurement-draggable:active {
+  cursor: grabbing;
+}
+
+.pdf-overlay-measurement-hit {
+  stroke: transparent;
+  stroke-width: 14;
+  pointer-events: stroke;
+  cursor: grab;
+}
+
+.pdf-overlay-measurement-source-line,
+.pdf-overlay-measurement-normal,
+.pdf-overlay-measurement-extension,
+.pdf-overlay-measurement-pick {
+  pointer-events: none;
+}
+
+.pdf-overlay-measurement-pick {
+  fill: var(--bg-elevated);
+  stroke: var(--color-primary);
+  stroke-width: 2;
+}
+
+.pdf-overlay-measurement-label {
+  fill: var(--color-primary-active);
+  pointer-events: painted;
+  cursor: grab;
+  stroke: var(--bg-elevated);
+  stroke-width: 4;
+  paint-order: stroke;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+}

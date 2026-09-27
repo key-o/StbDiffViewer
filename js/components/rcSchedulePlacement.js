@@ -23,9 +23,8 @@ function finiteDistance(value, allowZero) {
  */
 export function normalizeRcScheduleFaces(value, keys, fallbackFaces) {
   const scalar = finiteDistance(value, true);
-  const source = scalar !== null
-    ? Object.fromEntries(keys.map((key) => [key, scalar]))
-    : value || {};
+  const source =
+    scalar !== null ? Object.fromEntries(keys.map((key) => [key, scalar])) : value || {};
 
   return Object.fromEntries(
     keys.map((key) => [

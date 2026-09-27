@@ -6,18 +6,17 @@
  * ローカル座標（左上原点、X右向き、Y下向き）へ正規化する。
  */
 
+import { barOuterDiameterMm } from '../../constants/beamOpeningRules.js';
+import { REBAR_STANDARD_RULES } from '../../constants/rebarStandardRules.js';
 import { selectOuterInValues } from '../rebarSlotLayout.js';
-import {
-  createEvenlySpacedValues,
-  parseNumericRebarDiameterMm,
-} from '../rebarGeometryUtils.js';
+import { createEvenlySpacedValues, parseNumericRebarDiameterMm } from '../rebarGeometryUtils.js';
 import {
   BASELINE_COLUMN_COVER_FACES,
   averageColumnCoverFaces,
   normalizeColumnCoverFaces,
   resolveColumnMainCenterFaces,
   selectBaselineInnerLegSlotIndices,
-} from '../../ui/panels/sectionList/columnSectionCover.js';
+} from './columnSectionCover.js';
 
 const DEFAULT_MAIN_DIA = 'D22';
 
@@ -30,12 +29,6 @@ export function parseColumnBarDiameterMm(dia) {
   return parseNumericRebarDiameterMm(dia, 0);
 }
 
-function resolveCenterDistance(value, fallback) {
-  if (value === null || value === undefined || value === '') return fallback;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
 function evenlySpaced(start, end, count) {
   return createEvenlySpacedValues(start, end, count);
 }
@@ -45,9 +38,9 @@ function pointKey(point) {
 }
 
 function uniqueSorted(values) {
-  return [
-    ...new Set(values.filter(Number.isFinite).map((value) => Number(value.toFixed(9)))),
-  ].sort((a, b) => a - b);
+  return [...new Set(values.filter(Number.isFinite).map((value) => Number(value.toFixed(9))))].sort(
+    (a, b) => a - b,
+  );
 }
 
 function createSharedAxisValues(start, end, firstCount, secondCount, minimumSlotCount = 0) {
@@ -59,14 +52,7 @@ function createSharedAxisValues(start, end, firstCount, secondCount, minimumSlot
   return evenlySpaced(start, end, maxCount);
 }
 
-function calculateRectangularPositionsFromValues(
-  xValues,
-  yValues,
-  xLeft,
-  xRight,
-  yTop,
-  yBottom,
-) {
+function calculateRectangularPositionsFromValues(xValues, yValues, xLeft, xRight, yTop, yBottom) {
   const positions = new Map();
   const add = (point, direction) => {
     const key = pointKey(point);
@@ -240,9 +226,7 @@ function getSecondLayerGroups(mainBar) {
   return {
     centerInterval: second.centerInterval,
     clearInterval: second.clearInterval,
-    groups: groups.map((group) =>
-      normalizeDirectionalGroup(group, mainBar?.dia, mainBar?.grade),
-    ),
+    groups: groups.map((group) => normalizeDirectionalGroup(group, mainBar?.dia, mainBar?.grade)),
   };
 }
 
@@ -288,7 +272,7 @@ function placeFirstLayer(mainBar, bounds, sharedAxes) {
   };
 }
 
-function placeSecondLayer(mainBar, firstBounds, sharedAxes, remaining, hoopDiameter) {
+function placeSecondLayer(mainBar, firstBounds, sharedAxes, remaining) {
   const second = getSecondLayerGroups(mainBar);
   if (!second?.groups?.length || remaining <= 0) {
     return { bars: [], countX: 0, countY: 0 };
@@ -299,15 +283,44 @@ function placeSecondLayer(mainBar, firstBounds, sharedAxes, remaining, hoopDiame
   if (countX === 0 && countY === 0) return { bars: [], countX, countY };
 
   const primaryDia = second.groups[0].dia || mainBar?.dia || DEFAULT_MAIN_DIA;
-  const mainDia = parseColumnBarDiameterMm(mainBar?.dia || primaryDia);
-  const secondDia = parseColumnBarDiameterMm(primaryDia);
-  const estimatedInterval = Math.max(30, hoopDiameter + mainDia / 2 + secondDia / 2);
-  const clearInterval = Number(second.clearInterval);
-  const clearCenterInterval =
-    Number.isFinite(clearInterval) && clearInterval > 0
-      ? clearInterval + mainDia / 2 + secondDia / 2
-      : estimatedInterval;
-  const interval = resolveCenterDistance(second.centerInterval, clearCenterInterval);
+  const firstDiaName = mainBar?.dia || primaryDia;
+  const firstDia = parseColumnBarDiameterMm(firstDiaName);
+  const firstOuter = barOuterDiameterMm(firstDiaName, firstDia);
+  const explicitCenter = Number(second.centerInterval);
+  const explicitClear = Number(second.clearInterval);
+  const intervalCandidates = [];
+
+  if (Number.isFinite(explicitCenter) && explicitCenter > 0) {
+    intervalCandidates.push(explicitCenter);
+  } else {
+    for (const group of second.groups) {
+      const secondDiaName = group.dia || firstDiaName;
+      const secondDia = parseColumnBarDiameterMm(secondDiaName);
+      const secondOuter = barOuterDiameterMm(secondDiaName, secondDia);
+      if (Number.isFinite(explicitClear) && explicitClear > 0) {
+        intervalCandidates.push(explicitClear + firstOuter / 2 + secondOuter / 2);
+        continue;
+      }
+      if (String(secondDiaName).toUpperCase() === String(firstDiaName).toUpperCase()) {
+        const row = REBAR_STANDARD_RULES.resolveSpacingByDesignation(secondDiaName);
+        if (Number.isFinite(row?.layer2MinMm)) {
+          intervalCandidates.push(row.layer2MinMm);
+          continue;
+        }
+      }
+      const clear = REBAR_STANDARD_RULES.resolveMainBarClearSpacingMm({
+        firstDiaMm: firstDia,
+        secondDiaMm: secondDia,
+      });
+      if (Number.isFinite(clear)) {
+        intervalCandidates.push(clear + firstOuter / 2 + secondOuter / 2);
+      }
+    }
+  }
+  const interval = intervalCandidates.length > 0 ? Math.max(...intervalCandidates) : null;
+  if (!Number.isFinite(interval) || interval <= 0) {
+    return { bars: [], countX, countY };
+  }
 
   const bounds = {
     xLeft: firstBounds.xLeft + interval,
@@ -383,20 +396,16 @@ function createRectangularCoreBars(coreBar, width, height, sharedAxes) {
     sharedAxes.x.length >= sideCount + 2 &&
     sharedAxes.y.length >= sideCount + 2
   ) {
-    const selectCentered = (values) => {
-      const start = Math.floor((values.length - sideCount) / 2);
+    const selectCentered = (values, fromEnd = false) => {
+      const offset = (values.length - sideCount) / 2;
+      const start = fromEnd ? Math.ceil(offset) : Math.floor(offset);
       return values.slice(start, start + sideCount);
     };
     const xs = selectCentered(sharedAxes.x);
-    const ys = selectCentered(sharedAxes.y);
-    estimated = calculateRectangularPositionsFromValues(
-      xs,
-      ys,
-      xs[0],
-      xs.at(-1),
-      ys[0],
-      ys.at(-1),
-    );
+    // 3DローカルvはY上向きで、2DのY下向きとは並び順が逆になる。
+    // 奇数スロットから偶数本を切り出す場合の片寄り方向を3Dと一致させる。
+    const ys = selectCentered(sharedAxes.y, true);
+    estimated = calculateRectangularPositionsFromValues(xs, ys, xs[0], xs.at(-1), ys[0], ys.at(-1));
   }
 
   if (!estimated) {
@@ -461,9 +470,7 @@ function buildRectangularColumnGeometry(sectionData, options) {
   const height = Number(sectionData?.height) || 0;
   if (!(width > 0) || !(height > 0)) return null;
 
-  const coverFaces = normalizeColumnCoverFaces(
-    options.coverFaces || BASELINE_COLUMN_COVER_FACES,
-  );
+  const coverFaces = normalizeColumnCoverFaces(options.coverFaces || BASELINE_COLUMN_COVER_FACES);
   const mainBar = sectionData?.mainBar || {};
   const hoop = sectionData?.hoop || {};
   const centers = resolveColumnMainCenterFaces(mainBar, coverFaces);
@@ -481,10 +488,8 @@ function buildRectangularColumnGeometry(sectionData, options) {
   const firstCountX = firstGroups.reduce((sum, group) => sum + group.countX, 0);
   const firstCountY = firstGroups.reduce((sum, group) => sum + group.countY, 0);
   const secondLayer = getSecondLayerGroups(mainBar);
-  const secondCountX =
-    secondLayer?.groups?.reduce((sum, group) => sum + group.countX, 0) || 0;
-  const secondCountY =
-    secondLayer?.groups?.reduce((sum, group) => sum + group.countY, 0) || 0;
+  const secondCountX = secondLayer?.groups?.reduce((sum, group) => sum + group.countX, 0) || 0;
+  const secondCountY = secondLayer?.groups?.reduce((sum, group) => sum + group.countY, 0) || 0;
   const shared = options.sharedSlotCounts || {};
   const sharedAxes = {
     x: createSharedAxisValues(
@@ -506,13 +511,7 @@ function buildRectangularColumnGeometry(sectionData, options) {
   const first = placeFirstLayer(mainBar, firstBounds, sharedAxes);
   const targetTotal = toPositiveInteger(mainBar?.countTotal ?? mainBar?.count);
   const remaining = targetTotal > 0 ? Math.max(0, targetTotal - first.bars.length) : Infinity;
-  const second = placeSecondLayer(
-    mainBar,
-    firstBounds,
-    sharedAxes,
-    remaining,
-    parseColumnBarDiameterMm(hoop?.dia),
-  );
+  const second = placeSecondLayer(mainBar, firstBounds, sharedAxes, remaining);
   const mainBars = [...first.bars, ...second.bars];
 
   const xAnchors = uniqueSorted(
@@ -593,9 +592,7 @@ function buildCircularColumnGeometry(sectionData, options) {
   const diameter = Number(sectionData?.diameter) || 0;
   if (!(diameter > 0)) return null;
 
-  const coverFaces = normalizeColumnCoverFaces(
-    options.coverFaces || BASELINE_COLUMN_COVER_FACES,
-  );
+  const coverFaces = normalizeColumnCoverFaces(options.coverFaces || BASELINE_COLUMN_COVER_FACES);
   const coverAverage = averageColumnCoverFaces(coverFaces);
   const center = diameter / 2;
   const mainBar = sectionData?.mainBar || {};

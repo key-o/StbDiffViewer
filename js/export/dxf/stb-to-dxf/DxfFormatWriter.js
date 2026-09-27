@@ -433,17 +433,29 @@ export function generateDxfContent(bounds, layers, lines2D, texts2D = [], circle
 // ========================================
 
 /**
+ * DXF出力名を正規化する。UI入力に拡張子が含まれていても二重付与しない。
+ * @param {string} filename - 入力ファイル名
+ * @returns {string} .dxf付きファイル名
+ */
+export function normalizeDxfFilename(filename) {
+  const value = String(filename ?? '').trim() || 'stb_export';
+  return /\.dxf$/i.test(value) ? value : `${value}.dxf`;
+}
+
+/**
  * DXFファイルをダウンロード
  * @param {string} content - DXFファイル内容
- * @param {string} filename - ファイル名（拡張子なし）
+ * @param {string} filename - ファイル名（.dxf有無どちらも可）
  * @param {FileSystemDirectoryHandle} [directoryHandle] - 保存先フォルダ
  * @returns {Promise<boolean>} 保存成功フラグ
  */
 export async function downloadDxf(content, filename, directoryHandle = null) {
+  const outputFilename = normalizeDxfFilename(filename);
+
   // File System Access APIを使った保存
   if (directoryHandle) {
     try {
-      const fileHandle = await directoryHandle.getFileHandle(`${filename}.dxf`, { create: true });
+      const fileHandle = await directoryHandle.getFileHandle(outputFilename, { create: true });
       const writable = await fileHandle.createWritable();
       await writable.write(content);
       await writable.close();
@@ -456,6 +468,6 @@ export async function downloadDxf(content, filename, directoryHandle = null) {
 
   // 従来のダウンロード方式
   const blob = new Blob([content], { type: 'application/dxf' });
-  downloadBlob(blob, `${filename}.dxf`);
+  downloadBlob(blob, outputFilename);
   return true;
 }

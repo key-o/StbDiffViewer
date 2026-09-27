@@ -14,10 +14,7 @@ import {
   placeRcBarSymbol,
   serializeRcSvg,
 } from '../rcVisualSvg.js';
-import {
-  buildBeamScheduleGeometry,
-  normalizeBeamScheduleBarLayers,
-} from './beamScheduleModel.js';
+import { buildBeamScheduleGeometry, normalizeBeamScheduleBarLayers } from './beamScheduleModel.js';
 
 const BEAM_BAR_PREFIX = 'beam-bar';
 

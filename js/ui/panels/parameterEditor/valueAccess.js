@@ -68,8 +68,8 @@ export const parameterEditorValueAccessMethods = {
     }
     // XSDバリデーション
     else if (validationController.isSchemaReady() && currentValue && currentValue.trim() !== '') {
-      const { elementType, attributeName } = this.currentConfig;
-      const tagName = elementType === 'Node' ? 'StbNode' : `Stb${elementType}`;
+      const { elementType, attributeName, schemaTagName } = this.currentConfig;
+      const tagName = schemaTagName || (elementType === 'Node' ? 'StbNode' : `Stb${elementType}`);
       const validation = validationController.validateAttribute(
         tagName,
         attributeName,

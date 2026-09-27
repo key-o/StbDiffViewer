@@ -5,6 +5,7 @@ import {
 } from '../../../common-stb/import/parser/jsonSchemaLoader.js';
 import { createLogger } from '../../../utils/logger.js';
 import { getState } from '../../../data/state/globalState.js';
+import editDocumentProvider from '../../../app/editing/editDocumentProvider.js';
 import { getImportanceManager } from '../../../app/importanceManager.js';
 import { eventBus, ImportanceEvents } from '../../../data/events/index.js';
 import {
@@ -156,7 +157,9 @@ export async function displayElementInfo(idA, idB, elementType, modelSource = nu
   setCurrentEditingElement({ idA, idB, elementType, modelSource });
   currentDisplayNodes = { nodeA: null, nodeB: null, elementType: null };
 
-  const docA = getState('models.documentA');
+  // Model A の表示・編集読み取りは active Working Document を優先する。
+  // 比較 engine の models.documentA は source snapshot のまま維持する。
+  const docA = editDocumentProvider.getActiveEditDocument();
   const docB = getState('models.documentB');
   const hasModelA = !!docA;
   const hasModelB = !!docB;

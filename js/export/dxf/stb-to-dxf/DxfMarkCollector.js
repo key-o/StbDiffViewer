@@ -49,14 +49,9 @@ export function collectDxfElementMarks(elementTypes, clippingState = null, optio
       const box = new THREE.Box3().setFromObject(child);
       if (box.isEmpty()) return;
 
-      let position = box.getCenter(new THREE.Vector3());
+      const position = box.getCenter(new THREE.Vector3());
       if (clippingState?.type === 'story') {
-        const cutZ = resolveStoryPlanCutZ(
-          elementType,
-          box,
-          clippingState,
-          planCutOffset,
-        );
+        const cutZ = resolveStoryPlanCutZ(elementType, box, clippingState, planCutOffset);
         if (cutZ == null) return;
         position.z = cutZ;
       } else if (clippingState?.type && !isPointWithinClippingBounds(position, clippingState)) {

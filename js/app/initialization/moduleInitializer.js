@@ -142,4 +142,12 @@ export async function initializeRequiredModules(elementGroups) {
   } catch (error) {
     log.warn('DxfExporterプロバイダーの初期化に失敗しました:', error);
   }
+
+  // PDF照合は遅延読込。通常の3D表示・既存DXFの状態は変更しない。
+  try {
+    const { initializePdfOverlayServices } = await import('./pdfOverlayInitializer.js');
+    initializePdfOverlayServices();
+  } catch (error) {
+    log.warn('PDF照合サービスの初期化に失敗しました:', error);
+  }
 }

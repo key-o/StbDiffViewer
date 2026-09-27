@@ -19,6 +19,7 @@ import * as THREE from 'three';
 import { createLogger } from '../../../utils/logger.js';
 import { getState, setState } from '../../../data/state/globalState.js';
 import { eventBus, InteractionEvents } from '../../../data/events/index.js';
+import editDocumentProvider from '../../../app/editing/editDocumentProvider.js';
 import { scene, requestRender } from '../../../viewer/index.js';
 import { showInfo } from '../../common/toast.js';
 
@@ -151,12 +152,12 @@ export function clearHighlights() {
 }
 
 /**
- * documentA から節点IDの座標 {X,Y,Z} を取得する（スナップ・マーカー配置用）。
+ * active edit document から節点IDの座標 {X,Y,Z} を取得する（スナップ・マーカー配置用）。
  * @param {string} nodeId
  * @returns {{X: string, Y: string, Z: string}|null}
  */
 export function getNodeCoords(nodeId) {
-  const doc = getState('models.documentA');
+  const doc = editDocumentProvider.getActiveEditDocument();
   if (!doc || nodeId == null) return null;
   const node = doc.querySelector(`StbNode[id="${String(nodeId).replace(/"/g, '\\"')}"]`);
   if (!node) return null;

@@ -4,27 +4,29 @@
  * UI(SVG)とDXFで別々に配筋位置を計算しないため、断面寸法・主筋・STP・中子筋・腹筋を
  * mm単位のローカル座標（左上原点、X右向き、Y下向き）へ正規化する。
  *
- * かぶり・主筋重心位置の解決規則は柱リストと共通化する。
- * - 断面リストの「かぶり」はコンクリート面から外周HOOP芯までの作図距離とする
- * - 通常時は柱リストと同じ共通作図プロファイルを使用し、STB depth_coverは意味データとして保持する
- * - center_*は正値だけを明示主筋芯として優先する
- * - center_*欠損/0時は「作図かぶり + 柱リストと同じ基準差」で補う
+ * かぶり・主筋重心位置の解決規則:
+ * - center_* が正値なら主筋芯として最優先する
+ * - center_* がなく STB depth_cover が明示されていれば、かぶり + 1段筋半径で主筋芯を求める
+ * - 位置情報がなければ基準DXF由来の作図プロファイル（HOOP芯50mm・主筋芯72mm）で補う
+ * - 作図かぶりoverride時は従来どおりHOOP芯を優先し、center欠損面は共通オフセットで補う
+ * - 多段筋は重心間距離、段筋あき、日建連2023 表2-4の順に段間隔を解決する
  */
 
-import { createOuterInSlotOrder } from '../rebarSlotLayout.js';
-import {
-  createEvenlySpacedValues,
-  parseDtRebarDiameterMm,
-} from '../rebarGeometryUtils.js';
-import {
-  BASELINE_RC_SCHEDULE_PROFILE,
-  resolveRcScheduleProfile,
-} from '../rcScheduleProfile.js';
+import { createEvenlySpacedValues, parseDtRebarDiameterMm } from '../rebarGeometryUtils.js';
+import { BASELINE_RC_SCHEDULE_PROFILE, resolveRcScheduleProfile } from '../rcScheduleProfile.js';
 import {
   hasRcScheduleFaceValue,
   normalizeRcScheduleFaces,
   resolveRcScheduleMainFaces,
 } from '../rcSchedulePlacement.js';
+import {
+  assignBeamLayerGroupsToPositions,
+  beamLayerLayoutRadiusMm,
+  getBeamPositionMetadata,
+  normalizeBeamRebarLayers,
+  resolveBeamFirstLayerFaces,
+  resolveBeamLayerCenterSpacingMm,
+} from '../../data/extractors/beamSectionList/beamRebarPositionResolver.js';
 
 const DEFAULT_MAIN_DIA = 'D25';
 const DEFAULT_WEB_DIA = 'D13';
@@ -74,22 +76,16 @@ function resolveBeamMainOffsets(profile, hoopFaces) {
   );
 }
 
-function hasOwnMetadata(object, key) {
-  return !!object && Object.prototype.hasOwnProperty.call(object, key);
-}
-
 function resolveStrictSourceCover(positionData) {
-  if (hasOwnMetadata(positionData, 'sourceCover')) return positionData.sourceCover;
-  const cover = positionData?.cover || null;
-  if (hasOwnMetadata(cover, 'sourceCover')) return cover.sourceCover;
-  return cover;
+  return getBeamPositionMetadata(positionData).sourceCover;
 }
 
 function resolveExplicitMainCenters(positionData) {
-  if (hasOwnMetadata(positionData, 'mainCenters')) return positionData.mainCenters;
-  const cover = positionData?.cover || null;
-  if (hasOwnMetadata(cover, 'mainCenters')) return cover.mainCenters;
-  return null;
+  return getBeamPositionMetadata(positionData).mainCenters;
+}
+
+function resolveBeamLayerSpacing(positionData) {
+  return getBeamPositionMetadata(positionData).layerSpacing;
 }
 
 function normalizeBeamMainCenters(value) {
@@ -103,19 +99,37 @@ function normalizeBeamMainCenters(value) {
   };
 }
 
-export function resolveBeamScheduleCovers(
-  cover,
-  profile = BASELINE_RC_SCHEDULE_PROFILE,
+function positiveDistance(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+export function resolveBeamLayerCenterSpacing(
+  previousRadius,
+  currentRadius,
+  layerSpacing,
+  stirrupDiameter = 0,
 ) {
+  const explicitCenter = positiveDistance(layerSpacing?.centerInterval);
+  if (explicitCenter !== null) return explicitCenter;
+
+  const clearInterval = positiveDistance(layerSpacing?.clearInterval);
+  if (clearInterval !== null) {
+    return clearInterval + previousRadius + currentRadius;
+  }
+
+  // 柱リストと同じ推定規則。STBに段間隔がない場合だけ使用する。
+  return Math.max(30, Number(stirrupDiameter) + previousRadius + currentRadius);
+}
+
+export function resolveBeamScheduleCovers(cover, profile = BASELINE_RC_SCHEDULE_PROFILE) {
   const source = cover || {};
   const defaultCover = Number(profile?.beam?.defaultSourceCoverMm) || 40;
   const top = Number.isFinite(source.top) ? source.top : defaultCover;
   const bottom = Number.isFinite(source.bottom) ? source.bottom : defaultCover;
   const left = Number.isFinite(source.left) ? source.left : top;
   const right = Number.isFinite(source.right) ? source.right : top;
-  const estimated = ['top', 'bottom', 'left', 'right'].some(
-    (key) => !Number.isFinite(source[key]),
-  );
+  const estimated = ['top', 'bottom', 'left', 'right'].some((key) => !Number.isFinite(source[key]));
   return { top, bottom, left, right, estimated };
 }
 
@@ -124,58 +138,7 @@ function hasDrawingOverride(value) {
 }
 
 export function normalizeBeamScheduleBarLayers(bar) {
-  const sourceLayers = Array.isArray(bar?.layers)
-    ? bar.layers.filter((layer) => Number(layer?.count) > 0)
-    : [];
-
-  if (sourceLayers.length > 0) {
-    return sourceLayers
-      .map((layer, index) => {
-        const barGroups = Array.isArray(layer.barGroups)
-          ? layer.barGroups
-              .filter((group) => Number(group?.count) > 0)
-              .map((group) => ({
-                count: Number(group.count),
-                dia: group.dia || layer.dia || bar?.dia || DEFAULT_MAIN_DIA,
-                grade: group.grade || layer.grade || bar?.grade || null,
-                diaEstimated: !(group.dia || layer.dia || bar?.dia),
-              }))
-          : [];
-        const largestGroup = barGroups.reduce(
-          (largest, group) =>
-            !largest || parseBeamBarDiameterMm(group.dia) > parseBeamBarDiameterMm(largest.dia)
-              ? group
-              : largest,
-          null,
-        );
-        return {
-          step: Number(layer.step) > 0 ? Number(layer.step) : index + 1,
-          count: Number(layer.count),
-          dia: largestGroup?.dia || layer.dia || bar?.dia || DEFAULT_MAIN_DIA,
-          grade: layer.grade || bar?.grade || null,
-          diaEstimated: largestGroup?.diaEstimated ?? !(layer.dia || bar?.dia),
-          barGroups,
-        };
-      })
-      .sort((a, b) => a.step - b.step);
-  }
-
-  if (!bar) return [];
-  const dia = bar.dia || DEFAULT_MAIN_DIA;
-  const diaEstimated = !bar.dia;
-  return [
-    { step: 1, count: Number(bar.count1st || bar.count) || 0 },
-    { step: 2, count: Number(bar.count2nd) || 0 },
-    { step: 3, count: Number(bar.count3rd) || 0 },
-  ]
-    .filter((layer) => layer.count > 0)
-    .map((layer) => ({
-      ...layer,
-      dia,
-      grade: bar.grade || null,
-      diaEstimated,
-      barGroups: [],
-    }));
+  return normalizeBeamRebarLayers(bar, DEFAULT_MAIN_DIA);
 }
 
 export function evenlySpacedBeamValues(count, start, end) {
@@ -204,20 +167,16 @@ export function resolveBeamStirrupInnerAnchors(mainBarXs, innerLegCount, start, 
   return Array.from({ length: count }, (_, index) => start + (span * (index + 1)) / (count + 1));
 }
 
-function resolveLayerGroups(layer) {
-  if (layer.barGroups?.length > 0) return layer.barGroups;
-  return [{ count: layer.count, dia: layer.dia, grade: layer.grade, diaEstimated: layer.diaEstimated }];
-}
-
-function createBarPlacement(x, y, group, layer, side) {
+function createBarPlacement(x, y, assignment, layer, side, positionSource) {
   return {
     x,
     y,
-    dia: group.dia,
-    grade: group.grade || null,
+    dia: assignment.dia,
+    grade: assignment.grade || null,
     layer: layer.step,
     role: side === 'TOP' ? 'top' : 'bottom',
-    diaEstimated: !!group.diaEstimated,
+    diaEstimated: !!assignment.diaEstimated,
+    positionSource,
   };
 }
 
@@ -225,11 +184,12 @@ function createHorizontalLayers(bar, side, context) {
   const layers = normalizeBeamScheduleBarLayers(bar);
   const result = [];
   let previousY = null;
-  let previousRadius = 0;
+  let previousLayer = null;
+  let blocked = false;
 
   layers.forEach((layer, index) => {
-    const groups = resolveLayerGroups(layer);
-    const layoutRadius = Math.max(...groups.map((group) => beamBarRadiusMm(group.dia)));
+    if (blocked) return;
+    const layoutRadius = beamLayerLayoutRadiusMm(layer, DEFAULT_MAIN_DIA);
     const xPositions = evenlySpacedBeamValues(
       layer.count,
       context.mainCenters.left,
@@ -237,39 +197,34 @@ function createHorizontalLayers(bar, side, context) {
     );
 
     let y;
+    let positionSource;
     if (index === 0) {
       y = side === 'TOP' ? context.mainCenters.top : context.mainCenters.bottom;
+      positionSource = side === 'TOP' ? context.faceSources.top : context.faceSources.bottom;
     } else {
-      const centerSpacing = previousRadius + layoutRadius * 3;
-      y = side === 'TOP' ? previousY + centerSpacing : previousY - centerSpacing;
+      const resolved = resolveBeamLayerCenterSpacingMm({
+        previousLayer,
+        currentLayer: layer,
+        layerSpacing: context.layerSpacing,
+        applyDefaults: context.applyDefaults,
+      });
+      if (!Number.isFinite(resolved.value)) {
+        blocked = true;
+        return;
+      }
+      y = side === 'TOP' ? previousY + resolved.value : previousY - resolved.value;
+      positionSource = resolved.source;
     }
 
-    let placements;
-    if (layer.barGroups?.length > 0) {
-      placements = [];
-      const slotOrder = createOuterInSlotOrder(xPositions.length);
-      let slotCursor = 0;
-      groups.forEach((group) => {
-        for (let i = 0; i < group.count && slotCursor < slotOrder.length; i += 1) {
-          placements.push(createBarPlacement(xPositions[slotOrder[slotCursor]], y, group, layer, side));
-          slotCursor += 1;
-        }
-      });
-      const fallbackGroup = {
-        dia: layer.dia,
-        grade: layer.grade,
-        diaEstimated: layer.diaEstimated,
-      };
-      while (slotCursor < slotOrder.length) {
-        placements.push(
-          createBarPlacement(xPositions[slotOrder[slotCursor]], y, fallbackGroup, layer, side),
-        );
-        slotCursor += 1;
-      }
-    } else {
-      const group = groups[0];
-      placements = xPositions.map((x) => createBarPlacement(x, y, group, layer, side));
+    if (!Number.isFinite(y)) {
+      blocked = true;
+      return;
     }
+
+    const assignments = assignBeamLayerGroupsToPositions(layer, xPositions);
+    const placements = assignments.map((assignment) =>
+      createBarPlacement(assignment.position, y, assignment, layer, side, positionSource),
+    );
 
     result.push({
       step: layer.step,
@@ -279,9 +234,10 @@ function createHorizontalLayers(bar, side, context) {
       xPositions,
       y,
       placements,
+      positionSource,
     });
     previousY = y;
-    previousRadius = layoutRadius;
+    previousLayer = layer;
   });
 
   return result;
@@ -301,20 +257,28 @@ export function buildBeamScheduleGeometry(positionData, options = {}) {
   const drawingOverride = options.drawingCoverOverride ?? options.coverOverride ?? null;
   const overrideActive = hasDrawingOverride(drawingOverride);
 
-  // 柱リストと同じく、作図かぶりは断面リスト設定値（HOOP芯）を基準とする。
-  // STB depth_coverは意味データとしてsourceCoversへ保持するが、通常作図位置には直接使わない。
+  // HOOP芯はDXF作図プロファイルを基準とする。STB depth_coverは主筋かぶりなので、
+  // HOOP芯へ直接流用しない。作図overrideがある場合のみHOOP芯を置き換える。
   const hoopFaces = normalizeRcScheduleFaces(
     overrideActive ? drawingOverride : baselineHoopFaces,
     BEAM_FACE_KEYS,
     baselineHoopFaces,
   );
-  // 柱リストと同じく、明示center_*は作図かぶり設定より優先する。
-  const mainFaces = resolveRcScheduleMainFaces(
+  const baselineMainFaces = resolveRcScheduleMainFaces(
     explicitCenters,
     hoopFaces,
     BEAM_FACE_KEYS,
     mainOffsets,
   );
+  const positionResolution = resolveBeamFirstLayerFaces({
+    positionData,
+    fallbackFaces: baselineMainFaces,
+    fallbackSource: 'baseline-schedule',
+    useSourceCover: !overrideActive,
+    allowFallbackWhenNotApplicable: false,
+  });
+  const mainFaces = positionResolution.faces;
+  const layerSpacing = positionResolution.layerSpacing || resolveBeamLayerSpacing(positionData);
 
   const stirrup = positionData?.stirrup || null;
   const hasStirrup = !!stirrup?.dia;
@@ -333,7 +297,14 @@ export function buildBeamScheduleGeometry(positionData, options = {}) {
     bottom: depth - mainFaces.bottom,
   };
 
-  const context = { width, depth, mainCenters };
+  const context = {
+    width,
+    depth,
+    mainCenters,
+    layerSpacing,
+    applyDefaults: positionResolution.applyDefaults,
+    faceSources: positionResolution.faceSources,
+  };
   const topLayers = createHorizontalLayers(positionData?.topBar, 'TOP', context);
   const bottomLayers = createHorizontalLayers(positionData?.bottomBar, 'BOTTOM', context);
   const mainBars = [...topLayers, ...bottomLayers].flatMap((layer) => layer.placements);
@@ -367,46 +338,60 @@ export function buildBeamScheduleGeometry(positionData, options = {}) {
   }
 
   const webBars = [];
+  const webUnresolved = [];
   const webBar = positionData?.webBar;
-  if (webBar && Number(webBar.count) > 0) {
-    const dia = webBar.dia || DEFAULT_WEB_DIA;
-    const spacing = (mainCenters.bottom - mainCenters.top) / (Number(webBar.count) + 1);
-    for (let i = 1; i <= Number(webBar.count); i += 1) {
-      const y = mainCenters.top + spacing * i;
-      webBars.push({
-        x: mainCenters.left,
-        y,
-        dia,
-        role: 'web',
-        layer: null,
-        diaEstimated: !webBar.dia,
-      });
-      webBars.push({
-        x: mainCenters.right,
-        y,
-        dia,
-        role: 'web',
-        layer: null,
-        diaEstimated: !webBar.dia,
-      });
+  const webCount = Number.parseInt(webBar?.count, 10) || 0;
+  if (webBar && webCount > 0) {
+    if (webCount % 2 !== 0) {
+      webUnresolved.push(`web-bar-count-not-pairable:${webCount}`);
+    } else {
+      const dia = webBar.dia || DEFAULT_WEB_DIA;
+      const levelCount = webCount / 2;
+      const spacing = (mainCenters.bottom - mainCenters.top) / (levelCount + 1);
+      for (let i = 1; i <= levelCount; i += 1) {
+        const y = mainCenters.top + spacing * i;
+        webBars.push({
+          x: mainCenters.left,
+          y,
+          dia,
+          role: 'web',
+          layer: null,
+          diaEstimated: !webBar.dia,
+        });
+        webBars.push({
+          x: mainCenters.right,
+          y,
+          dia,
+          role: 'web',
+          layer: null,
+          diaEstimated: !webBar.dia,
+        });
+      }
     }
   }
 
   const hasCenterPlacement = hasRcScheduleFaceValue(explicitCenters, BEAM_FACE_KEYS);
+  const hasSourceCoverPlacement =
+    !overrideActive && hasRcScheduleFaceValue(strictSourceCover, BEAM_FACE_KEYS);
 
   return {
     width,
     depth,
     covers: sourceCovers,
     sourceCovers,
+    layerSpacing,
     scheduleHoopFaces: hoopFaces,
     scheduleMainFaces: mainFaces,
+    positionSources: positionResolution.faceSources,
+    unresolvedPlacement: [...positionResolution.unresolved, ...webUnresolved],
     profile,
     placementMode: overrideActive
       ? 'DRAWING_COVER_OVERRIDE'
       : hasCenterPlacement
         ? 'STB_CENTER'
-        : 'BASELINE_SCHEDULE',
+        : hasSourceCoverPlacement
+          ? 'STB_COVER'
+          : 'BASELINE_SCHEDULE',
     concrete: { left: 0, top: 0, right: width, bottom: depth },
     stirrup: stirrupBounds
       ? {

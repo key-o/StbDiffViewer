@@ -9,6 +9,7 @@
  */
 
 import { floatingWindowManager } from './floatingWindowManager.js';
+import { registerXmlValidationMarkIssues } from './xmlViewerIssueDescriptor.js';
 import { getState } from '../../data/state/globalState.js';
 import { formatXml } from '../../common-stb/export/xmlFormatter.js';
 import { showSuccess, showWarning } from '../common/toast.js';
@@ -18,6 +19,12 @@ import {
   getElementDefinitionForVersion,
   isVersionLoaded,
 } from '../../common-stb/import/parser/jsonSchemaLoader.js';
+import {
+  formatAttributeSchemaTitle,
+  getAttributeSchemaPresentation,
+  getChildElementSchemaRole,
+  getMissingRequiredAttributeNames,
+} from '../../common-stb/schema/schemaPresentation.js';
 
 const log = createLogger('ui:panels:xmlViewer');
 
@@ -43,6 +50,14 @@ const SEVERITY_RANK = {
   error: 3,
   warning: 2,
   info: 1,
+};
+
+const ELEMENT_ROLE_LABELS = {
+  root: 'ルート要素',
+  required: '必須子要素',
+  optional: '任意子要素',
+  choice: 'choice候補要素',
+  unknown: '親XSD定義外',
 };
 
 function normalizeModelSource(modelSource) {
@@ -115,6 +130,8 @@ export function initializeXmlViewer() {
     btn.title = isCollapsed ? '展開する' : '折りたたむ';
   });
 
+  ensureSchemaRoleLegend();
+
   // 編集イベントリスナー: 表示中のモデルが編集された場合にXMLを再表示
   eventBus.on(EditEvents.ATTRIBUTE_CHANGED, ({ modelSource }) => {
     const isViewerVisible = floatingWindowManager.isWindowVisible('xml-viewer-float');
@@ -126,6 +143,29 @@ export function initializeXmlViewer() {
   });
 
   log.info('XMLビューアパネルを初期化しました');
+}
+
+function ensureSchemaRoleLegend() {
+  const legend = document.querySelector('.xml-viewer-legend');
+  if (!legend || legend.querySelector('[data-xml-schema-role-legend]')) return;
+
+  const definitions = [
+    ['required', 'XSD必須属性'],
+    ['optional', 'XSD任意属性'],
+    ['choice', 'XSD choice要素'],
+  ];
+
+  for (const [role, label] of definitions) {
+    const item = document.createElement('span');
+    item.className = 'xml-legend-item';
+    item.dataset.xmlSchemaRoleLegend = role;
+
+    const swatch = document.createElement('span');
+    swatch.className = `xml-legend-swatch xml-legend-role-${role}`;
+    item.appendChild(swatch);
+    item.appendChild(document.createTextNode(label));
+    legend.appendChild(item);
+  }
 }
 
 /**
@@ -158,15 +198,15 @@ function updateSchemaStatus(schemaContext) {
   if (!schemaStatus) return;
 
   if (!schemaContext.loaded) {
-    schemaStatus.textContent = 'XSD定義色分け: スキーマ未ロード';
+    schemaStatus.textContent = 'XSD役割色分け: スキーマ未ロード';
     schemaStatus.className = 'xml-validation-status xml-schema-status has-warning';
-    schemaStatus.title = `バージョン ${schemaContext.version} のスキーマが未ロードのため、要素のXSD定義判定は未表示です`;
+    schemaStatus.title = `バージョン ${schemaContext.version} のスキーマが未ロードのため、要素・属性のXSD定義判定は未表示です`;
     return;
   }
 
-  schemaStatus.textContent = `XSD定義色分け: ${schemaContext.version}`;
+  schemaStatus.textContent = `XSD役割色分け: ${schemaContext.version}`;
   schemaStatus.className = 'xml-validation-status xml-schema-status ok';
-  schemaStatus.title = `要素名を XSD定義済み / XSD未定義 で色分け表示中（version: ${schemaContext.version}）`;
+  schemaStatus.title = `要素・属性を XSD の必須/任意/choice/未定義 で色分け表示中（version: ${schemaContext.version}）`;
 }
 
 function getCategoryLabel(category) {
@@ -244,16 +284,30 @@ function getElementSchemaState(el, schemaContext) {
   if (!schemaContext?.loaded) {
     return {
       known: null,
+      role: 'unknown',
+      definition: null,
       title: `XSD定義判定: スキーマ未ロード (version: ${version})`,
     };
   }
 
   const elementName = el.localName || el.tagName;
-  const known = Boolean(getElementDefinitionForVersion(version, elementName));
+  const definition = getElementDefinitionForVersion(version, elementName);
+  const known = Boolean(definition);
+  let role = 'root';
+
+  if (known && el.parentElement) {
+    const parentName = el.parentElement.localName || el.parentElement.tagName;
+    const parentDef = getElementDefinitionForVersion(version, parentName);
+    role = getChildElementSchemaRole(parentDef, elementName);
+  }
+
+  const roleText = ELEMENT_ROLE_LABELS[role] || role;
   return {
     known,
+    role,
+    definition,
     title: known
-      ? `XSD定義済み: <${elementName}> (version: ${version})`
+      ? `XSD定義済み: <${elementName}> / ${roleText} (version: ${version})`
       : `XSD未定義: <${elementName}> (version: ${version})`,
   };
 }
@@ -262,7 +316,9 @@ function appendTagName(container, el, schemaContext) {
   const state = getElementSchemaState(el, schemaContext);
   const tagName = document.createElement('span');
   tagName.className = 'xml-tag-name';
-  if (state.known === true) tagName.classList.add('xml-tag-xsd-known');
+  if (state.known === true) {
+    tagName.classList.add('xml-tag-xsd-known', `xml-tag-role-${state.role}`);
+  }
   if (state.known === false) tagName.classList.add('xml-tag-xsd-unknown');
   tagName.title = state.title;
   tagName.textContent = el.tagName;
@@ -303,7 +359,7 @@ function updateNavButtons() {
     } else {
       const pos = errorMarkIndex >= 0 ? errorMarkIndex + 1 : '-';
       label.textContent = `${pos}/${total} 箇所`;
-      label.title = `エラーのある箇所 ${pos} / ${total}（エラー総数とは異なります）`;
+      label.title = `エラーのある箇所 ${pos} / ${total}（同一箇所に複数エラーがある場合は集約）`;
     }
   }
 }
@@ -593,6 +649,89 @@ function renderDomNode(el, depth, errorMap, parent, schemaContext) {
   parent.appendChild(node);
 }
 
+function appendAttribute(container, el, attr, attrIssueMap, schemaState, schemaContext) {
+  const attrName = attr.name;
+  const attrLookupName = attr.localName || attrName;
+  const attrInfo =
+    schemaState.definition?.attributes?.get(attrName) ??
+    schemaState.definition?.attributes?.get(attrLookupName) ??
+    null;
+  const presentation = getAttributeSchemaPresentation(attrInfo, attrName);
+  const schemaTitle = formatAttributeSchemaTitle({
+    elementName: el.localName || el.tagName,
+    attributeName: attrName,
+    attrInfo,
+    version: schemaContext.version,
+  });
+
+  container.appendChild(document.createTextNode(' '));
+  const nameSpan = document.createElement('span');
+  nameSpan.className = `xml-attr-name xml-attr-role-${presentation.role}`;
+  for (const modifier of presentation.modifiers) {
+    nameSpan.classList.add(`xml-attr-${modifier}`);
+  }
+  nameSpan.title = schemaTitle;
+  nameSpan.textContent = attrName;
+  container.appendChild(nameSpan);
+  container.appendChild(document.createTextNode('="'));
+
+  const attrIssues = attrIssueMap.get(attrName) || attrIssueMap.get(attrLookupName) || [];
+  const attrIssue = pickPrimaryIssue(attrIssues);
+  if (attrIssue && attrIssues.length > 0) {
+    const mark = document.createElement('mark');
+    mark.className = `xml-mark-${attrIssue.severity} ${getIssueCategoryClass(attrIssue.category)}`;
+    mark.title = formatIssueTitle(attrIssues, schemaTitle);
+    registerXmlValidationMarkIssues(mark, attrIssues);
+    mark.textContent = attr.value;
+    container.appendChild(mark);
+  } else {
+    const valueSpan = document.createElement('span');
+    valueSpan.className = 'xml-attr-value';
+    for (const modifier of presentation.modifiers) {
+      valueSpan.classList.add(`xml-attr-value-${modifier}`);
+    }
+    valueSpan.title = schemaTitle;
+    valueSpan.textContent = attr.value;
+    container.appendChild(valueSpan);
+  }
+  container.appendChild(document.createTextNode('"'));
+}
+
+function appendMissingAttributeHint(
+  container,
+  el,
+  attributeName,
+  attrIssues,
+  schemaState,
+  schemaContext,
+) {
+  const attrInfo = schemaState.definition?.attributes?.get(attributeName) ?? null;
+  const schemaTitle = formatAttributeSchemaTitle({
+    elementName: el.localName || el.tagName,
+    attributeName,
+    attrInfo,
+    version: schemaContext.version,
+  });
+
+  container.appendChild(document.createTextNode(' '));
+  if (attrIssues.length > 0) {
+    const primary = pickPrimaryIssue(attrIssues);
+    const mark = document.createElement('mark');
+    mark.className = `xml-mark-${primary?.severity || 'error'} ${getIssueCategoryClass(primary?.category)} xml-missing-attr`;
+    mark.title = formatIssueTitle(attrIssues, schemaTitle);
+    registerXmlValidationMarkIssues(mark, attrIssues);
+    mark.textContent = `⟪@${attributeName} 欠落⟫`;
+    container.appendChild(mark);
+    return;
+  }
+
+  const hint = document.createElement('span');
+  hint.className = 'xml-missing-required-hint';
+  hint.title = `${schemaTitle}\nXML上に属性が存在しません。バリデーション実行前のXSD案内です。`;
+  hint.textContent = `⟪@${attributeName} 必須⟫`;
+  container.appendChild(hint);
+}
+
 /**
  * 要素の開始タグを DOM ノードとして親に追加します（属性のバリデーションマーク付き）
  * @param {Node} container
@@ -621,21 +760,47 @@ function appendTagOpen(container, el, errorMap, selfClosing, schemaContext) {
   const tagFragment = document.createDocumentFragment();
   tagFragment.appendChild(document.createTextNode('<'));
   appendTagName(tagFragment, el, schemaContext);
+
+  const presentAttributeNames = new Set();
   for (const attr of Array.from(el.attributes)) {
-    tagFragment.appendChild(document.createTextNode(` ${attr.name}="`));
-    const attrIssues = attrIssueMap.get(attr.name) || [];
-    const attrIssue = pickPrimaryIssue(attrIssues);
-    if (attrIssue && attrIssues.length > 0) {
-      const mark = document.createElement('mark');
-      mark.className = `xml-mark-${attrIssue.severity} ${getIssueCategoryClass(attrIssue.category)}`;
-      mark.title = formatIssueTitle(attrIssues, schemaState.title);
-      mark.textContent = attr.value;
-      tagFragment.appendChild(mark);
-    } else {
-      tagFragment.appendChild(document.createTextNode(attr.value));
-    }
-    tagFragment.appendChild(document.createTextNode('"'));
+    presentAttributeNames.add(attr.name);
+    presentAttributeNames.add(attr.localName || attr.name);
+    appendAttribute(tagFragment, el, attr, attrIssueMap, schemaState, schemaContext);
   }
+
+  // XSD上の必須属性が欠落している場合は、検証前から薄いヒントを表示する。
+  // 検証後は ValidationIssue を同じ位置に mark として描画し、前後移動の対象にする。
+  const missingRequiredAttributes = getMissingRequiredAttributeNames(
+    schemaState.definition,
+    presentAttributeNames,
+  );
+  const renderedMissing = new Set();
+  for (const attributeName of missingRequiredAttributes) {
+    appendMissingAttributeHint(
+      tagFragment,
+      el,
+      attributeName,
+      attrIssueMap.get(attributeName) || [],
+      schemaState,
+      schemaContext,
+    );
+    renderedMissing.add(attributeName);
+  }
+
+  // MVD等、XSD必須ではないが「欠落属性」としてissue化されたケースも開始タグ上に可視化する。
+  // これにより「実体が無い属性なのでmarkを置けない」問題を解消する。
+  for (const [attributeName, attrIssues] of attrIssueMap) {
+    if (presentAttributeNames.has(attributeName) || renderedMissing.has(attributeName)) continue;
+    appendMissingAttributeHint(
+      tagFragment,
+      el,
+      attributeName,
+      attrIssues,
+      schemaState,
+      schemaContext,
+    );
+  }
+
   tagFragment.appendChild(document.createTextNode(selfClosing ? '/>' : '>'));
 
   if (elemIssues.length > 0) {
@@ -644,6 +809,7 @@ function appendTagOpen(container, el, errorMap, selfClosing, schemaContext) {
     const mark = document.createElement('mark');
     mark.className = `xml-mark-${severity} ${getIssueCategoryClass(primaryIssue?.category)}`;
     mark.title = formatIssueTitle(elemIssues, schemaState.title);
+    registerXmlValidationMarkIssues(mark, elemIssues);
     mark.appendChild(tagFragment);
     container.appendChild(mark);
   } else {

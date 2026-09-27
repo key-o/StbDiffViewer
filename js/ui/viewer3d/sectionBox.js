@@ -24,11 +24,7 @@ import { scheduleRender } from '../../utils/renderScheduler.js';
 import { showWarning } from '../common/toast.js';
 import { createLogger } from '../../utils/logger.js';
 import { eventBus } from '../../data/events/eventBus.js';
-import {
-  FinalizationEvents,
-  ModelEvents,
-  ViewEvents,
-} from '../../constants/eventTypes.js';
+import { FinalizationEvents, ModelEvents, ViewEvents } from '../../constants/eventTypes.js';
 import { CAMERA_CONTEXTS, CAMERA_MODES } from '../../constants/displayModes.js';
 import { resolveDrawingDepthAxis } from './sectionBoxHandleVisibility.js';
 

@@ -20,7 +20,7 @@ import {
   BASELINE_COLUMN_COVER_FACES,
   averageColumnCoverFaces,
   normalizeColumnCoverFaces,
-} from '../../ui/panels/sectionList/columnSectionCover.js';
+} from './columnSectionCover.js';
 
 const COL_BAR_PREFIX = 'col-bar';
 
@@ -34,7 +34,9 @@ export class ConfiguredRcColumnVisualRenderer {
     };
     this.scheduleProfile = resolveRcScheduleProfile(options.scheduleProfile || {});
     this.coverFaces = normalizeColumnCoverFaces(
-      options.coverFaces || this.scheduleProfile.column.hoopCenterFaces || BASELINE_COLUMN_COVER_FACES,
+      options.coverFaces ||
+        this.scheduleProfile.column.hoopCenterFaces ||
+        BASELINE_COLUMN_COVER_FACES,
     );
   }
 

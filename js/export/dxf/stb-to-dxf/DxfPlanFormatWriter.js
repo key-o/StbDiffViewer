@@ -75,12 +75,7 @@ export function generatePolyline(polyline) {
  * @param {Array} circles2D
  * @returns {string}
  */
-export function generatePlanEntities(
-  lines2D = [],
-  polylines2D = [],
-  texts2D = [],
-  circles2D = [],
-) {
+export function generatePlanEntities(lines2D = [], polylines2D = [], texts2D = [], circles2D = []) {
   const entities = [];
   addPairs(entities, [0, 'SECTION'], [2, 'ENTITIES']);
 

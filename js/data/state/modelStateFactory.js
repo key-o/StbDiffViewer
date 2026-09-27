@@ -47,6 +47,23 @@ export function createEmptyElementData() {
   };
 }
 
+export function createInitialEditingState() {
+  return {
+    active: false,
+    sessionId: null,
+    sourceDocumentA: null,
+    workingDocument: null,
+    sourceNodeMapA: new Map(),
+    workingNodeMap: new Map(),
+    workingRevision: 0,
+    moveFollowRelatedNodes: true,
+    dirty: false,
+    untrackedDirty: false,
+    history: [],
+    redoStack: [],
+  };
+}
+
 export function createInitialModelState() {
   return {
     documentA: null,
@@ -55,13 +72,18 @@ export function createInitialModelState() {
     nodeMapB: new Map(),
     calDataA: null,
     calDataB: null,
-    ss7OriginalCsvTextA: null,
-    ss7OriginalCsvTextB: null,
     nodeMapRawA: new Map(),
     nodeMapRawB: new Map(),
     sectionMaps: createEmptySectionMaps(),
     steelSections: new Map(),
     elementData: createEmptyElementData(),
+    // STB原データとは分離して保持する派生数量store（QuantityServiceが読込後に設定）
+    derivedQuantitiesA: null,
+    derivedQuantitiesB: null,
+    // DerivedQuantityStore を集計向けに正規化した派生キャッシュ（STB正本ではない）
+    quantityFactsA: null,
+    quantityFactsB: null,
+    editing: createInitialEditingState(),
     modelsLoaded: false,
     stbVersionA: null,
     stbVersionB: null,

@@ -7,10 +7,12 @@
 
 import { eventBus, EditEvents } from '../../../../data/events/index.js';
 import { getState } from '../../../../data/state/globalState.js';
+import editDocumentProvider from '../../../../app/editing/editDocumentProvider.js';
 import { showSuccess } from '../../../common/toast.js';
 import { normalizeNodeIds, findDirectChild } from './domHelpers.js';
 import { updateEditingSummary } from './editHistory.js';
 import { getModifications } from './editState.js';
+import { getLegacyMutationFailure } from './legacyMutationGate.js';
 
 /** 節点紐づけ対象タイプ → XML タグ名（既存の階・通り芯への後追い紐づけで使用） */
 const NODE_LINK_TAGS = {
@@ -28,7 +30,7 @@ const NODE_LINK_TAGS = {
  */
 export function getNodeLinkTargets(elementType) {
   const tagName = NODE_LINK_TAGS[elementType];
-  const doc = getState('models.documentA');
+  const doc = editDocumentProvider.getActiveEditDocument();
   if (!tagName || !doc) return [];
   const result = [];
   for (const el of doc.querySelectorAll(tagName)) {
@@ -47,12 +49,16 @@ export function getNodeLinkTargets(elementType) {
  * 既存の階・通り芯（StbStory/StbParallelAxis/StbArcAxis/StbRadialAxis）へ節点を後追いで紐づける。
  * 対象要素の StbNodeIdList（無ければ生成）へ未登録の節点のみ StbNodeId を追加する（xs:key の重複を防ぐ）。
  * 履歴には {op:'linkNodes', addedNodeIds} を記録し、Undo で追加分のみ取り消す。
+ * Working Session 中は対応 Command へ移行前のため fail-closed とする。
  * @param {string} elementType - 'Story' | 'Axis' | 'ArcAxis' | 'RadialAxis'
  * @param {string} elementId - 対象要素の id
  * @param {string[]|string} nodeIdsInput - 紐づける節点ID（配列またはスペース区切り）
  * @returns {{success: boolean, added: number, error?: string}}
  */
 export function linkNodesToExisting(elementType, elementId, nodeIdsInput) {
+  const blocked = getLegacyMutationFailure('節点紐づけ', { added: 0 });
+  if (blocked) return blocked;
+
   const tagName = NODE_LINK_TAGS[elementType];
   if (!tagName) {
     return { success: false, added: 0, error: `未対応の紐づけ対象: ${elementType}` };

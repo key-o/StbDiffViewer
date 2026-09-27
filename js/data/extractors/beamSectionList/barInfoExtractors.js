@@ -11,6 +11,7 @@ import {
   extractStirrupInfo as extractStirrupInfoFromBar,
   extractWebBarInfo as extractWebBarInfoFromBar,
 } from '../../../common-stb/utils/barArrangementExtractor.js';
+import { resolveReinforcementStrength } from '../reinforcementStrengthResolver.js';
 
 /**
  * 指定した位置の主筋要素を検索
@@ -70,8 +71,12 @@ export function extractMainBarInfo(mainBarElement) {
       mainBarElement.getAttribute('D') ||
       barInfo.D_main
     )?.toUpperCase() || null;
-  const grade =
-    mainBarElement.getAttribute('strength') || mainBarElement.getAttribute('grade') || null;
+  const grade = resolveReinforcementStrength({
+    element: mainBarElement,
+    diameter: dia,
+    explicitStrength:
+      mainBarElement.getAttribute('strength') || mainBarElement.getAttribute('grade') || null,
+  }).value;
 
   return {
     count,
@@ -122,10 +127,14 @@ export function extractStirrupInfo(simpleBarElement, _order) {
     ) || null;
 
   // グレード
-  const gradeStirrup =
-    simpleBarElement.getAttribute('strength_stirrup') ||
-    simpleBarElement.getAttribute('strength_band') ||
-    null;
+  const gradeStirrup = resolveReinforcementStrength({
+    element: simpleBarElement,
+    diameter: dStirrup,
+    explicitStrength:
+      simpleBarElement.getAttribute('strength_stirrup') ||
+      simpleBarElement.getAttribute('strength_band') ||
+      null,
+  }).value;
 
   return {
     dia: dStirrup.toUpperCase(),
@@ -165,7 +174,11 @@ export function extractWebBarInfo(simpleBarElement, _order) {
   }
 
   // グレード
-  const gradeWeb = simpleBarElement.getAttribute('strength_web') || null;
+  const gradeWeb = resolveReinforcementStrength({
+    element: simpleBarElement,
+    diameter: dWeb,
+    explicitStrength: simpleBarElement.getAttribute('strength_web') || null,
+  }).value;
 
   return {
     dia: dWeb.toUpperCase(),

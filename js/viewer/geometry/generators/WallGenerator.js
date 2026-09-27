@@ -159,9 +159,7 @@ export class WallGenerator extends BaseElementGenerator {
       const offsetY = offset?.offset_Y || 0;
       const offsetZ = offset?.offset_Z || 0;
 
-      referencePoints.push(
-        new THREE.Vector3(node.x + offsetX, node.y + offsetY, node.z + offsetZ),
-      );
+      referencePoints.push(new THREE.Vector3(node.x + offsetX, node.y + offsetY, node.z + offsetZ));
     }
 
     // 断面データの取得（厚さ）
@@ -303,7 +301,9 @@ export class WallGenerator extends BaseElementGenerator {
       }
 
       if (!fallback || maxDistSq <= 1e-8) {
-        log?.warn?.(`Skipping wall ${wallId ?? ''}: first and second reference points are degenerate`);
+        log?.warn?.(
+          `Skipping wall ${wallId ?? ''}: first and second reference points are degenerate`,
+        );
         return null;
       }
 

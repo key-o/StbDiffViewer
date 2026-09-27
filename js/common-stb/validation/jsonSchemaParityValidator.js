@@ -1,7 +1,7 @@
 /**
  * @fileoverview JSON Schema 検証に XSD 1.0 の構造差分を補完するバリデータ。
  *
- * 既存の Ajv ベース属性検証はそのまま利用し、XSD→JSON Schema 変換で
+ * 既存の属性検証はそのまま利用し、XSD→JSON Schema 変換で
  * 情報が不足する以下を補完する。
  * - XML 名前空間
  * - 通常 xs:sequence の順序（sequenceOrder が未生成の場合は XSD 由来配列順を使用）
@@ -206,9 +206,7 @@ function validateChoiceGroup(
         ? seqCandidates
         : [];
 
-  const presentDirectMembers = directMembers.filter(
-    (m) => occurrence(actualCounts, m.name) > 0,
-  );
+  const presentDirectMembers = directMembers.filter((m) => occurrence(actualCounts, m.name) > 0);
   const selectedBranchCount = selectedSeqGroups.length + presentDirectMembers.length;
 
   if (selectedBranchCount > 1) {

@@ -19,7 +19,6 @@ import {
 } from '../common-stb/import/parser/jsonSchemaLoader.js';
 import { parseStbCalData } from '../common-stb/import/extractor/StbCalDataExtractor.js';
 import { getLoaderSetState } from './loaderDependencies.js';
-import { SS7_ENABLED } from '../config/featureFlags.js';
 import { createEmptyElementData, createEmptySectionMaps } from '../data/state/modelStateFactory.js';
 
 /**
@@ -107,8 +106,6 @@ export async function processModelDocuments(fileA, fileB) {
     versionInfo,
     calDataA: resultA?.calData || null,
     calDataB: resultB?.calData || null,
-    originalTextA: resultA?.originalText || null,
-    originalTextB: resultB?.originalText || null,
   };
 }
 
@@ -122,18 +119,8 @@ function isIfcFile(file) {
 }
 
 /**
- * ファイルがSS7形式かどうかを判定
- * @param {File} file - チェック対象ファイル
- * @returns {boolean}
- */
-function isSs7CsvFile(file) {
-  const name = file.name.toLowerCase();
-  return name.endsWith('.csv') || name.endsWith('.ss7');
-}
-
-/**
  * Process a single model file (pure transformation, no side effects)
- * Supports STB (XML), IFC, and SS7 CSV files.
+ * Supports STB (XML) and IFC files.
  * All importers return a unified ImportResult: { document, metadata }.
  * @param {File} file - Model file to process
  * @returns {Promise<Object>} Processing result for single model
@@ -145,9 +132,6 @@ async function processModelFile(file) {
   if (isIfcFile(file)) {
     const { convertIfcToStbDocument } = await import('../common-ifc/IfcToStbBridge.js');
     importResult = await convertIfcToStbDocument(file);
-  } else if (isSs7CsvFile(file) && SS7_ENABLED) {
-    const { convertSs7ToStbDocument } = await import('../common-ss7/Ss7ToStbBridge.js');
-    importResult = await convertSs7ToStbDocument(file);
   } else {
     importResult = await loadStbXmlAutoEncoding(file);
   }
@@ -169,7 +153,6 @@ async function processModelFile(file) {
     versionInfo: getVersionInfo(document),
     sourceType: metadata.sourceType,
     ifcSchema: metadata.ifcSchema || null,
-    originalText: metadata.originalText || null,
   };
 }
 
@@ -189,6 +172,10 @@ export function clearModelProcessingState() {
   setState('models.sectionMaps', createEmptySectionMaps());
   setState('models.steelSections', new Map());
   setState('models.elementData', createEmptyElementData());
+  setState('models.derivedQuantitiesA', null);
+  setState('models.derivedQuantitiesB', null);
+  setState('models.quantityFactsA', null);
+  setState('models.quantityFactsB', null);
   setState('models.modelsLoaded', false);
   setState('models.modelBounds', null);
   setState('sectionsData', null);
@@ -198,8 +185,6 @@ export function clearModelProcessingState() {
   setState('models.activeXsdVersion', null);
   setState('models.calDataA', null);
   setState('models.calDataB', null);
-  setState('models.ss7OriginalCsvTextA', null);
-  setState('models.ss7OriginalCsvTextB', null);
 }
 
 /**

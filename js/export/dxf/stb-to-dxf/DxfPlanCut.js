@@ -10,13 +10,7 @@
 export const DEFAULT_PLAN_CUT_OFFSET = 1500;
 export const DEFAULT_PLAN_CUT_TOLERANCE = 0.1;
 
-const VERTICAL_PLAN_TYPES = new Set([
-  'Column',
-  'Post',
-  'Wall',
-  'Brace',
-  'FoundationColumn',
-]);
+const VERTICAL_PLAN_TYPES = new Set(['Column', 'Post', 'Wall', 'Brace', 'FoundationColumn']);
 
 /**
  * 階クリップ状態から基準階Zを取得する。
@@ -48,11 +42,7 @@ export function getStoryBaseZ(clippingState) {
  * @param {number} [planCutOffset=1500]
  * @returns {number}
  */
-export function getPlanTargetZ(
-  elementType,
-  storyBaseZ,
-  planCutOffset = DEFAULT_PLAN_CUT_OFFSET,
-) {
+export function getPlanTargetZ(elementType, storyBaseZ, planCutOffset = DEFAULT_PLAN_CUT_OFFSET) {
   return VERTICAL_PLAN_TYPES.has(elementType)
     ? storyBaseZ + Number(planCutOffset || 0)
     : storyBaseZ;

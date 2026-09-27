@@ -6,7 +6,6 @@
 
 import { createLogger } from '../utils/logger.js';
 import { exportDxf, getExportStats } from '../export/dxf/dxfExporter.js';
-import { getCurrentEntities, getCurrentLayers } from './controllers/dxfFileLoader.js';
 import { showWarning } from './dxfLoaderHelpers.js';
 import { getState } from '../data/state/globalState.js';
 
@@ -26,8 +25,8 @@ export function clearSelectedExportLayers() {
  * エクスポートレイヤーUIを更新
  */
 export function updateExportLayerUI() {
-  const currentEntities = getCurrentEntities();
-  const currentLayers = getCurrentLayers();
+  const currentEntities = getState('dxf.entities') || {};
+  const currentLayers = getState('dxf.layers') || [];
   const layerContainer = document.getElementById('dxf-export-layer-list');
   if (!layerContainer) return;
 
@@ -107,7 +106,7 @@ export function updateExportLayerUI() {
  * エクスポート統計を更新
  */
 function updateExportStats() {
-  const currentEntities = getCurrentEntities();
+  const currentEntities = getState('dxf.entities');
   const statsEl = document.getElementById('export-entity-count');
   if (!statsEl || !currentEntities) return;
 
@@ -151,8 +150,8 @@ function deselectAllExportLayers() {
  * DXFをエクスポート
  */
 export function handleExportDxf() {
-  const currentEntities = getCurrentEntities();
-  const currentLayers = getCurrentLayers();
+  const currentEntities = getState('dxf.entities');
+  const currentLayers = getState('dxf.layers') || [];
   if (!currentEntities || !currentLayers.length) {
     showWarning('エクスポートするDXFデータがありません');
     return;

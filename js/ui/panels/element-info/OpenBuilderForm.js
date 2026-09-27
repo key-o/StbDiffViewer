@@ -14,7 +14,12 @@ import {
   setActiveVersion,
 } from '../../../common-stb/import/parser/jsonSchemaLoader.js';
 import { detectStbVersion } from '../../../common-stb/import/parser/utils/stbVersionDetection.js';
-import { addOpenWithAssignment } from './editMode/index.js';
+import {
+  addOpenWithAssignment,
+  deleteOpenArrangement,
+  editingSession,
+  reassignOpenArrangement,
+} from './editMode/index.js';
 import { openSectionBuilder } from './SectionBuilderForm.js';
 import { createAttrFieldRow } from './schemaFieldFactory.js';
 
@@ -24,6 +29,12 @@ function is21(version) {
 
 function selectorById(tagName, id) {
   return `${tagName}[id="${String(id).replace(/"/g, '\\"')}"]`;
+}
+
+function getActiveEditDocument() {
+  return editingSession.getState()?.active === true
+    ? editingSession.getWorkingDocument()
+    : getState('models.documentA');
 }
 
 function createSelectRow(labelText) {
@@ -39,7 +50,10 @@ function createSelectRow(labelText) {
 }
 
 function getPanels(doc) {
-  return [...Array.from(doc.querySelectorAll('StbWall')), ...Array.from(doc.querySelectorAll('StbSlab'))]
+  return [
+    ...Array.from(doc.querySelectorAll('StbWall')),
+    ...Array.from(doc.querySelectorAll('StbSlab')),
+  ]
     .filter((element) => element.getAttribute('id'))
     .sort((a, b) => {
       if (a.tagName !== b.tagName) return a.tagName.localeCompare(b.tagName);
@@ -104,7 +118,7 @@ function populateSectionSelect(select, doc, selectedId = '', required = false) {
 /** 壁・床開口の作成フォームを開く。 */
 export function openOpenBuilder() {
   return new Promise((resolve) => {
-    const doc = getState('models.documentA');
+    const doc = getActiveEditDocument();
     if (!doc) {
       showError('モデルAが読み込まれていません');
       resolve(null);
@@ -113,6 +127,7 @@ export function openOpenBuilder() {
 
     const modelVersion = detectStbVersion(doc);
     const version21 = is21(modelVersion);
+    const canManageArrangement = version21 && editingSession.getState()?.active === true;
     const openTagName = version21 ? 'StbOpenArrangement' : 'StbOpen';
     const relationAttrs = new Set(['id', 'guid', 'id_section']);
     if (version21) {
@@ -131,6 +146,11 @@ export function openOpenBuilder() {
       resolve(null);
       return;
     }
+    const requiresOpenSection =
+      version21 &&
+      template.attributes.some(
+        (attribute) => attribute.name === 'id_section' && attribute.required === true,
+      );
 
     let settled = false;
     let onKeydown = null;
@@ -187,8 +207,31 @@ export function openOpenBuilder() {
     }
     content.appendChild(sourceRow.row);
 
-    const sectionRow = createSelectRow(version21 ? '開口断面（必須）' : '開口補強断面');
-    populateSectionSelect(sectionRow.select, doc, '', version21);
+    let reassignBtn = null;
+    let deleteBtn = null;
+    if (canManageArrangement) {
+      const manageRow = document.createElement('div');
+      manageRow.className = 'add-member-row';
+      const label = document.createElement('label');
+      label.className = 'add-member-label';
+      label.textContent = '既存配置';
+      const actions = document.createElement('div');
+      actions.className = 'parameter-editor-buttons';
+      reassignBtn = document.createElement('button');
+      reassignBtn.type = 'button';
+      reassignBtn.className = 'parameter-editor-ok';
+      reassignBtn.textContent = '選択開口を割当先へ移動';
+      deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'parameter-editor-cancel';
+      deleteBtn.textContent = '選択開口を削除';
+      actions.append(reassignBtn, deleteBtn);
+      manageRow.append(label, actions);
+      content.appendChild(manageRow);
+    }
+
+    const sectionRow = createSelectRow(requiresOpenSection ? '開口断面（必須）' : '開口補強断面');
+    populateSectionSelect(sectionRow.select, doc, '', requiresOpenSection);
     const newSectionBtn = document.createElement('button');
     newSectionBtn.type = 'button';
     newSectionBtn.className = 'parameter-editor-ok add-member-new-section-btn';
@@ -215,16 +258,25 @@ export function openOpenBuilder() {
         sectionRow.select,
         doc,
         source?.getAttribute('id_section') || '',
-        version21,
+        requiresOpenSection,
       );
     };
 
-    rebuildFields();
-    sourceRow.select.addEventListener('change', () => {
-      const source = sourceRow.select.value
+    const selectedSource = () =>
+      sourceRow.select.value
         ? doc.querySelector(selectorById(openTagName, sourceRow.select.value))
         : null;
-      rebuildFields(source);
+    const updateManagementState = () => {
+      const hasSelection = Boolean(selectedSource());
+      if (reassignBtn) reassignBtn.disabled = !hasSelection;
+      if (deleteBtn) deleteBtn.disabled = !hasSelection;
+    };
+
+    rebuildFields();
+    updateManagementState();
+    sourceRow.select.addEventListener('change', () => {
+      rebuildFields(selectedSource());
+      updateManagementState();
     });
 
     newSectionBtn.addEventListener('click', async () => {
@@ -233,13 +285,56 @@ export function openOpenBuilder() {
         initialRootElementName: 'StbSecOpen_RC',
       });
       if (!result?.id) return;
-      populateSectionSelect(sectionRow.select, doc, result.id, version21);
+      populateSectionSelect(sectionRow.select, doc, result.id, requiresOpenSection);
+    });
+
+    const selectedPanel = () => {
+      const panelValue = panelRow.select.value;
+      const separator = panelValue.indexOf(':');
+      if (separator < 0) return null;
+      return {
+        panelTag: panelValue.slice(0, separator),
+        panelId: panelValue.slice(separator + 1),
+      };
+    };
+
+    reassignBtn?.addEventListener('click', () => {
+      const source = selectedSource();
+      const panel = selectedPanel();
+      if (!source || !panel) {
+        showError('移動する開口配置と割当先を選択してください');
+        return;
+      }
+      const result = reassignOpenArrangement({
+        arrangementId: source.getAttribute('id'),
+        ...panel,
+      });
+      if (result.success) close({ ...result, action: 'reassign' });
+      else showError(result.error || '開口配置の再割当に失敗しました');
+    });
+
+    deleteBtn?.addEventListener('click', () => {
+      const source = selectedSource();
+      if (!source) {
+        showError('削除する開口配置を選択してください');
+        return;
+      }
+      const id = source.getAttribute('id');
+      if (
+        typeof window.confirm === 'function' &&
+        !window.confirm(`StbOpenArrangement #${id} を削除しますか？`)
+      ) {
+        return;
+      }
+      const result = deleteOpenArrangement({ arrangementId: id });
+      if (result.success) close({ ...result, action: 'delete' });
+      else showError(result.error || '開口配置の削除に失敗しました');
     });
 
     const buttonArea = document.createElement('div');
     buttonArea.className = 'parameter-editor-buttons';
     buttonArea.innerHTML = `
-      <button type="button" class="parameter-editor-cancel">キャンセル</button>
+      <button type="button" class="parameter-editor-cancel open-builder-cancel">キャンセル</button>
       <button type="button" class="parameter-editor-ok">作成して割当</button>
     `;
     container.append(header, content, buttonArea);
@@ -248,14 +343,11 @@ export function openOpenBuilder() {
     requestAnimationFrame(() => overlay.classList.add('show'));
 
     const onSubmit = () => {
-      const panelValue = panelRow.select.value;
-      const separator = panelValue.indexOf(':');
-      if (separator < 0) {
+      const panel = selectedPanel();
+      if (!panel) {
         showError('割当先の壁または床を選択してください');
         return;
       }
-      const panelTag = panelValue.slice(0, separator);
-      const panelId = panelValue.slice(separator + 1);
       const attrs = {};
       for (const ctrl of fieldCtrls) attrs[ctrl.name] = ctrl.getValue();
       if (sectionRow.select.value) attrs.id_section = sectionRow.select.value;
@@ -263,8 +355,8 @@ export function openOpenBuilder() {
       const validationAttrs = { ...attrs };
       if (version21) {
         validationAttrs.id = '1';
-        validationAttrs.kind_member = panelTag === 'StbWall' ? 'WALL' : 'SLAB';
-        validationAttrs.id_member = panelId;
+        validationAttrs.kind_member = panel.panelTag === 'StbWall' ? 'WALL' : 'SLAB';
+        validationAttrs.id_member = panel.panelId;
       } else {
         validationAttrs.id = '1';
       }
@@ -276,13 +368,15 @@ export function openOpenBuilder() {
         return;
       }
 
-      const result = addOpenWithAssignment({ panelTag, panelId, attrs });
+      const result = addOpenWithAssignment({ ...panel, attrs });
       if (result.success) close(result);
       else showError(result.error || '開口の作成・割当に失敗しました');
     };
 
     closeBtn.addEventListener('click', () => close(null));
-    buttonArea.querySelector('.parameter-editor-cancel')?.addEventListener('click', () => close(null));
+    buttonArea
+      .querySelector('.parameter-editor-cancel')
+      ?.addEventListener('click', () => close(null));
     buttonArea.querySelector('.parameter-editor-ok')?.addEventListener('click', onSubmit);
     overlay.addEventListener('click', (event) => {
       if (event.target === overlay) close(null);

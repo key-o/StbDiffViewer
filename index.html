@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-Qgz4eS3E3CCGj9FwWSnWaLQ0RFNNl8YzJZNpMQ9O5s4=' https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-xpt49HZNL8gCyHi9dDVE7bmc/fJ9EpzPo5RpqqYs1r0=' https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
     />
     <title>STB Diff Viewer</title>
     <link rel="icon" href="./favicon.ico" />
@@ -23,6 +23,7 @@
     <link rel="stylesheet" href="./style/components/clipping.css" />
     <link rel="stylesheet" href="./style/components/comparison.css" />
     <link rel="stylesheet" href="./style/components/importance-panel.css" />
+    <link rel="stylesheet" href="./style/components/quantity-summary.css" />
     <link rel="stylesheet" href="./style/components/importance-list.css" />
     <link rel="stylesheet" href="./style/components/importance-badges.css" />
     <link rel="stylesheet" href="./style/components/importance-colors.css" />
@@ -50,7 +51,6 @@
           "dxf-parser": "https://esm.sh/dxf-parser@1.1.2",
           "html2canvas": "https://esm.sh/html2canvas@1.4.1",
           "jspdf": "https://esm.sh/jspdf@4.2.1",
-          "ajv": "https://esm.sh/ajv@8.17.1",
           "web-ifc": "https://cdn.jsdelivr.net/npm/web-ifc@0.0.74/web-ifc-api.js",
           "encoding-japanese": "https://esm.sh/encoding-japanese@2.2.0"
         }
@@ -267,6 +267,14 @@
         </button>
         <button
           type="button"
+          id="toggle-quantity-summary-btn"
+          aria-controls="quantity-summary-panel"
+          aria-expanded="false"
+        >
+          📊 数量集計
+        </button>
+        <button
+          type="button"
           id="toggle-importance-panel-btn"
           aria-controls="importance-panel"
           aria-expanded="false"
@@ -302,6 +310,14 @@
         >
           📏 寸法測定
         </button>
+        <button
+          type="button"
+          id="toggle-pdf-overlay-btn"
+          aria-controls="pdf-overlay-panel"
+          aria-expanded="false"
+        >
+          📑 STB / PDF図面
+        </button>
       </div>
 
       <!-- 出力・変換セクション -->
@@ -325,14 +341,6 @@
             </button>
             <button type="button" id="exportIfcBtn" class="btn btn-secondary">
               📦 IFCファイルに変換
-            </button>
-            <button
-              type="button"
-              id="exportSs7Btn"
-              class="btn btn-secondary"
-              title="STBモデルをSS7入力形式CSV（Shift-JIS）として出力"
-            >
-              📊 SS7 CSV出力
             </button>
             <button
               type="button"
@@ -368,7 +376,7 @@
             </button>
           </div>
 
-          <!-- STBファイル出力セクション（バージョン変換・SS7/IFC変換後モデルに対応） -->
+          <!-- STBファイル出力セクション（バージョン変換・IFC変換後モデルに対応） -->
           <div class="export-settings">
             <label><strong>STBファイル出力</strong></label>
             <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center">
@@ -475,7 +483,7 @@
       <div class="canvas-drop-hint-icon" aria-hidden="true">📂</div>
       <div class="canvas-drop-hint-main">モデルを読み込んで確認を開始</div>
       <div class="canvas-drop-hint-sub">
-        STB / IFC / SS7 / CSV をここにドロップ。2ファイルならモデルA/Bとして比較します。
+        STB / IFC をここにドロップ。2ファイルならモデルA/Bとして比較します。
       </div>
       <div class="canvas-drop-hint-actions" aria-label="読み込み方法">
         <span>1ファイル: 単体表示</span>
@@ -682,6 +690,22 @@
             </button>
           </div>
 
+          <div class="rebar-generation-link-control">
+            <button
+              type="button"
+              id="open-rebar-generation-settings-btn"
+              class="btn btn-secondary"
+              aria-controls="rebar-generation-settings-float"
+              aria-expanded="false"
+              title="かぶり・配筋納まり・生成判定・判断トレースを設定／確認します"
+            >
+              🧱 鉄筋生成設定を開く
+            </button>
+            <div class="color-setting-help">
+              鉄筋の比較／表示と径別色は上の表で切り替えます。生成条件・納まり・判定は別ウィンドウで設定します。
+            </div>
+          </div>
+
           <div class="origin-axes-control">
             <label for="toggleOriginAxes">
               <input type="checkbox" id="toggleOriginAxes" />
@@ -734,38 +758,73 @@
               <input type="checkbox" id="toggleRebarDisplay" />
               鉄筋を表示（RC柱・RC梁の主筋／直線部）
             </label>
-            <label for="rebarCoverInput" class="rebar-cover-label">
-              かぶり
-              <input
-                type="number"
-                id="rebarCoverInput"
-                min="0"
-                max="200"
-                step="5"
-                value="40"
-                title="STBに主筋中心位置が無い場合に使うかぶり厚さ [mm]"
-              />
-              mm
+            <label for="toggleRebarSelectionMode" title="表示中の鉄筋ジオメトリを個別に選択します">
+              <input type="checkbox" id="toggleRebarSelectionMode" />
+              鉄筋選択モード
             </label>
           </div>
 
-          <div class="rebar-display-control">
-            <label for="toggleHoopDisplay">
-              <input type="checkbox" id="toggleHoopDisplay" />
-              帯筋・あばら筋を表示（ピッチ配置／直線部）
-            </label>
-          </div>
-
-          <div class="rebar-display-control">
-            <button
-              type="button"
-              id="openAnchorageCheckBtn"
-              title="柱・梁主筋の定着長さとカットオフ筋長さを配筋標準図の一般値と比較します"
-            >
-              定着・カットオフ一覧を開く
-            </button>
-          </div>
         </div>
+      </div>
+    </div>
+
+    <!-- 鉄筋生成設定フローティングウィンドウ -->
+    <div id="rebar-generation-settings-float" class="floating-window">
+      <div class="float-window-header" id="rebar-generation-settings-header">
+        <span class="float-window-title">🧱 鉄筋生成設定</span>
+        <div class="float-window-controls">
+          <button
+            class="float-window-btn"
+            id="close-rebar-generation-settings-btn"
+            aria-label="閉じる"
+            type="button"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+      <div class="float-window-content" id="rebar-generation-settings-content">
+        <section class="rebar-generation-setting-section">
+          <h4>生成条件</h4>
+          <label for="rebarCoverInput" class="rebar-cover-label">
+            かぶり
+            <input
+              type="number"
+              id="rebarCoverInput"
+              min="0"
+              max="200"
+              step="5"
+              value="40"
+              title="STBに主筋中心位置が無い場合に使うかぶり厚さ [mm]"
+            />
+            mm
+          </label>
+          <div class="color-setting-help">
+            STBに主筋中心位置が無い場合の鉄筋生成用フォールバック値です。
+          </div>
+        </section>
+
+        <div id="rebar-detailing-choice-settings-host"></div>
+
+        <section class="rebar-generation-setting-section rebar-generation-analysis-links">
+          <h4>検証・トレース</h4>
+          <button
+            type="button"
+            id="openAnchorageCheckBtn"
+            class="btn btn-secondary"
+            title="柱・梁主筋の定着長さとカットオフ筋長さを配筋標準図の一般値と比較します"
+          >
+            定着・カットオフ一覧を開く
+          </button>
+          <button
+            type="button"
+            id="openRebarDecisionTraceBtn"
+            class="btn btn-secondary"
+            title="配筋Resolverが採用したルール・優先順位・未解決理由を確認します"
+          >
+            配筋判断トレースを開く
+          </button>
+        </section>
       </div>
     </div>
 

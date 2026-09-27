@@ -346,10 +346,7 @@ export function drawTableFrame({
   };
 }
 
-export function scaleSectionListDxfEntities(
-  { bounds, lines2D, circles2D, texts2D },
-  scale,
-) {
+export function scaleSectionListDxfEntities({ bounds, lines2D, circles2D, texts2D }, scale) {
   const s = Number(scale);
   const factor = Number.isFinite(s) && s > 0 ? s : 1;
   const point = (value) => ({ x: value.x * factor, y: value.y * factor });

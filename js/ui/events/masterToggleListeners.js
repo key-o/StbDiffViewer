@@ -2,7 +2,7 @@
  * @fileoverview マスターチェックボックスによる一括切り替え処理
  *
  * 表示要素設定テーブルのヘッダーにあるマスターチェックボックスで、
- * 「表示」「立体」「ラベル」列のチェックボックスを一括でオン/オフできる機能を提供します。
+ * 「表示」「立体」「鉄筋」「ラベル」列のチェックボックスを一括でオン/オフできる機能を提供します。
  *
  * @module ui/events/masterToggleListeners
  */
@@ -11,6 +11,7 @@
 const SELECTORS = {
   masterDisplay: '#masterToggleDisplay',
   masterSolid: '#masterToggleSolid',
+  masterRebar: '#masterToggleRebar',
   masterLabel: '#masterToggleLabel',
   // 表示列: name="elements" の全チェックボックス
   displayCheckboxes: '.element-settings-table input[name="elements"]',
@@ -19,6 +20,8 @@ const SELECTORS = {
     '.element-settings-table input[id="toggleColumnView"], ' +
     '.element-settings-table input[id="toggleGirderView"], ' +
     '.element-settings-table input[id$="3DView"]',
+  // 鉄筋列: name="rebarToggle" の全チェックボックス
+  rebarCheckboxes: '.element-settings-table input[name="rebarToggle"]',
   // ラベル列: name="labelToggle" の全チェックボックス
   labelCheckboxes: '.element-settings-table input[name="labelToggle"]',
 };
@@ -27,11 +30,37 @@ const SELECTORS = {
 let isMasterUpdating = false;
 
 /**
+ * 鉄筋列は elementSettingsTable.js で動的追加されるため、
+ * 他列と同じ位置に全体ON/OFF用チェックボックスを補う。
+ * @returns {HTMLInputElement|null}
+ */
+function ensureMasterRebarToggle() {
+  const existing = document.querySelector(SELECTORS.masterRebar);
+  if (existing) return existing;
+
+  const header = document.querySelector(
+    '.element-settings-table th[data-element-settings-column="rebar"]',
+  );
+  if (!header) return null;
+
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.id = 'masterToggleRebar';
+  input.title = '全ての鉄筋表示を切替';
+  input.setAttribute('aria-label', '全ての鉄筋表示を切替');
+  header.appendChild(document.createTextNode(' '));
+  header.appendChild(input);
+  return input;
+}
+
+/**
  * マスターチェックボックスのイベントリスナーを設定
  */
 export function setupMasterToggleListeners() {
+  ensureMasterRebarToggle();
   setupMasterCheckbox(SELECTORS.masterDisplay, SELECTORS.displayCheckboxes);
   setupMasterCheckbox(SELECTORS.masterSolid, SELECTORS.solidCheckboxes);
+  setupMasterCheckbox(SELECTORS.masterRebar, SELECTORS.rebarCheckboxes);
   setupMasterCheckbox(SELECTORS.masterLabel, SELECTORS.labelCheckboxes);
 }
 

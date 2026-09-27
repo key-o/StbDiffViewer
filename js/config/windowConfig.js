@@ -47,6 +47,17 @@ export const WINDOW_DEFINITIONS = {
     autoShow: false,
     isDynamic: false, // HTMLで静的定義
   },
+  'rebar-generation-settings-float': {
+    title: '鉄筋生成設定',
+    icon: '🧱',
+    toggleButtonId: 'open-rebar-generation-settings-btn',
+    closeButtonId: 'close-rebar-generation-settings-btn',
+    headerId: 'rebar-generation-settings-header',
+    draggable: true,
+    resizable: true,
+    autoShow: false,
+    isDynamic: false,
+  },
   'component-info': {
     title: '要素情報',
     icon: '📋',

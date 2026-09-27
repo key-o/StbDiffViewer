@@ -26,10 +26,7 @@ import {
 import { collectDxfElementMarks } from './DxfMarkCollector.js';
 import { extractHorizontalSectionLoops } from './DxfSectionExtractor.js';
 import { collectWallOpeningPolylines } from './DxfOpeningCollector.js';
-import {
-  DEFAULT_PLAN_CUT_OFFSET,
-  resolveStoryPlanCutZ,
-} from './DxfPlanCut.js';
+import { DEFAULT_PLAN_CUT_OFFSET, resolveStoryPlanCutZ } from './DxfPlanCut.js';
 import { generatePlanDxfContent, downloadDxf } from './DxfPlanFormatWriter.js';
 import { eventBus, ToastEvents } from '../../../data/events/index.js';
 
@@ -175,12 +172,7 @@ function collectElementGeometry({
           child.updateWorldMatrix(true, false);
           const box = new THREE.Box3().setFromObject(child);
           if (box.isEmpty()) return;
-          const cutZ = resolveStoryPlanCutZ(
-            elementType,
-            box,
-            clippingState,
-            planCutOffset,
-          );
+          const cutZ = resolveStoryPlanCutZ(elementType, box, clippingState, planCutOffset);
           if (cutZ == null) return;
 
           const loops = extractHorizontalSectionLoops(child, cutZ);

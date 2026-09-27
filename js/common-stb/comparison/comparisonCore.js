@@ -11,11 +11,11 @@ import { getToleranceConfig } from '../../config/toleranceConfig.js';
 
 // 比較戦略をインポート
 import { BasicStrategy } from './BaseStrategy.js';
-import { ToleranceStrategy } from './ToleranceStrategy.js';
+import { SpatialIndexedToleranceStrategy } from './SpatialIndexedToleranceStrategy.js';
 
 // 戦略インスタンス
 const basicStrategy = new BasicStrategy();
-const toleranceStrategy = new ToleranceStrategy();
+const toleranceStrategy = new SpatialIndexedToleranceStrategy();
 
 // --- 要素比較ロジック ---
 /**

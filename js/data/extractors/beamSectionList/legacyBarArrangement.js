@@ -6,6 +6,8 @@
  */
 
 import { querySelector, querySelectorAll } from '../sectionListUtils.js';
+import { captureLegacyBeamAuxiliaryFacts } from '../rebar3d/beamAuxiliaryPlacement.js';
+import { resolveReinforcementStrength } from '../reinforcementStrengthResolver.js';
 import { extractBeamCover, getPositionName, ordinal } from './beamSectionHelpers.js';
 import {
   findMainBarElement,
@@ -170,6 +172,7 @@ function extractBarDataFromDirectAttributes(barElement, result) {
 
     positionData.stirrup = extractLegacyStirrup(barElement);
     positionData.webBar = extractLegacyWebBar(barElement);
+    captureLegacyBeamAuxiliaryFacts(barElement, positionData);
   });
 }
 
@@ -183,6 +186,7 @@ function extractBarDataFromDirectAttributesSingle(barElement, positionData) {
   positionData.bottomBar = extractLegacyMainBar(barElement, 'bottom');
   positionData.stirrup = extractLegacyStirrup(barElement);
   positionData.webBar = extractLegacyWebBar(barElement);
+  captureLegacyBeamAuxiliaryFacts(barElement, positionData);
 }
 
 /**
@@ -194,11 +198,18 @@ function extractLegacyStirrup(barElement) {
   const count = parseInt(barElement.getAttribute('N_stirrup')) || 0;
   if (count <= 0) return null;
 
+  const dia = barElement.getAttribute('D_stirrup')?.toUpperCase() || null;
+  const grade = resolveReinforcementStrength({
+    element: barElement,
+    diameter: dia,
+    explicitStrength: barElement.getAttribute('strength_stirrup'),
+  }).value;
+
   return {
     count,
-    dia: barElement.getAttribute('D_stirrup')?.toUpperCase() || null,
+    dia,
     pitch: parseInt(barElement.getAttribute('pitch_stirrup')) || null,
-    grade: barElement.getAttribute('strength_stirrup')?.toUpperCase() || null,
+    grade: grade?.toUpperCase() || null,
   };
 }
 
@@ -211,10 +222,17 @@ function extractLegacyWebBar(barElement) {
   const count = parseInt(barElement.getAttribute('N_web')) || 0;
   if (count <= 0) return null;
 
+  const dia = barElement.getAttribute('D_web')?.toUpperCase() || null;
+  const grade = resolveReinforcementStrength({
+    element: barElement,
+    diameter: dia,
+    explicitStrength: barElement.getAttribute('strength_web'),
+  }).value;
+
   return {
     count,
-    dia: barElement.getAttribute('D_web')?.toUpperCase() || null,
-    grade: barElement.getAttribute('strength_web')?.toUpperCase() || null,
+    dia,
+    grade: grade?.toUpperCase() || null,
   };
 }
 
@@ -226,12 +244,21 @@ function extractLegacyWebBar(barElement) {
  */
 function extractLegacyMainBar(barElement, side) {
   const dia = barElement.getAttribute('D_main')?.toUpperCase() || null;
-  const grade = barElement.getAttribute('strength_main')?.toUpperCase() || null;
+  const grade =
+    resolveReinforcementStrength({
+      element: barElement,
+      diameter: dia,
+      explicitStrength: barElement.getAttribute('strength_main'),
+    }).value?.toUpperCase() || null;
   const secondDia = barElement.getAttribute('D_2nd_main')?.toUpperCase() || null;
   const secondGrade =
-    (
-      barElement.getAttribute('strength_2nd_main') || barElement.getAttribute('strength_main')
-    )?.toUpperCase() || null;
+    resolveReinforcementStrength({
+      element: barElement,
+      diameter: secondDia || dia,
+      explicitStrength:
+        barElement.getAttribute('strength_2nd_main') ||
+        (!secondDia ? barElement.getAttribute('strength_main') : null),
+    }).value?.toUpperCase() || null;
   const primaryCounts = [1, 2, 3].map(
     (step) => parseInt(barElement.getAttribute(`N_main_${side}_${ordinal(step)}`), 10) || 0,
   );

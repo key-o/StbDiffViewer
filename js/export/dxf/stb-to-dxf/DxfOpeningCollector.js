@@ -132,11 +132,7 @@ export function collectWallOpeningPolylines(wallGroup, clippingState, options = 
       if (!span || span.maxX - span.minX <= tolerance) continue;
 
       const pointAt = (localX, normalOffset) =>
-        new THREE.Vector3(
-          Number(origin.x || 0),
-          Number(origin.y || 0),
-          cutZ,
-        )
+        new THREE.Vector3(Number(origin.x || 0), Number(origin.y || 0), cutZ)
           .addScaledVector(direction, localX)
           .addScaledVector(normal, normalOffset);
 

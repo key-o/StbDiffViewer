@@ -152,6 +152,24 @@
   padding-bottom: 16px;
 }
 
+/* 鉄筋生成設定ウィンドウ */
+#rebar-generation-settings-float {
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(680px, calc(100vw - 32px));
+  min-width: min(520px, calc(100vw - 32px));
+  min-height: 360px;
+  max-width: calc(100vw - 20px);
+  max-height: calc(100vh - 20px);
+  overflow: hidden;
+}
+
+#rebar-generation-settings-float .float-window-content {
+  overflow: auto;
+  padding-bottom: 16px;
+}
+
 /* 色付けモード設定ウィンドウ */
 #display-settings-float {
   min-width: 400px;
@@ -640,18 +658,102 @@
   border-color: rgba(239, 108, 0, 0.7);
 }
 
+.xml-legend-role-required {
+  background: rgba(21, 101, 192, 0.2);
+  border-color: rgba(21, 101, 192, 0.72);
+}
+
+.xml-legend-role-optional {
+  background: rgba(84, 110, 122, 0.16);
+  border-color: rgba(84, 110, 122, 0.55);
+}
+
+.xml-legend-role-choice {
+  background: rgba(106, 27, 154, 0.18);
+  border-color: rgba(106, 27, 154, 0.68);
+}
+
 .xml-tag-name {
   font-weight: 500;
 }
 
+/* XSD定義済みは「正しい」の意味に見えないよう、役割別の色を優先する。 */
 .xml-tag-name.xml-tag-xsd-known {
-  color: #2e7d32;
+  color: inherit;
+}
+
+.xml-tag-name.xml-tag-role-required {
+  color: #1565c0;
+  font-weight: 650;
+}
+
+.xml-tag-name.xml-tag-role-optional {
+  color: #546e7a;
+}
+
+.xml-tag-name.xml-tag-role-choice {
+  color: #6a1b9a;
+  font-weight: 600;
+}
+
+.xml-tag-name.xml-tag-role-root {
+  color: #37474f;
+  font-weight: 650;
 }
 
 .xml-tag-name.xml-tag-xsd-unknown {
   color: #b71c1c;
   text-decoration: underline dotted currentColor;
   text-underline-offset: 2px;
+}
+
+/* 属性名はXSD上の役割をバリデーション前から表示する。 */
+.xml-attr-name {
+  text-underline-offset: 2px;
+}
+
+.xml-attr-name.xml-attr-role-required {
+  color: #1565c0;
+  font-weight: 650;
+}
+
+.xml-attr-name.xml-attr-role-optional {
+  color: #546e7a;
+}
+
+.xml-attr-name.xml-attr-role-namespace {
+  color: #00796b;
+}
+
+.xml-attr-name.xml-attr-role-unknown {
+  color: #b71c1c;
+  text-decoration: underline dotted currentColor;
+}
+
+.xml-attr-name.xml-attr-enum {
+  text-decoration: underline dashed #6a1b9a;
+}
+
+.xml-attr-name.xml-attr-fixed {
+  text-decoration: underline double #6a1b9a;
+}
+
+.xml-attr-value-enum,
+.xml-attr-value-fixed {
+  color: #6a1b9a;
+}
+
+.xml-missing-required-hint {
+  color: #1565c0;
+  opacity: 0.62;
+  font-style: italic;
+  text-decoration: underline dotted currentColor;
+  cursor: help;
+}
+
+.xml-viewer-pre mark.xml-missing-attr {
+  font-style: italic;
+  white-space: nowrap;
 }
 
 /* バリデーションエラーハイライト（mark要素） */

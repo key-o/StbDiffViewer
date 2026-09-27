@@ -102,9 +102,7 @@ export function resolveSectionListAdaptiveLayout({
       getDiagramHeight(metrics.maxEntryHeightByStory.get(story.id) || 0, story),
     ]),
   );
-  const rowHeights = stories.map(
-    (story) => diagramHeightsByStory.get(story.id) + infoAreaH,
-  );
+  const rowHeights = stories.map((story) => diagramHeightsByStory.get(story.id) + infoAreaH);
 
   return {
     positionWidthsBySymbol,

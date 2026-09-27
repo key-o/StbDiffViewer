@@ -138,3 +138,14 @@ export function getBatchElementCenter(hit) {
     return null;
   }
 }
+
+// 編集時の局所Geometry更新も、通常/バッチ格納差を同じviewer境界で吸収する。
+export {
+  updateNodeRenderablesInGroup,
+  updateLineRenderablesInGroup,
+} from '../editing/targetedGeometryUpdater.js';
+export {
+  insertElementRenderablesInGroup,
+  removeElementRenderablesInGroup,
+  replaceElementRenderablesInGroup,
+} from '../editing/targetedRenderableReplacement.js';

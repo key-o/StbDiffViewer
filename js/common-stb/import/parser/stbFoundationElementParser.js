@@ -33,6 +33,8 @@ export function extractPileElements(xmlDoc) {
     const idNode = pileEl.getAttribute('id_node');
     const levelTop = pileEl.getAttribute('level_top');
     const lengthAll = pileEl.getAttribute('length_all');
+    const lengthHead = pileEl.getAttribute('length_head');
+    const lengthFoot = pileEl.getAttribute('length_foot');
 
     const offset_bottom_X = pileEl.getAttribute('offset_bottom_X');
     const offset_bottom_Y = pileEl.getAttribute('offset_bottom_Y');
@@ -55,6 +57,8 @@ export function extractPileElements(xmlDoc) {
         kind: kind,
         kind_structure: kindStructure,
         length_all: lengthAll ? parseFloat(lengthAll) : undefined,
+        length_head: lengthHead ? parseFloat(lengthHead) : undefined,
+        length_foot: lengthFoot ? parseFloat(lengthFoot) : undefined,
         offset_bottom_X: offset_bottom_X ? parseFloat(offset_bottom_X) : 0,
         offset_bottom_Y: offset_bottom_Y ? parseFloat(offset_bottom_Y) : 0,
         offset_top_X: offset_top_X ? parseFloat(offset_top_X) : 0,
@@ -76,6 +80,8 @@ export function extractPileElements(xmlDoc) {
         kind: kind,
         kind_structure: kindStructure,
         length_all: lengthAll ? parseFloat(lengthAll) : undefined,
+        length_head: lengthHead ? parseFloat(lengthHead) : undefined,
+        length_foot: lengthFoot ? parseFloat(lengthFoot) : undefined,
         offset_X: offsetX ? parseFloat(offsetX) : 0,
         offset_Y: offsetY ? parseFloat(offsetY) : 0,
         rotate: rotate ? parseFloat(rotate) : 0,
@@ -228,6 +234,8 @@ export function extractStripFootingElements(xmlDoc) {
     const kindStructure = stripFootingEl.getAttribute('kind_structure');
     const idNodeStart = stripFootingEl.getAttribute('id_node_start');
     const idNodeEnd = stripFootingEl.getAttribute('id_node_end');
+    const lengthExStart = stripFootingEl.getAttribute('length_ex_start');
+    const lengthExEnd = stripFootingEl.getAttribute('length_ex_end');
     const level = parseFloat(stripFootingEl.getAttribute('level')) || 0;
     const offset = parseFloat(stripFootingEl.getAttribute('offset')) || 0;
 
@@ -240,6 +248,8 @@ export function extractStripFootingElements(xmlDoc) {
         kind_structure: kindStructure,
         id_node_start: idNodeStart,
         id_node_end: idNodeEnd,
+        length_ex_start: lengthExStart ? parseFloat(lengthExStart) : 0,
+        length_ex_end: lengthExEnd ? parseFloat(lengthExEnd) : 0,
         level,
         offset,
       };

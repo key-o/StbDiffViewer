@@ -1,20 +1,25 @@
 /**
  * @fileoverview 定着・カットオフ筋長さのチェック一覧パネル
  *
- * RC造配筋標準図（日建連 2013.03.27 改訂）に基づく次の判定をまとめて一覧表示する。
+ * RC造配筋標準図（日建連・JSCA 2023.04.01 改定）に基づく次の判定をまとめて一覧表示する。
  *
  * - 梁定着（§8-2）: 梁主筋の柱内90°折曲げ定着の水平投影長さ
+ * - 大梁仕口納まり（§8-3）: 左右大梁主筋の通し／鉛直段差／水平位置差
+ * - 大梁特殊納まり（図8-2-3 / 8-2-4）: 吊上げ筋・ハンチ部コーナー主筋
+ * - 柱頭特殊納まり（図8-2-5）: 最上階柱頭の柱内拘束筋
  * - 柱定着（§7-3）: 最上階柱頭の180°フック／直線定着、最下階柱脚の90°折曲げ定着
  * - 柱カットオフ（§7-1）: 柱頭・柱脚カットオフ筋長さ Ho/2＋15d と、その定着
  * - 梁カットオフ（§8-1 / §9-1）: 端部・中央カットオフ筋長さと中央での重なり
  *
  * 3D配筋表示のON/OFFとは独立して算定するため、鉄筋を表示していなくても開ける。
+ * 特殊納まりはproduction gateの状態・source・blockerも表示し、未生成理由を隠さない。
  *
  * @module ui/panels/anchorageCheckPanel
  */
 
+import { getRebarProjectDetailing } from '../../config/rebarProjectDetailing.js';
 import { floatingWindowManager } from './floatingWindowManager.js';
-import { collectRebarAnchorageChecks } from '../../app/viewModes/rebarDisplay.js';
+import { collectRebarAnchorageChecks } from '../../app/viewModes/rebarAnchorageCheckCollector.js';
 import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('AnchorageCheckPanel');
@@ -39,7 +44,7 @@ function injectStyles() {
   const style = document.createElement('style');
   style.id = STYLE_ID;
   style.textContent = `
-    #${WINDOW_ID} { width: 880px; max-width: 96vw; }
+    #${WINDOW_ID} { width: 1040px; max-width: 96vw; }
     #${WINDOW_ID} .anchorage-toolbar {
       display: flex;
       flex-wrap: wrap;
@@ -129,7 +134,11 @@ function createWindowElement() {
           <select id="${WINDOW_ID}-category">
             <option value="">すべて</option>
             <option value="梁定着">梁定着</option>
+            <option value="大梁仕口納まり">大梁仕口納まり</option>
+            <option value="大梁特殊納まり">大梁特殊納まり</option>
+            <option value="柱頭特殊納まり">柱頭特殊納まり</option>
             <option value="柱定着">柱定着</option>
+            <option value="柱仕口納まり">柱仕口納まり</option>
             <option value="柱カットオフ">柱カットオフ</option>
             <option value="梁カットオフ">梁カットオフ</option>
           </select>
@@ -150,13 +159,13 @@ function createWindowElement() {
 }
 
 /**
- * 入力欄から算定設定を作る
- * @returns {{coverMm:number, columnCoverMm:number}} 算定設定
+ * 入力欄とproject detailing runtime sourceから算定設定を作る
+ * @returns {{coverMm?:number, columnCoverMm?:number, projectDetailing:Object}} 算定設定
  */
 function readOptions() {
   const beamCover = Number(document.getElementById(`${WINDOW_ID}-beam-cover`)?.value);
   const columnCover = Number(document.getElementById(`${WINDOW_ID}-column-cover`)?.value);
-  const options = {};
+  const options = { projectDetailing: getRebarProjectDetailing() };
   if (Number.isFinite(beamCover) && beamCover >= 0) options.coverMm = beamCover;
   if (Number.isFinite(columnCover) && columnCover >= 0) options.columnCoverMm = columnCover;
   return options;
@@ -171,6 +180,30 @@ function roundOrDash(value) {
   return Number.isFinite(value) ? Math.round(value) : '-';
 }
 
+function productionGateLabel(row) {
+  if (!row?.specialDetailingRequired) return '-';
+  const status = row.productionGateStatus || 'UNRESOLVED';
+  const mode = row.productionGateMode ? `/${row.productionGateMode}` : '';
+  const source = row.productionGateSource ? `/${row.productionGateSource}` : '';
+  const blockers = Array.isArray(row.productionGateBlockers)
+    ? row.productionGateBlockers.filter(Boolean).join('|')
+    : '';
+  return `${status}${mode}${source}${blockers ? `: ${blockers}` : ''}`;
+}
+
+function partialCheckLabel(row) {
+  switch (row?.requirementKind) {
+    case 'L2':
+      return 'L2全長のみ判定';
+    case 'LB_PROJECTION':
+      return '投影のみ判定';
+    case 'HOOK_TAIL_90':
+      return '90°余長のみ判定';
+    default:
+      return '部分判定';
+  }
+}
+
 /** 一覧の列定義（CSVと表で共有する） */
 const COLUMNS = [
   { key: 'modelSource', label: 'モデル', text: true, value: (row) => row.modelSource },
@@ -180,7 +213,12 @@ const COLUMNS = [
   { key: 'section', label: '断面', text: true, value: (row) => row.sectionName || '-' },
   { key: 'position', label: '位置', text: true, value: (row) => row.position || '-' },
   { key: 'role', label: '対象', text: true, value: (row) => ROLE_LABELS[row.role] || row.role },
-  { key: 'bar', label: '呼び径', text: true, value: (row) => `D${row.diaMm}` },
+  {
+    key: 'bar',
+    label: '呼び径',
+    text: true,
+    value: (row) => (Number.isFinite(row.diaMm) ? `D${row.diaMm}` : '-'),
+  },
   { key: 'grade', label: '鉄筋種別', text: true, value: (row) => row.grade || '-' },
   { key: 'fc', label: 'Fc', value: (row) => row.fc ?? '-' },
   { key: 'count', label: '本数', value: (row) => row.count },
@@ -193,6 +231,41 @@ const COLUMNS = [
       Number.isFinite(row.availableMm) && row.requiredMm > 0
         ? (row.availableMm / row.requiredMm).toFixed(2)
         : '-',
+  },
+  {
+    key: 'generation',
+    label: '生成状態',
+    text: true,
+    value: (row) => {
+      // Production Gateを評価した行は、requirementOnlyより実際の生成状態を優先する。
+      if (row.productionGateEvaluated === true) {
+        if (row.generationStatus === 'CENTERLINE_READY') return '中心線生成対象';
+        if (row.productionPathCandidate || row.productionPlacementCandidate)
+          return 'production候補';
+        if (row.generationStatus === 'UNRESOLVED') return '未生成・要確認';
+        if (row.generationStatus === 'NOT_APPLICABLE') return '対象外';
+        return '-';
+      }
+      return row.requirementOnly
+        ? row.kind === '基礎小梁（R12対象外）'
+          ? 'R12対象外'
+          : row.partialCheck
+            ? partialCheckLabel(row)
+            : '必要長さのみ'
+        : row.generationStatus === 'CENTERLINE_READY'
+          ? '中心線生成対象'
+          : row.productionPathCandidate || row.productionPlacementCandidate
+            ? 'production候補'
+            : row.generationStatus === 'UNRESOLVED'
+              ? '未生成・要確認'
+              : '-';
+    },
+  },
+  {
+    key: 'productionGate',
+    label: 'Production Gate',
+    text: true,
+    value: productionGateLabel,
   },
   { key: 'note', label: '備考', text: true, value: (row) => row.note || '' },
 ];
@@ -234,7 +307,7 @@ function buildTable(rows) {
     for (const column of COLUMNS) {
       const td = document.createElement('td');
       if (column.text) td.className = 'text';
-      // 部材名・断面名はXML由来のため必ず textContent で挿入する
+      // 部材名・断面名・gate blocker等は必ず textContent で挿入する
       td.textContent = String(column.value(row));
       tr.appendChild(td);
     }
@@ -293,13 +366,16 @@ function refresh() {
   if (notes) {
     const rounded = allRows.some((row) => !row.exact);
     notes.textContent =
-      '出典は日本建設業連合会「鉄筋コンクリート造配筋標準図」(2013.03.27 改訂) §7-1・§7-3・§8-1・§8-2・§9-1 の一般値です。' +
-      '必要定着長さ L2 / L2h は「異形鉄筋の定着の長さ」の一般表によります。梁定着の確保長さは' +
-      '「梁軸方向の柱せい − 柱かぶり − 帯筋外径 − 柱主筋外径」で、柱主筋はD22・帯筋はD10と仮定しています。' +
-      '柱せい・内法スパンは通り芯平行配置を想定した近似で、柱の回転（rotate）・斜め梁の厳密な投影は考慮していません。' +
-      '判定「—」は基礎などの情報が無く算定できない、または参考表示の行です。' +
-      '実際の可否は設計指針・構造設計者の判断によります。' +
-      (rounded ? ' ※Fcまたは鉄筋種別が表の範囲外のため、一部の行は安全側に丸めています。' : '');
+      '配筋ルールは日建連・JSCA 2023に基づきます。構造図が優先されます。' +
+      '梁定着の確保長さは接続柱の実配筋と実配置から評価します。' +
+      '小梁（要件）はR12-N/O/Pで上端筋の投影・90°余長・L2をbar-levelで部分判定し、R12-Q〜VでVERTICAL_90候補・実曲げ・identity・Production Gateを表示します。' +
+      '下端L3/L3h・代替mode・main-bar trimは未判定・未生成です。' +
+      '大梁仕口は同一直線の通し筋を優先し、水平位置差の自動折曲げは行いません。' +
+      '大梁仕口の鉛直折曲げ候補は必要長さ6eと実柱主筋から解いたjtを比較します。' +
+      '柱仕口納まりの必要長さ／確保長さは、それぞれ6e／梁主筋間隔jtです。' +
+      '特殊納まりはProduction Gateのsource・mode・blockerを表示し、暗黙補完しません。' +
+      '中心線生成対象・production候補は適合OKを意味せず、実曲げ半径や閉鎖形状など未生成の詳細があります。' +
+      (rounded ? '未解決・標準補完を含む行は個別確認してください。' : '');
   }
 }
 

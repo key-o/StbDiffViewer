@@ -17,7 +17,7 @@ import { ConfiguredColumnSectionListRenderer } from './ConfiguredColumnSectionLi
 import {
   BASELINE_COLUMN_COVER_FACES,
   normalizeColumnCoverFaces,
-} from './columnSectionCover.js';
+} from '../../../components/rcColumnVisual/columnSectionCover.js';
 import {
   collectSectionListAdaptiveMetrics,
   createCenteredSectionProjection,
@@ -67,12 +67,14 @@ const COLUMN_INFO_ROWS = [
   },
   {
     label: 'HOOP',
-    format: (sectionData, arrangement) => stripHtml(uiPresenter.formatHoop(sectionData, arrangement)),
+    format: (sectionData, arrangement) =>
+      stripHtml(uiPresenter.formatHoop(sectionData, arrangement)),
   },
   {
     // 添付基準DXFでは通常HOOPと同値。STBに独立値が無い場合は同値を表示する。
     label: '接合部HOOP',
-    format: (sectionData, arrangement) => stripHtml(uiPresenter.formatHoop(sectionData, arrangement)),
+    format: (sectionData, arrangement) =>
+      stripHtml(uiPresenter.formatHoop(sectionData, arrangement)),
   },
   {
     label: '備考',
@@ -125,15 +127,9 @@ function drawColumnGeometry(lines2D, circles2D, geometry, cx, cy, scheduleProfil
   }
 
   [...geometry.mainBars, ...geometry.coreBars].forEach((bar) => {
-    addRebarSymbol(
-      lines2D,
-      circles2D,
-      bar.dia,
-      dx(bar.x),
-      dy(bar.y),
-      LAYERS.REBAR,
-      { profile: scheduleProfile },
-    );
+    addRebarSymbol(lines2D, circles2D, bar.dia, dx(bar.x), dy(bar.y), LAYERS.REBAR, {
+      profile: scheduleProfile,
+    });
   });
 }
 
@@ -276,14 +272,7 @@ export async function exportConfiguredColumnSectionListToDxf(
           coverFaces,
           sharedSlotCounts,
         });
-        drawColumnGeometry(
-          lines2D,
-          circles2D,
-          geometry,
-          posCx,
-          sectionCenterY,
-          scheduleProfile,
-        );
+        drawColumnGeometry(lines2D, circles2D, geometry, posCx, sectionCenterY, scheduleProfile);
 
         drawSectionListInfoValues({
           texts2D,

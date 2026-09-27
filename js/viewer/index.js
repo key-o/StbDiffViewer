@@ -181,7 +181,15 @@ export {
 
 // パフォーマンスユーティリティの再エクスポート
 export { getElementRegistry } from './utils/ElementRegistry.js';
-export { findElementInGroup, getBatchElementCenter } from './utils/batchElementLookup.js';
+export {
+  findElementInGroup,
+  getBatchElementCenter,
+  insertElementRenderablesInGroup,
+  removeElementRenderablesInGroup,
+  replaceElementRenderablesInGroup,
+  updateNodeRenderablesInGroup,
+  updateLineRenderablesInGroup,
+} from './utils/batchElementLookup.js';
 export { getFrustumCuller } from './rendering/FrustumCuller.js';
 export { getLabelVisibilityCuller } from './annotations/labelVisibilityCuller.js';
 export {
@@ -234,12 +242,19 @@ export {
 export { getRebarDisplayManager } from './rendering/rebarDisplayManager.js';
 export {
   createColumnRebarMeshes,
-  createBeamRebarMeshes,
-  createRebarPieceMeshes,
   createColumnHoopMeshes,
   createBeamStirrupMeshes,
   disposeRebarMeshes,
 } from './geometry/generators/RebarGenerator.js';
+export { createRebarPieceMeshes } from './geometry/generators/RebarPiecePathGenerator.js';
+export { createBeamRebarMeshes } from './geometry/generators/FoundationBeamAwareRebarGenerator.js';
+export {
+  createPileMainRebarMeshes,
+  createPileBandMeshes,
+} from './geometry/generators/PileRebarGenerator.js';
+export { createAuxiliaryTieMeshes } from './geometry/generators/AuxiliaryTieGenerator.js';
+
+export { createColumnJointRebarMeshes } from './geometry/generators/ColumnJointRebarGenerator.js';
 
 // アウトライン
 export { initializeOutlineSystem } from './rendering/outlines.js';
@@ -320,3 +335,10 @@ export {
   setLayerVisibility,
   toggleDxfEditMode,
 } from './dxfViewer.js';
+
+export { createColumnMainMemberMeshes } from './geometry/generators/ColumnMainRebarGenerator.js';
+export {
+  createActualBendShearMeshes,
+  createLegacyShearFallbackLayoutMap,
+} from './geometry/generators/ActualBendShearRebarGenerator.js';
+export { buildFoundationBeamLowestColumnPassThroughRenderPlan2023 } from './geometry/generators/FoundationBeamLowestColumnPassThroughRenderPlan2023.js';

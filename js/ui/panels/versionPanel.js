@@ -29,7 +29,7 @@ let showVersionSpecificDifferences = true;
  * @param {Object} versionInfo - バージョン情報
  * @param {string} versionInfo.versionA - モデルAのバージョン
  * @param {string} versionInfo.versionB - モデルBのバージョン
- * @param {string} [versionInfo.sourceTypeA] - モデルAのソース種別 ('stb'|'ifc'|'ss7csv')
+ * @param {string} [versionInfo.sourceTypeA] - モデルAのソース種別 ('stb'|'ifc')
  * @param {string} [versionInfo.sourceTypeB] - モデルBのソース種別
  * @param {string} [versionInfo.ifcSchemaA] - モデルAのIFCスキーマ (IFC2X3等)
  * @param {string} [versionInfo.ifcSchemaB] - モデルBのIFCスキーマ
@@ -64,7 +64,7 @@ export function updateVersionPanel(versionInfo) {
  * インラインバージョンバッジを更新
  * @param {string} elementId - 更新する要素のID
  * @param {string} version - バージョン文字列
- * @param {string} [sourceType] - ソース種別 ('stb'|'ifc'|'ss7csv')
+ * @param {string} [sourceType] - ソース種別 ('stb'|'ifc')
  * @param {string} [ifcSchema] - IFCスキーマ文字列
  * @param {boolean} [hasModel=true] - 対象スロットにモデルが存在するか
  */
@@ -90,9 +90,6 @@ function updateInlineVersionBadge(elementId, version, sourceType, ifcSchema, has
  * @returns {string} 表示ラベル
  */
 function formatSourceLabel(version, sourceType, ifcSchema) {
-  if (sourceType === 'ss7csv') {
-    return 'SS7入力CSV';
-  }
   if (sourceType === 'ifc') {
     return ifcSchema ? formatIfcSchema(ifcSchema) : 'IFC';
   }
@@ -124,9 +121,6 @@ function formatIfcSchema(schema) {
  * @returns {string} CSSクラス名
  */
 function getVersionClass(version, sourceType) {
-  if (sourceType === 'ss7csv') {
-    return 'version-ss7';
-  }
   if (sourceType === 'ifc') {
     return 'version-ifc';
   }

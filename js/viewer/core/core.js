@@ -83,7 +83,7 @@ if (typeof window !== 'undefined') {
     10, // near: 10mm
     50000000, // far: 50km
   );
-  camera.position.set(10000, 10000, 10000);
+  camera.position.set(10000, -10000, 10000);
   camera.up.set(0, 0, 1);
 
   // OrthographicCamera を初期化（2Dモード用）

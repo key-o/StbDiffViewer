@@ -13,6 +13,26 @@ import { REBAR_CUTOFF_RULES } from '../../../constants/rebarCutoffRules.js';
 const POSITION_ORDER = ['LEFT', 'CENTER', 'RIGHT'];
 
 /**
+ * R12で大梁・小梁の差を閉じ込めるための薄いstrategy。
+ *
+ * 現段階では既存の断面分類契約をそのまま保持し、geometryや標準図type選択は変更しない。
+ * 後続R12では memberTag を起点に L3/L3h・大梁内定着など小梁固有規則だけを分岐させる。
+ */
+function resolveBeamSectionMemberStrategy(element) {
+  const tagName = element?.tagName || element?.localName || '';
+  if (tagName === 'StbSecGirder_RC') {
+    return { memberType: 'girder', memberTag: 'StbGirder', source: 'legacy-section-tag' };
+  }
+  if (element?.getAttribute('isFoundation') === 'true') {
+    return { memberType: 'girder', memberTag: 'StbGirder', source: 'foundation-section' };
+  }
+  if (element?.getAttribute('kind_beam') === 'BEAM') {
+    return { memberType: 'beam', memberTag: 'StbBeam', source: 'kind-beam' };
+  }
+  return { memberType: 'girder', memberTag: 'StbGirder', source: 'default-girder' };
+}
+
+/**
  * 区間 [start, end] を count 個の等間隔値に分ける
  * @param {number} start - 始点
  * @param {number} end - 終点
@@ -133,12 +153,11 @@ export function resolveSpanRanges(keys) {
  * - `StbSecGirder_RC` は常に大梁
  * - `StbSecBeam_RC` は `kind_beam="BEAM"` のときだけ小梁で、
  *   属性が無い場合と `isFoundation="true"` の基礎梁は大梁として扱う
+ *
+ * R12以降の小梁固有処理は、この関数の内部strategyと同じ分類契約を使用する。
  * @param {Element} element - 断面要素
  * @returns {boolean} 大梁なら true
  */
 export function isGirderSection(element) {
-  const tagName = element.tagName || element.localName;
-  if (tagName === 'StbSecGirder_RC') return true;
-  if (element.getAttribute('isFoundation') === 'true') return true;
-  return element.getAttribute('kind_beam') !== 'BEAM';
+  return resolveBeamSectionMemberStrategy(element).memberType === 'girder';
 }

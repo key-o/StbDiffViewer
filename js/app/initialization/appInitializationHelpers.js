@@ -55,6 +55,14 @@ import { initKeyboardShortcuts } from '../../viewer/interaction/keyboard-shortcu
 import { initializeViewCube } from '../../ui/viewer3d/viewCube/ViewCube.js';
 import { CAMERA_ORTHOGRAPHIC } from '../../config/renderingConstants.js';
 import { renderElementSettingsRows } from '../../ui/panels/elementSettingsTable.js';
+import {
+  renderRebarDetailingChoiceSettings,
+  setRebarDetailingJointAssemblyCheckProvider,
+  setRebarDetailingWidthCheckProvider,
+} from '../../ui/panels/rebarDetailingChoiceSettings.js';
+import { collectRebarAppendixA2JointAssemblyChecks } from '../../data/extractors/rebar3d/rebarAppendixA2JointAssemblyChecks.js';
+import { collectRebarAppendixA3WidthChecks } from '../../data/extractors/rebar3d/rebarAppendixA3SectionWidthChecks.js';
+import { getModelContext } from '../viewModes/modelContext.js';
 import { setModelLoaderDependencies } from '../../modelLoader/loaderDependencies.js';
 import {
   initMeasurementManager,
@@ -137,6 +145,21 @@ export function initializeApplicationServices(rendererInitialized) {
     });
 
   renderElementSettingsRows();
+  setRebarDetailingJointAssemblyCheckProvider(() => {
+    const { modelADocument, modelBDocument } = getModelContext();
+    return {
+      A: collectRebarAppendixA2JointAssemblyChecks(modelADocument),
+      B: collectRebarAppendixA2JointAssemblyChecks(modelBDocument),
+    };
+  });
+  setRebarDetailingWidthCheckProvider(() => {
+    const { modelADocument, modelBDocument } = getModelContext();
+    return {
+      A: collectRebarAppendixA3WidthChecks(modelADocument),
+      B: collectRebarAppendixA3WidthChecks(modelBDocument),
+    };
+  });
+  renderRebarDetailingChoiceSettings();
 }
 
 /**

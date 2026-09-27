@@ -29,7 +29,10 @@ import { initSectionBoxEventListeners } from '../../ui/viewer3d/sectionBox.js';
 import { injectElementInfoService } from '../../viewer/services/elementInfoAdapter.js';
 import { initializeValidationPanel } from '../../ui/panels/validationPanelIntegration.js';
 import { initializeXmlViewer } from '../../ui/panels/xmlViewer.js';
+import { initializeXmlViewerIssueList } from '../../ui/panels/xmlViewerIssueList.js';
+import { initializeXmlViewerKeyboardNavigation } from '../../ui/panels/xmlViewerKeyboardNavigation.js';
 import { initializeRawXmlDiffViewer } from '../../ui/panels/rawXmlDiffViewer.js';
+import { initializeModelEditPanel } from '../../ui/panels/modelEditPanel.js';
 import { getState } from '../../data/state/globalState.js';
 import { convertComparisonResultsForTree } from '../../data/converters/comparison-to-tree.js';
 import { handleTreeElementSelection } from './eventHandlers.js';
@@ -39,6 +42,7 @@ import {
 } from '../../ui/panels/sectionList/index.js';
 import { initializeBeamOpeningDiagramPanel } from '../../ui/panels/beamOpeningDiagram/BeamOpeningDiagramPanel.js';
 import { initializeAnchorageCheckPanel } from '../../ui/panels/anchorageCheckPanel.js';
+import { initializeRebarDecisionTracePanel } from '../../ui/panels/rebarDecisionTracePanel.js';
 
 const log = createLogger('uiInitializationHelpers');
 
@@ -69,6 +73,10 @@ export function initializeSharedPanels() {
   initSectionBoxEventListeners();
   initDxfLoaderEventListeners();
 
+  // Issue #277: 編集入口を Element Info / 出力設定から独立させる。
+  // 既存ボタンを移動してから各編集フォームを初期化することで、mutation 経路は変更しない。
+  initializeModelEditPanel();
+
   import('../../ui/panels/element-info/index.js').then((elementInfo) => {
     injectElementInfoService(elementInfo);
     if (typeof elementInfo.initializeEditModeButton === 'function') {
@@ -89,6 +97,9 @@ export function initializeSharedPanels() {
     if (typeof elementInfo.initJointBuilderForm === 'function') {
       elementInfo.initJointBuilderForm();
     }
+    if (typeof elementInfo.initJointArrangementManagerForm === 'function') {
+      elementInfo.initJointArrangementManagerForm();
+    }
     log.info('要素情報サービスが注入されました');
   });
 
@@ -97,7 +108,12 @@ export function initializeSharedPanels() {
   initializeFloatingWindow();
   initializeValidationPanel();
   initializeXmlViewer();
+  initializeXmlViewerIssueList();
+  initializeXmlViewerKeyboardNavigation();
   initializeRawXmlDiffViewer();
+  import('../../ui/panels/pdfOverlay/PdfOverlayPanel.js')
+    .then(({ initializePdfOverlayPanel }) => initializePdfOverlayPanel())
+    .catch((error) => log.warn('PDF図面照合パネルの初期化に失敗:', error));
   initializeOverlayToggle();
 
   log.info('共通UIパネルが初期化されました');
@@ -158,6 +174,7 @@ export function initializeSectionListPanels() {
   initializeOptionalPanel(initBeamSectionListPanel, 'RC梁断面リストパネル');
   initializeOptionalPanel(initializeBeamOpeningDiagramPanel, '梁貫通孔配置図パネル');
   initializeOptionalPanel(initializeAnchorageCheckPanel, '定着・カットオフチェックパネル');
+  initializeOptionalPanel(initializeRebarDecisionTracePanel, '配筋判断トレースパネル');
 }
 
 function handleTreeSelection(

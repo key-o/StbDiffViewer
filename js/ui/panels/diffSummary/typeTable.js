@@ -214,7 +214,8 @@ function generatePlacementAxisHeader() {
   let html =
     '<div class="diff-type-group-header-grid" role="row"><div class="diff-group-spacer" aria-hidden="true"></div>';
   html += `<div class="diff-group-static" role="columnheader" style="grid-column: span ${FLAT_LEADING_COLUMNS.length}">全体</div>`;
-  html += '<div class="diff-group-static" role="columnheader" style="grid-column: span 1">一致</div>';
+  html +=
+    '<div class="diff-group-static" role="columnheader" style="grid-column: span 1">一致</div>';
   html += `<div class="diff-group-static" role="columnheader" style="grid-column: span ${CORRESPONDING_STATUS_COLUMNS.length - 1}">差分</div>`;
   html += `<div class="diff-group-static" role="columnheader" style="grid-column: span ${AB_ONLY_COLUMNS.length}">A/Bのみ</div>`;
   html += '</div>';

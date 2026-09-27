@@ -6,13 +6,15 @@
  */
 
 import * as THREE from 'three';
-import { colorManager } from '../../../viewer/index.js';
+import { colorManager, getRebarDisplayManager } from '../../../viewer/index.js';
+import { isRebarGhostActive } from '../../../colorModes/modelSourceMapping.js';
 
-/** @type {{line: THREE.Material|null, sprite: THREE.Material|null, mesh: THREE.Material|null, meshSrcConcrete: THREE.Material|null}} */
+/** @type {{line: THREE.Material|null, sprite: THREE.Material|null, mesh: THREE.Material|null, meshGhost: THREE.Material|null, meshSrcConcrete: THREE.Material|null}} */
 const selectionCandidateMaterialCache = {
   line: null,
   sprite: null,
   mesh: null,
+  meshGhost: null,
   meshSrcConcrete: null,
 };
 
@@ -24,12 +26,16 @@ const selectionCandidateMaterialCache = {
  */
 export function createHighlightMaterial(obj, colorMode = 'highlight') {
   let highlightMat = null;
+  const useGhostTransparency = obj instanceof THREE.Mesh && isRebarGhostActive();
   if (obj instanceof THREE.Line) {
     highlightMat = colorManager.getMaterial(colorMode, { isLine: true });
   } else if (obj instanceof THREE.Sprite) {
     highlightMat = colorManager.getMaterial(colorMode, { isSprite: true });
   } else if (obj instanceof THREE.Mesh) {
-    highlightMat = colorManager.getMaterial(colorMode, { isLine: false });
+    highlightMat = colorManager.getMaterial(colorMode, {
+      isLine: false,
+      isTransparent: useGhostTransparency,
+    });
   }
 
   if (colorMode === 'selectionCandidate' && highlightMat?.isMaterial) {
@@ -52,6 +58,11 @@ export function createHighlightMaterial(obj, colorMode = 'highlight') {
         selectionCandidateMaterialCache.meshSrcConcrete = srcConcreteMaterial;
       }
       highlightMat = selectionCandidateMaterialCache.meshSrcConcrete;
+    } else if (obj instanceof THREE.Mesh && useGhostTransparency) {
+      if (!selectionCandidateMaterialCache.meshGhost) {
+        selectionCandidateMaterialCache.meshGhost = highlightMat;
+      }
+      highlightMat = selectionCandidateMaterialCache.meshGhost;
     } else {
       if (!selectionCandidateMaterialCache.mesh) {
         selectionCandidateMaterialCache.mesh = highlightMat;
@@ -78,6 +89,22 @@ export function applyHighlightMaterial(obj, colorMode = 'highlight') {
     return false;
   }
 
+  if (obj.userData?.isRebarInstanceSelection) {
+    const manager = getRebarDisplayManager();
+    if (!manager?.addSelectionOverlay(obj, obj.userData.sourceMesh)) return false;
+    obj.material = highlightMat;
+    return true;
+  }
+
   obj.material = highlightMat;
   return true;
+}
+
+/** 選択／候補プレビュー解除時に鉄筋instanceのオーバーレイを除去する。 */
+export function clearHighlightMaterial(obj, originalMaterial = null) {
+  if (obj?.userData?.isRebarInstanceSelection) {
+    getRebarDisplayManager()?.removeSelectionOverlay(obj);
+  }
+  if (originalMaterial) obj.material = originalMaterial;
+  return Boolean(originalMaterial || obj?.userData?.isRebarInstanceSelection);
 }

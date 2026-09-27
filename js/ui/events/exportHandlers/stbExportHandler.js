@@ -3,12 +3,13 @@
  *
  * STBファイルのエクスポート機能を処理します。
  * 元のSTBファイルが利用可能な場合、バージョン変換ルール（12種類）を適用します。
- * IFC/SS7ソースの場合はDOMドキュメントのバージョン属性のみ更新します。
+ * IFCソースの場合はDOMドキュメントのバージョン属性のみ更新します。
  *
  * @module ui/events/exportHandlers/stbExportHandler
  */
 
 import { showSuccess, showError, showWarning } from '../../common/toast.js';
+import editingSession from '../../../app/editing/editingSession.js';
 import { getState } from '../../../data/state/globalState.js';
 import {
   downloadStbFile,
@@ -38,7 +39,7 @@ function escapeRegExp(value) {
  * @returns {string} 拡張子を除いたファイル名
  */
 function stripKnownSourceExtension(filename) {
-  return String(filename || '').replace(/\.(stb|xml|csv|ss7|ifc)$/i, '');
+  return String(filename || '').replace(/\.(stb|xml|ifc)$/i, '');
 }
 
 /**
@@ -59,15 +60,88 @@ export function buildDefaultStbExportFilename(sourceName, targetVersion) {
 /**
  * バージョン変換の入力XMLを編集済みDOMから生成する。
  *
- * 元ファイルのテキストではなく現在のDOM（documentA/B）をシリアライズする点が重要。
- * 新規追加した部材や属性編集は DOM にのみ反映されており、元ファイルテキストを
- * 変換すると編集内容（追加要素など）が失われるため。
+ * 元ファイルのテキストではなく現在のDOM（Working Document / documentA/B）を
+ * シリアライズする点が重要。新規追加した部材や属性編集はDOMにのみ反映されており、
+ * 元ファイルテキストを変換すると編集内容（追加要素など）が失われるため。
  *
  * @param {Document} sourceDoc - 出力対象の編集済みDOM
  * @returns {string} シリアライズされたXML文字列
  */
 export function serializeDocForExport(sourceDoc) {
   return new XMLSerializer().serializeToString(sourceDoc);
+}
+
+/**
+ * STB出力の対象DOMと元ファイル情報を解決する。
+ *
+ * Working Session 中の Model A は source documentA ではなく Working Document が編集正本となる。
+ * `auto` でも active Working Document を最優先し、比較用 Model B を誤って出力しない。
+ * Model B を明示した場合だけ B を選択する。
+ *
+ * @param {object} options
+ * @param {'auto'|'A'|'B'|string} [options.targetModel='auto']
+ * @param {Document|null} [options.documentA=null]
+ * @param {Document|null} [options.documentB=null]
+ * @param {File|object|null} [options.fileA=null]
+ * @param {File|object|null} [options.fileB=null]
+ * @param {Document|null} [options.workingDocumentA=null]
+ * @returns {{sourceDoc:Document|null,sourceFile:File|object|null,sourceModel:'A'|'B'|null,usesWorkingDocument:boolean}}
+ */
+export function resolveStbExportSource(options = {}) {
+  const {
+    targetModel = 'auto',
+    documentA = null,
+    documentB = null,
+    fileA = null,
+    fileB = null,
+    workingDocumentA = null,
+  } = options;
+
+  const effectiveDocumentA = workingDocumentA || documentA;
+  const usesWorkingDocument = Boolean(workingDocumentA);
+
+  if (targetModel === 'A') {
+    return {
+      sourceDoc: effectiveDocumentA,
+      sourceFile: fileA,
+      sourceModel: effectiveDocumentA ? 'A' : null,
+      usesWorkingDocument,
+    };
+  }
+
+  if (targetModel === 'B') {
+    return {
+      sourceDoc: documentB,
+      sourceFile: fileB,
+      sourceModel: documentB ? 'B' : null,
+      usesWorkingDocument: false,
+    };
+  }
+
+  if (workingDocumentA) {
+    return {
+      sourceDoc: workingDocumentA,
+      sourceFile: fileA,
+      sourceModel: 'A',
+      usesWorkingDocument: true,
+    };
+  }
+
+  if (documentB) {
+    return {
+      sourceDoc: documentB,
+      sourceFile: fileB,
+      sourceModel: 'B',
+      usesWorkingDocument: false,
+    };
+  }
+
+  return {
+    sourceDoc: documentA,
+    sourceFile: fileA,
+    sourceModel: documentA ? 'A' : null,
+    usesWorkingDocument: false,
+  };
 }
 
 /**
@@ -103,20 +177,18 @@ async function handleStbExport() {
     const docB = getState('models.documentB');
     const fileA = getState('files.originalFileA');
     const fileB = getState('files.originalFileB');
+    const editingState = editingSession.getState?.();
+    const workingDocumentA =
+      editingState?.active === true ? editingSession.getWorkingDocument?.() || null : null;
 
-    let sourceDoc = null;
-    let sourceFile = null;
-
-    if (targetModel === 'A') {
-      sourceDoc = docA;
-      sourceFile = fileA;
-    } else if (targetModel === 'B') {
-      sourceDoc = docB;
-      sourceFile = fileB;
-    } else {
-      sourceDoc = docB || docA;
-      sourceFile = fileB || fileA;
-    }
+    const { sourceDoc, sourceFile } = resolveStbExportSource({
+      targetModel,
+      documentA: docA,
+      documentB: docB,
+      fileA,
+      fileB,
+      workingDocumentA,
+    });
 
     if (!sourceDoc) {
       showWarning('出力するモデルが読み込まれていません。');
@@ -175,7 +247,7 @@ async function handleStbExport() {
       }
     }
 
-    // IFC/SS7ソースまたは同バージョンの場合はDOM経由で出力
+    // IFCソースまたは同バージョンの場合はDOM経由で出力
     const { validateJsonSchema } =
       await import('../../../common-stb/validation/jsonSchemaValidator.js');
     const schemaIssues = validateJsonSchema(sourceDoc, {

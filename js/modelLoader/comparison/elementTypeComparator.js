@@ -31,6 +31,7 @@ import {
   DEFAULT_SECTION_MATCH_CRITERION,
   STORY_AXIS_MATCH_CRITERION,
   DEFAULT_STORY_AXIS_MATCH_CRITERION,
+  buildStoryHeightMatchKey,
 } from '../../config/comparisonKeyConfig.js';
 import { getToleranceConfig } from '../../config/toleranceConfig.js';
 import { filterWallsByViewerElementType } from '../../common-stb/walls/wallClassification.js';
@@ -490,9 +491,8 @@ function compareElementsByType(
           const id = getElementAttribute(el, 'id');
           let fallbackKey = null;
           if (storyAxisMatchCriterion === STORY_AXIS_MATCH_CRITERION.GEOMETRY) {
-            const height = parseFloat(getElementAttribute(el, 'height'));
-            // 標高も computeAxisGeometryKey と同じ 10mm グリッドへ量子化する
-            fallbackKey = Number.isFinite(height) ? `story:h:${Math.round(height / 10)}` : null;
+            const height = getElementAttribute(el, 'height');
+            fallbackKey = buildStoryHeightMatchKey(height);
           } else {
             fallbackKey = name ? `story:${name}` : null;
           }

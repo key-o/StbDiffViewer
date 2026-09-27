@@ -37,7 +37,11 @@ export { initializeDockButton } from './dockController.js';
 
 export { initAddMemberForm, openAddMemberForm } from './AddMemberForm.js';
 export { initOpenBuilderForm, openOpenBuilder } from './OpenBuilderForm.js';
-export { initJointBuilderForm, openJointBuilder } from './JointBuilderForm.js';
+export { initJointBuilderForm, openJointBuilder } from './JointBuilderPublicForm.js';
+export {
+  initJointArrangementManagerForm,
+  openJointArrangementManager,
+} from './JointArrangementManagerTypedForm.js';
 
 export { getAttributeImportanceLevel, getImportanceCircleHtml } from './ImportanceColors.js';
 export {

@@ -4,6 +4,10 @@
  * 通常の自由入力属性は要素情報テーブル上で直接編集する。
  * 列挙値・固定値・参照ID・識別子などルールを伴う属性だけは従来の
  * ParameterEditor ダイアログを使用する。
+ *
+ * Phase 6 では、Phase 5 までに主要 mutation 入口が Working Command 化されたことを前提に、
+ * 編集モード ON を Working Session の production 起動点とする。OFF 時は dirty な Working
+ * Session を確認なしで破棄せず、ユーザー確認後に source snapshot へ戻す。
  */
 
 import {
@@ -11,13 +15,17 @@ import {
   isSchemaLoaded,
   validateAttributeValue,
 } from '../../../../common-stb/import/parser/jsonSchemaLoader.js';
+import { eventBus, EditEvents } from '../../../../data/events/index.js';
+import editingSession from '../../../../app/editing/editingSession.js';
+import { resolveElementTagName } from '../../../../app/editing/attributeCommandUtils.js';
+import { showError } from '../../../common/toast.js';
 import {
   getModifications,
   isEditMode,
   redisplayCurrentEditingElement,
   setEditMode,
 } from './editState.js';
-import { editAttributeValue } from './attributeEdit.js';
+import { commitWorkingAttributeEdit, editAttributeValue } from './attributeEdit.js';
 import { applyAttributeEditToDocument } from './editAppliers.js';
 import { updateEditingSummary } from './editHistory.js';
 
@@ -27,7 +35,56 @@ import { updateEditingSummary } from './editHistory.js';
  * @returns {string}
  */
 function getSchemaTagName(elementType) {
-  return elementType === 'Node' ? 'StbNode' : `Stb${elementType}`;
+  return resolveElementTagName(elementType) || `Stb${elementType}`;
+}
+
+function isWorkingSessionActive() {
+  return editingSession.getState()?.active === true;
+}
+
+function syncEditModeButton(active = isEditMode()) {
+  const editButton = document.getElementById('edit-mode-button');
+  if (editButton) {
+    editButton.textContent = active ? '✏️ 編集モード（ON）' : '✏️ 編集モード';
+    editButton.classList.toggle('edit-mode-active', active);
+  }
+
+  const editingControls = document.getElementById('editing-controls');
+  if (editingControls) {
+    editingControls.hidden = !active;
+    editingControls.setAttribute('aria-hidden', active ? 'false' : 'true');
+  }
+}
+
+function startWorkingSessionIfNeeded() {
+  if (isWorkingSessionActive()) return true;
+  try {
+    editingSession.start();
+    return true;
+  } catch (error) {
+    showError(
+      `編集セッションを開始できませんでした: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return false;
+  }
+}
+
+function confirmWorkingSessionDiscard() {
+  const state = editingSession.getState();
+  if (!state?.active || state.dirty !== true) return true;
+  const count = state.history?.length || 0;
+  if (typeof globalThis.confirm !== 'function') return false;
+  return globalThis.confirm(
+    `${count}件の Working Document 編集があります。\n` +
+      '編集モードを終了すると現在の Working Document 編集を破棄します。よろしいですか？',
+  );
+}
+
+function stopWorkingSessionIfActive() {
+  if (!isWorkingSessionActive()) return true;
+  if (!confirmWorkingSessionDiscard()) return false;
+  editingSession.discard();
+  return true;
 }
 
 /**
@@ -44,13 +101,7 @@ export function requiresParameterDialog(elementType, attributeName) {
   const attr = String(attributeName || '');
   const lower = attr.toLowerCase();
 
-  // 自己識別子と他要素参照は、重複チェック・参照候補・追従更新が必要。
-  if (
-    lower === 'id' ||
-    lower === 'guid' ||
-    lower.startsWith('id_') ||
-    /_id(?:_|$)/.test(lower)
-  ) {
+  if (lower === 'id' || lower === 'guid' || lower.startsWith('id_') || /_id(?:_|$)/.test(lower)) {
     return true;
   }
 
@@ -75,11 +126,6 @@ export function requiresParameterDialog(elementType, attributeName) {
   return false;
 }
 
-/**
- * edit-btn のdata属性を別要素へ転記する。
- * @param {HTMLElement} source
- * @param {HTMLElement} target
- */
 function copyEditDataset(source, target) {
   for (const key of ['editType', 'editId', 'editAttr', 'editValue', 'editPath']) {
     if (source.dataset[key] !== undefined) {
@@ -88,11 +134,6 @@ function copyEditDataset(source, target) {
   }
 }
 
-/**
- * ComparisonRenderer が生成した編集ボタンを、インライン入力またはクリック可能セルへ変換する。
- * 鉛筆アイコンは表示しない。
- * @param {ParentNode} [root=document]
- */
 export function decorateEditableAttributeCells(root = document) {
   if (!isEditMode()) return;
 
@@ -139,10 +180,6 @@ export function decorateEditableAttributeCells(root = document) {
   });
 }
 
-/**
- * インライン入力値を確定する。
- * @param {HTMLInputElement} input
- */
 function commitInlineAttribute(input) {
   const { editType, editId, editAttr, editValue, editPath } = input.dataset;
   if (!editType || !editAttr) return;
@@ -151,7 +188,6 @@ function commitInlineAttribute(input) {
   const newValue = input.value;
   if (newValue === oldValue) return;
 
-  // 直接入力でもXSD型チェックは通す。不正値の場合のみ従来ダイアログへ移行する。
   if (isSchemaLoaded()) {
     const validation = validateAttributeValue(getSchemaTagName(editType), editAttr, newValue);
     if (!validation.valid && validation.blocking !== false) {
@@ -161,6 +197,23 @@ function commitInlineAttribute(input) {
       });
       return;
     }
+  }
+
+  if (isWorkingSessionActive()) {
+    try {
+      commitWorkingAttributeEdit(editType, editId || '', editAttr, newValue, editPath || null);
+    } catch (error) {
+      input.value = oldValue;
+      showError(
+        `編集を確定できませんでした: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return;
+    }
+
+    updateEditingSummary();
+    redisplayCurrentEditingElement();
+    queueEditableDecoration();
+    return;
   }
 
   getModifications().push({
@@ -192,10 +245,6 @@ function commitInlineAttribute(input) {
   queueEditableDecoration();
 }
 
-/**
- * ルール付きセルから従来のParameterEditorを開く。
- * @param {HTMLElement} cell
- */
 function openRuleEditor(cell) {
   const { editType, editId, editAttr, editValue, editPath } = cell.dataset;
   if (!editType || !editAttr) return;
@@ -208,42 +257,50 @@ let decorationQueued = false;
 function queueEditableDecoration() {
   if (decorationQueued) return;
   decorationQueued = true;
-  queueMicrotask(() => {
+  globalThis.queueMicrotask(() => {
     decorationQueued = false;
     decorateEditableAttributeCells(document);
   });
 }
 
-/**
- * 編集モードの切り替え
- */
 export function toggleEditMode() {
   const next = !isEditMode();
-  setEditMode(next);
-  const editButton = document.getElementById('edit-mode-button');
-  if (editButton) {
-    editButton.textContent = next ? '✏️ 編集モード（ON）' : '✏️ 編集モード';
-    editButton.classList.toggle('edit-mode-active', next);
+
+  if (next) {
+    if (!startWorkingSessionIfNeeded()) return false;
+    setEditMode(true);
+  } else {
+    if (!stopWorkingSessionIfActive()) return false;
+    setEditMode(false);
   }
 
-  // 現在表示中の要素を再表示して編集UIを反映
+  syncEditModeButton(next);
+  updateEditingSummary();
   redisplayCurrentEditingElement();
   if (next) queueEditableDecoration();
+  eventBus.emit(EditEvents.MODE_TOGGLED, { active: next });
+  return true;
 }
 
-/** 編集イベントデリゲーションの登録済みフラグ */
 let isEditButtonDelegationInitialized = false;
+let workingSummaryListenerInitialized = false;
 let editMutationObserver = null;
 
-// DOM初期化後にイベントリスナーを設定（window.*グローバル汚染の解消）
 export function initializeEditModeButton() {
   const editModeBtn = document.getElementById('edit-mode-button');
   if (editModeBtn) {
     editModeBtn.addEventListener('click', toggleEditMode);
   }
 
+  if (!workingSummaryListenerInitialized) {
+    eventBus.on(EditEvents.WORKING_DOCUMENT_CHANGED, () => {
+      updateEditingSummary();
+      syncEditModeButton(isEditMode());
+    });
+    workingSummaryListenerInitialized = true;
+  }
+
   if (!isEditButtonDelegationInitialized) {
-    // 通常属性: セル内inputを直接編集し、changeで確定する。
     document.addEventListener('change', (event) => {
       const input = /** @type {HTMLElement} */ (event.target)?.closest?.('.inline-attr-input');
       if (input instanceof HTMLInputElement) commitInlineAttribute(input);
@@ -271,7 +328,6 @@ export function initializeEditModeButton() {
       }
     });
 
-    // ルール付き属性は値セル自体をクリックすると従来ダイアログを開く。
     document.addEventListener('click', (event) => {
       const target = /** @type {HTMLElement} */ (event.target);
       const cell = target?.closest?.('.rule-edit-cell[data-edit-attr]');
@@ -280,7 +336,6 @@ export function initializeEditModeButton() {
         return;
       }
 
-      // MutationObserverで装飾される前にクリックされた場合のフォールバック。
       const button = target?.closest?.('.edit-btn[data-edit-attr]');
       if (!button) return;
       const { editType, editId, editAttr, editValue, editPath } = button.dataset;
@@ -289,7 +344,6 @@ export function initializeEditModeButton() {
       });
     });
 
-    // 要素を切り替えた際の再描画でも、自動的に編集セルへ変換する。
     editMutationObserver = new MutationObserver(() => {
       if (isEditMode()) queueEditableDecoration();
     });
@@ -298,12 +352,14 @@ export function initializeEditModeButton() {
     isEditButtonDelegationInitialized = true;
   }
 
+  syncEditModeButton(isEditMode());
   if (isEditMode()) queueEditableDecoration();
 
-  // E2Eテスト用ブリッジ: UIを介さずに属性編集パイプラインを直接起動する
   window.__editBridge = {
     applyEdit: (elementType, elementId, attrName, newValue, editPath = null) =>
-      applyAttributeEditToDocument(elementType, elementId, attrName, newValue, editPath),
+      isWorkingSessionActive()
+        ? commitWorkingAttributeEdit(elementType, elementId, attrName, newValue, editPath)
+        : applyAttributeEditToDocument(elementType, elementId, attrName, newValue, editPath),
     decorateEditableAttributeCells,
     requiresParameterDialog,
   };

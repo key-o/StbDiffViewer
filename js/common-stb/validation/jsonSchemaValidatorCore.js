@@ -1,7 +1,7 @@
 /**
  * @fileoverview JSON Schema 検証モジュール（ブラウザ版）
  *
- * JSON Schema と ajv を使って STB XML ファイルを検証する。
+ * バージョン別 JSON Schema 属性メタデータを使って STB XML ファイルを検証する。
  * xsdSchemaValidator.js の JSON Schema 版。
  *
  * 検証項目:
@@ -14,7 +14,6 @@
  * - 型チェック（number, boolean 等）
  */
 
-import Ajv from 'ajv';
 import {
   getElementDefinitionForVersion,
   isVersionLoaded,
@@ -22,8 +21,8 @@ import {
 import { SEVERITY, CATEGORY } from './validationConstants.js';
 import { buildIssueLocation as buildBaseIssueLocation } from './issueLocation.js';
 
-// ajv インスタンスのキャッシュ（バージョン別）
-const ajvCache = new Map(); // version -> { ajv, validatorCache }
+// 属性インタープリターのキャッシュ（バージョン別）
+const attributeValidatorCache = new Map(); // version -> Map<elementName, validator | null>
 
 /**
  * JSON Schema に基づいて STB XML ドキュメントを検証
@@ -39,7 +38,7 @@ export function validateJsonSchema(xmlDoc, options = {}) {
   if (!xmlDoc || !xmlDoc.documentElement) return [];
   if (!isVersionLoaded(version)) return [];
 
-  const ctx = getAjvContext(version);
+  const ctx = getAttributeValidatorContext(version);
   const issues = [];
 
   validateElement(xmlDoc.documentElement, version, ctx, issues);
@@ -48,31 +47,27 @@ export function validateJsonSchema(xmlDoc, options = {}) {
 }
 
 // ============================================================
-// 内部: ajv コンテキスト管理
+// 内部: 属性検証コンテキスト管理
 // ============================================================
 
 /**
- * バージョン別 ajv コンテキストを取得（キャッシュ）
+ * バージョン別属性検証コンテキストを取得（キャッシュ）
  */
-function getAjvContext(version) {
-  if (ajvCache.has(version)) return ajvCache.get(version);
+function getAttributeValidatorContext(version) {
+  if (attributeValidatorCache.has(version)) {
+    return attributeValidatorCache.get(version);
+  }
 
-  const ajv = new Ajv({
-    allErrors: true,
-    coerceTypes: true, // XML 属性値は全て文字列 → 型変換
-    strict: false, // 未知キーワードを無視
-  });
-
-  const ctx = { ajv, validatorCache: new Map() };
-  ajvCache.set(version, ctx);
+  const ctx = { version, validatorCache: new Map() };
+  attributeValidatorCache.set(version, ctx);
   return ctx;
 }
 
 /**
- * 要素名に対応する ajv 検証関数を取得（キャッシュ）
+ * 要素名に対応する属性検証関数を取得（キャッシュ）
  */
-function getValidator(elementName, version, ctx) {
-  const { ajv, validatorCache } = ctx;
+function getAttributeValidator(elementName, ctx) {
+  const { version, validatorCache } = ctx;
   if (validatorCache.has(elementName)) return validatorCache.get(elementName);
 
   const def = getElementDefinitionForVersion(version, elementName);
@@ -81,11 +76,8 @@ function getValidator(elementName, version, ctx) {
     return null;
   }
 
-  // JSON Schema オブジェクトを構築
-  const schema = buildElementSchema(def);
-
   try {
-    const validator = ajv.compile(schema);
+    const validator = buildAttributeValidator(def);
     validatorCache.set(elementName, validator);
     return validator;
   } catch {
@@ -95,60 +87,168 @@ function getValidator(elementName, version, ctx) {
 }
 
 /**
- * 要素定義から ajv 用の JSON Schema を構築
+ * バージョン付き属性定義から、Ajv の allErrors/coerceTypes に相当する
+ * 属性検証関数を構築する。Ajv のコード生成には依存しない。
  */
-function buildElementSchema(def) {
-  const properties = {};
+function buildAttributeValidator(def) {
+  const attributes = [];
   const required = [];
+  const allowedNames = new Set();
 
-  for (const [attrName, attrDef] of def.attributes) {
-    properties[attrName] = buildPropertySchema(attrDef);
-    if (attrDef.required) required.push(attrName);
+  for (const [name, attrDef] of def.attributes) {
+    allowedNames.add(name);
+    if (attrDef.required) required.push(name);
+
+    const constraints = attrDef.constraints;
+    const enumerations = constraints?.enumerations || [];
+    const pattern = constraints?.patterns?.[0];
+    // buildPropertySchema は enum がある場合に type を省略する。
+    const type =
+      enumerations.length > 0
+        ? null
+        : attrDef.type === 'number' || attrDef.type === 'integer'
+          ? attrDef.type
+          : attrDef.type === 'boolean'
+            ? 'boolean'
+            : 'string';
+
+    attributes.push({
+      name,
+      fixed: attrDef.fixed,
+      type,
+      enumerations,
+      pattern: pattern === undefined ? null : new RegExp(pattern, 'u'),
+      patternSource: pattern,
+      minExclusive: constraints?.minExclusive ?? null,
+      maxExclusive: constraints?.maxExclusive ?? null,
+      minInclusive: constraints?.minInclusive ?? null,
+      maxInclusive: constraints?.maxInclusive ?? null,
+      minLength: constraints?.minLength ?? null,
+    });
   }
 
-  return {
-    type: 'object',
-    properties,
-    required: required.length > 0 ? required : undefined,
-    additionalProperties: false,
-  };
+  return (attrs) => validateAttributes(attrs, attributes, required, allowedNames);
 }
 
 /**
- * attrDef から JSON Schema プロパティを構築
+ * 属性オブジェクトを検証し、既存の Ajv エラー変換が扱う形式で返す。
  */
-function buildPropertySchema(attrDef) {
-  const schema = {};
+function validateAttributes(attrs, attributes, required, allowedNames) {
+  const errors = [];
 
-  if (attrDef.fixed !== null && attrDef.fixed !== undefined) {
-    schema.const = attrDef.fixed;
-    return schema;
-  }
-
-  const type = attrDef.type;
-  if (type === 'number' || type === 'integer') {
-    schema.type = type;
-  } else if (type === 'boolean') {
-    schema.type = 'boolean';
-  } else {
-    schema.type = 'string';
-  }
-
-  const c = attrDef.constraints;
-  if (c) {
-    if (c.enumerations.length > 0) {
-      schema.enum = c.enumerations;
-      delete schema.type;
+  // Ajv は required / additionalProperties を properties の制約より先に報告する。
+  for (const name of required) {
+    if (!Object.prototype.hasOwnProperty.call(attrs, name)) {
+      errors.push({ keyword: 'required', instancePath: '', params: { missingProperty: name } });
     }
-    if (c.patterns.length > 0) schema.pattern = c.patterns[0];
-    if (c.minExclusive !== null) schema.exclusiveMinimum = c.minExclusive;
-    if (c.maxExclusive !== null) schema.exclusiveMaximum = c.maxExclusive;
-    if (c.minInclusive !== null) schema.minimum = c.minInclusive;
-    if (c.maxInclusive !== null) schema.maximum = c.maxInclusive;
-    if (c.minLength !== null) schema.minLength = c.minLength;
   }
 
-  return schema;
+  for (const name of Object.keys(attrs)) {
+    if (!allowedNames.has(name)) {
+      errors.push({
+        keyword: 'additionalProperties',
+        instancePath: '',
+        params: { additionalProperty: name },
+      });
+    }
+  }
+
+  for (const attr of attributes) {
+    if (!Object.prototype.hasOwnProperty.call(attrs, attr.name)) continue;
+
+    const instancePath = `/${attr.name.replace(/~/g, '~0').replace(/\//g, '~1')}`;
+    let value = attrs[attr.name];
+    const pushError = (keyword, params) => errors.push({ keyword, instancePath, params });
+
+    if (attr.fixed !== null && attr.fixed !== undefined) {
+      if (value !== attr.fixed) pushError('const', { allowedValue: attr.fixed });
+      continue;
+    }
+
+    if (attr.enumerations.length > 0 && !attr.enumerations.includes(value)) {
+      pushError('enum', { allowedValues: attr.enumerations });
+    }
+
+    if (attr.type && !coerceAttributeType(attrs, attr.name, attr.type)) {
+      pushError('type', { type: attr.type });
+    }
+    value = attrs[attr.name];
+
+    // JSON Schema numeric keywords only apply to numbers. This guard matters for
+    // enum properties, where the generated schema deliberately has no type.
+    if (typeof value === 'number' && !Number.isNaN(value)) {
+      if (attr.maxInclusive !== null && value > attr.maxInclusive) {
+        pushError('maximum', { comparison: '<=', limit: attr.maxInclusive });
+      }
+      if (attr.minInclusive !== null && value < attr.minInclusive) {
+        pushError('minimum', { comparison: '>=', limit: attr.minInclusive });
+      }
+      if (attr.maxExclusive !== null && value >= attr.maxExclusive) {
+        pushError('exclusiveMaximum', { comparison: '<', limit: attr.maxExclusive });
+      }
+      if (attr.minExclusive !== null && value <= attr.minExclusive) {
+        pushError('exclusiveMinimum', { comparison: '>', limit: attr.minExclusive });
+      }
+    }
+
+    if (
+      attr.minLength !== null &&
+      typeof value === 'string' &&
+      countCodePoints(value) < attr.minLength
+    ) {
+      pushError('minLength', { limit: attr.minLength });
+    }
+
+    if (attr.pattern && typeof value === 'string' && !attr.pattern.test(value)) {
+      pushError('pattern', { pattern: attr.patternSource });
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * Ajv の coerceTypes: true と同じく XML 属性の文字列を対応型へ変換する。
+ */
+function coerceAttributeType(attrs, name, type) {
+  const value = attrs[name];
+  if (type === 'string') return typeof value === 'string';
+  if (type === 'boolean') {
+    if (value === 'true') {
+      attrs[name] = true;
+      return true;
+    }
+    if (value === 'false') {
+      attrs[name] = false;
+      return true;
+    }
+    return typeof value === 'boolean';
+  }
+
+  if (type === 'number' || type === 'integer') {
+    if (typeof value === 'number') {
+      return type === 'number' ? !Number.isNaN(value) : Number.isInteger(value);
+    }
+
+    // Ajv does not coerce the empty string. Whitespace-only strings coerce to 0.
+    if (typeof value !== 'string' || value === '') return false;
+    const number = Number(value);
+    if (
+      Number.isNaN(number) ||
+      (type === 'integer' && number % 1 !== 0 && Number.isFinite(number))
+    ) {
+      return false;
+    }
+    attrs[name] = number;
+    return true;
+  }
+
+  return true;
+}
+
+/** JSON Schema minLength counts Unicode code points rather than UTF-16 code units. */
+function countCodePoints(value) {
+  return Array.from(value).length;
 }
 
 // ============================================================
@@ -162,17 +262,15 @@ function validateElement(element, version, ctx, issues) {
   const elementName = element.localName || element.nodeName.replace(/^.*:/, '');
   const elementId = element.getAttribute ? element.getAttribute('id') || '' : '';
 
-  const validator = getValidator(elementName, version, ctx);
+  const validator = getAttributeValidator(elementName, ctx);
 
   if (validator) {
     const attrs = attrsToObject(element);
-    const valid = validator(attrs);
+    const errors = validator(attrs);
 
-    if (!valid && validator.errors) {
-      for (const err of validator.errors) {
-        const issue = convertAjvError(err, elementName, elementId, attrs, element);
-        if (issue) issues.push(issue);
-      }
+    for (const err of errors) {
+      const issue = convertAjvError(err, elementName, elementId, attrs, element);
+      if (issue) issues.push(issue);
     }
   }
 

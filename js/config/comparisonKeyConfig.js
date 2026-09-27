@@ -190,7 +190,7 @@ export const DEFAULT_STORY_AXIS_MATCH_CRITERION = STORY_AXIS_MATCH_CRITERION.NAM
  */
 export const STORY_AXIS_MATCH_CRITERION_LABELS = {
   [STORY_AXIS_MATCH_CRITERION.NAME]: '名前（符号）',
-  [STORY_AXIS_MATCH_CRITERION.GEOMETRY]: '幾何位置（原点＋距離）',
+  [STORY_AXIS_MATCH_CRITERION.GEOMETRY]: '幾何位置（階=高さ／通り芯=位置）',
 };
 
 /**
@@ -202,6 +202,34 @@ export const STORY_AXIS_MATCH_CRITERION_DESCRIPTIONS = {
   [STORY_AXIS_MATCH_CRITERION.GEOMETRY]:
     '階は標高、通り芯は原点と距離から算出した実座標を基準に対応付けます（名称の表記差を無視。別ソフト間の同一建物比較向け）',
 };
+
+/**
+ * 階の幾何位置照合で使用する標高グリッド(mm)。
+ * Story の全体比較と Quantity A/B 比較で同一値を使用する。
+ */
+export const STORY_HEIGHT_MATCH_GRID_MM = 10;
+
+/**
+ * StbStory.height を幾何位置照合用の安定キーへ量子化する。
+ * @param {number|string|null|undefined} heightMm
+ * @returns {number|null} 10mmグリッドの整数キー。無効値は null。
+ */
+export function quantizeStoryHeightForMatch(heightMm) {
+  if (heightMm === null || heightMm === undefined || heightMm === '') return null;
+  const height = Number(heightMm);
+  if (!Number.isFinite(height)) return null;
+  return Math.round(height / STORY_HEIGHT_MATCH_GRID_MM);
+}
+
+/**
+ * StbStory.height から全体比較で使用するキー文字列を生成する。
+ * @param {number|string|null|undefined} heightMm
+ * @returns {string|null}
+ */
+export function buildStoryHeightMatchKey(heightMm) {
+  const quantized = quantizeStoryHeightForMatch(heightMm);
+  return quantized === null ? null : `story:h:${quantized}`;
+}
 
 /**
  * 配置要素比較モード: 線状要素とポリゴン要素の配置位置比較の詳細度

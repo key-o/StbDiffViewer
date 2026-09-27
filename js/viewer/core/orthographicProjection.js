@@ -209,14 +209,7 @@ export function fitOrthographicToBounds(
 ) {
   if (!camera?.isOrthographicCamera) return null;
 
-  const viewHeight = calculateOrthographicFitHeight(
-    bounds,
-    position,
-    target,
-    up,
-    aspect,
-    padding,
-  );
+  const viewHeight = calculateOrthographicFitHeight(bounds, position, target, up, aspect, padding);
   if (!viewHeight) return null;
 
   setOrthographicViewHeight(camera, viewHeight, aspect, { resetZoom: true });

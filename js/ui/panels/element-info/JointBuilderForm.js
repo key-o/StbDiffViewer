@@ -248,18 +248,17 @@ function openJointAssignment202(created) {
     content.appendChild(targetRow.row);
 
     const endpointRow = createSelectRow(family === 'column' ? '柱脚・柱頭' : '始端・終端');
-    for (const [value, text] of
-      family === 'column'
-        ? [
-            ['START', '柱脚側（START / bottom）'],
-            ['END', '柱頭側（END / top）'],
-            ['BOTH', '柱脚・柱頭の両方'],
-          ]
-        : [
-            ['START', '始端側（START）'],
-            ['END', '終端側（END）'],
-            ['BOTH', '始端・終端の両方'],
-          ]) {
+    for (const [value, text] of family === 'column'
+      ? [
+          ['START', '柱脚側（START / bottom）'],
+          ['END', '柱頭側（END / top）'],
+          ['BOTH', '柱脚・柱頭の両方'],
+        ]
+      : [
+          ['START', '始端側（START）'],
+          ['END', '終端側（END）'],
+          ['BOTH', '始端・終端の両方'],
+        ]) {
       const option = document.createElement('option');
       option.value = value;
       option.textContent = text;
@@ -275,7 +274,9 @@ function openJointAssignment202(created) {
     startDistanceRow.input.step = 'any';
     content.appendChild(startDistanceRow.row);
 
-    const startKindRow = createSelectRow(family === 'column' ? '柱脚側 継手種別' : '始端側 継手種別');
+    const startKindRow = createSelectRow(
+      family === 'column' ? '柱脚側 継手種別' : '始端側 継手種別',
+    );
     for (const value of ['', 'BOLT', 'WBOLT', 'WELD']) {
       const option = document.createElement('option');
       option.value = value;
@@ -393,7 +394,9 @@ function openJointAssignment202(created) {
     };
 
     closeBtn.addEventListener('click', () => close(created));
-    buttonArea.querySelector('.joint-definition-only')?.addEventListener('click', () => close(created));
+    buttonArea
+      .querySelector('.joint-definition-only')
+      ?.addEventListener('click', () => close(created));
     buttonArea.querySelector('.joint-assign-submit')?.addEventListener('click', onSubmit);
     overlay.addEventListener('click', (event) => {
       if (event.target === overlay) close(created);
@@ -565,7 +568,9 @@ function openJointArrangementBuilder() {
     };
 
     closeBtn.addEventListener('click', () => close(null));
-    buttonArea.querySelector('.parameter-editor-cancel')?.addEventListener('click', () => close(null));
+    buttonArea
+      .querySelector('.parameter-editor-cancel')
+      ?.addEventListener('click', () => close(null));
     buttonArea.querySelector('.parameter-editor-ok')?.addEventListener('click', onSubmit);
     overlay.addEventListener('click', (event) => {
       if (event.target === overlay) close(null);

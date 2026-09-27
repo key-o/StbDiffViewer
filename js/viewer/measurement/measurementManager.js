@@ -31,12 +31,40 @@ let _tempObjects = [];
 /** @type {Array<{id:number, p1:THREE.Vector3, p2:THREE.Vector3, normal:THREE.Vector3, distance:number, objects:THREE.Object3D[]}>} */
 let _measurements = [];
 let _nextId = 1;
+let _sharedEventsBound = false;
 
 /**
  * 測定マネージャーを初期化する（アプリ起動時に1度呼ぶ）
  */
 export function initMeasurementManager() {
   initMeasurementGroup(scene);
+  if (!_sharedEventsBound) {
+    eventBus.on(MeasurementEvents.DELETE_REQUESTED, ({ id } = {}) => deleteMeasurement(id));
+    eventBus.on(MeasurementEvents.SEQUENCE_RESET, resetPendingMeasurementSequence);
+    _sharedEventsBound = true;
+  }
+}
+
+/**
+ * 未完了の1点目だけを破棄する。
+ * 完了済み寸法は保持し、3D/PDFの描画面切替時に古い1点目を持ち越さない。
+ */
+export function resetPendingMeasurementSequence() {
+  const hadPending =
+    _state === State.FIRST_PICKED ||
+    _firstPoint !== null ||
+    _firstNormal !== null ||
+    _tempObjects.length > 0;
+
+  if (_tempObjects.length > 0) {
+    removeMeasurementObjects(_tempObjects);
+    _tempObjects = [];
+  }
+  _firstPoint = null;
+  _firstNormal = null;
+  _state = State.IDLE;
+
+  if (hadPending) scheduleRender();
 }
 
 /** 測定モードが有効かを返す */
@@ -100,6 +128,12 @@ export function handleMeasurementClick(intersection) {
 }
 
 function _handleFirstPick(intersection) {
+  // PDF側に未完了の1点目が残っていても、新しい3D測定へ持ち越さない。
+  eventBus.emit(MeasurementEvents.SEQUENCE_RESET, {
+    targetSurface: '3d',
+    reason: 'first-pick',
+  });
+
   let worldNormal;
   if (intersection.face && intersection.face.normal) {
     worldNormal = intersection.face.normal
@@ -140,6 +174,7 @@ function _handleFirstPick(intersection) {
   eventBus.emit(MeasurementEvents.FIRST_POINT_PICKED, {
     point: _firstPoint.clone(),
     normal: _firstNormal.clone(),
+    surface: '3d',
     elementInfo: { elementType, elementLabel, elementName, modelSide },
   });
 }

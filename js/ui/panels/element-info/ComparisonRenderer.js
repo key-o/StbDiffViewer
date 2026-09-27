@@ -35,7 +35,6 @@ import {
 import { isEditMode, getCurrentEditingElement } from './editMode/index.js';
 import { buildElementEditPath } from './editPath.js';
 import { escapeHtml, valueToSafeHtml } from '../../../utils/htmlUtils.js';
-import { getState } from '../../../data/state/globalState.js';
 
 // サブモジュールからのインポート
 import {
@@ -76,8 +75,8 @@ export function renderOpeningInfo(nodeA, nodeB, showSingleColumn) {
   if (hasOpenIdListA || hasOpenIdListB) return '';
 
   // v2.1.0: StbOpenArrangement[@id_member="wallId"][@kind_member="WALL"] を検索
-  const docA = getState('models.documentA');
-  const docB = getState('models.documentB');
+  const docA = nodeA?.ownerDocument || null;
+  const docB = nodeB?.ownerDocument || null;
   const openingsA = wallIdA
     ? Array.from(
         docA?.querySelectorAll(`StbOpenArrangement[id_member="${wallIdA}"][kind_member="WALL"]`) ||
@@ -184,8 +183,8 @@ export function renderSectionInfo(nodeA, nodeB, showSingleColumn, modelSource, e
 
   let content = '';
 
-  const docA = getState('models.documentA');
-  const docB = getState('models.documentB');
+  const docA = nodeA?.ownerDocument || null;
+  const docB = nodeB?.ownerDocument || null;
   const sectionNodeA = sectionIdA ? findSectionNode(docA, sectionIdA, elementType) : null;
   const sectionNodeB = sectionIdB ? findSectionNode(docB, sectionIdB, elementType) : null;
 
@@ -507,6 +506,8 @@ export function renderComparisonRecursive(
           attrIndentStyle,
           childAttrIndent,
           rowId,
+          nodeA?.ownerDocument || null,
+          nodeB?.ownerDocument || null,
         );
       }
     }
@@ -528,6 +529,8 @@ export function renderComparisonRecursive(
         attrIndentStyle,
         childAttrIndent,
         rowId,
+        nodeA?.ownerDocument || null,
+        nodeB?.ownerDocument || null,
       );
     }
   }

@@ -5,7 +5,6 @@
  * およびpos属性マッチングロジックを提供します。
  */
 
-import { getState } from '../../../data/state/globalState.js';
 import { getAttributesMap } from './SectionHelpers.js';
 import {
   comparableAttributeDiffers,
@@ -64,11 +63,11 @@ export function renderSteelSectionBlock(
   elementIndentStyle,
   attrIndentStyle,
   parentRowId,
+  docA = null,
+  docB = null,
 ) {
-  const docA = getState('models.documentA');
-  const docB = getState('models.documentB');
-  const resultA = shapeA ? findSteelSectionElement(docA || docB, shapeA) : null;
-  const resultB = shapeB ? findSteelSectionElement(docB || docA, shapeB) : null;
+  const resultA = shapeA ? findSteelSectionElement(docA, shapeA) : null;
+  const resultB = shapeB ? findSteelSectionElement(docB, shapeB) : null;
   if (!resultA && !resultB) return '';
 
   const shape = shapeA || shapeB;
@@ -179,9 +178,9 @@ export function renderOpeningPropertiesBlock(
   elementIndentStyle,
   attrIndentStyle,
   parentRowId,
+  docA = null,
+  docB = null,
 ) {
-  const docA = getState('models.documentA');
-  const docB = getState('models.documentB');
   const openElA = openIdA ? findOpeningXmlElement(docA, openIdA) : null;
   const openElB = openIdB ? findOpeningXmlElement(docB, openIdB) : null;
   if (!openElA && !openElB) return '';

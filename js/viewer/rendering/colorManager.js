@@ -414,12 +414,16 @@ class ColorManager {
       });
     }
 
+    const isTransparent = params.isTransparent === true;
     return new THREE.MeshStandardMaterial({
       color: new THREE.Color(highlightColor),
       roughness: 0.5,
       metalness: 0.2,
       side: THREE.DoubleSide,
       emissive: new THREE.Color(0x554400),
+      transparent: isTransparent,
+      opacity: isTransparent ? 0.4 : 1.0,
+      depthWrite: !isTransparent,
       clippingPlanes,
     });
   }
@@ -452,12 +456,16 @@ class ColorManager {
       });
     }
 
+    const isTransparent = params.isTransparent === true;
     return new THREE.MeshStandardMaterial({
       color: new THREE.Color(candidateColor),
       roughness: 0.45,
       metalness: 0.15,
       side: THREE.DoubleSide,
       emissive: new THREE.Color(0x0c4a52),
+      transparent: isTransparent,
+      opacity: isTransparent ? 0.4 : 1.0,
+      depthWrite: !isTransparent,
       clippingPlanes,
     });
   }

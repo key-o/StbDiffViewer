@@ -30,11 +30,7 @@ function uniqueSortedNumbers(values, tolerance) {
  * @param {number} [tolerance=0.1]
  * @returns {Array<{minX:number,maxX:number}>}
  */
-export function intersectWallProfileAtLocalY(
-  profile,
-  localY,
-  tolerance = DEFAULT_TOLERANCE,
-) {
+export function intersectWallProfileAtLocalY(profile, localY, tolerance = DEFAULT_TOLERANCE) {
   if (!Array.isArray(profile) || profile.length < 3) return [];
 
   const xs = [];

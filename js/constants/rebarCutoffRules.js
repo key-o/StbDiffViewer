@@ -11,11 +11,15 @@
  * @module constants/rebarCutoffRules
  */
 
+import { REBAR_STANDARD_RULES } from './rebarStandardRules.js';
+
 /**
  * 梁主筋のカットオフ基準（梁貫通孔検討・区間割りと共用する一般値）
  * @constant {Object}
  */
 export const REBAR_CUTOFF_RULES = {
+  /** P0-A以降の既定値の基準標準図 */
+  sourceStandardId: REBAR_STANDARD_RULES.standardId,
   /** カットオフ基準位置: 内法スパンLoに対する比率（Lo/4） */
   cutoffSpanRatio: 0.25,
   /** カットオフ余長: 主筋径dに対する倍率（15d以上） */

@@ -23,6 +23,7 @@ import {
   compareSymbols,
 } from './sectionListUtils.js';
 import { createLogger } from '../../utils/logger.js';
+import { resolveReinforcementStrength } from './reinforcementStrengthResolver.js';
 
 const log = createLogger('data:extractors:columnSectionListExtractor');
 
@@ -303,13 +304,43 @@ function extractCoreBar(barElement, fallbackElement) {
   if (total <= 0) return null;
 
   const dia = readAttribute(barElement, fallbackElement, 'D_axial', 'D_core', 'D_main_core');
-  const grade = readAttribute(barElement, fallbackElement, 'strength_axial', 'strength_core');
+  const explicitGrade = readAttribute(
+    barElement,
+    fallbackElement,
+    'strength_axial',
+    'strength_core',
+  );
+  const grade = resolveReinforcementStrength({
+    element: barElement,
+    diameter: dia,
+    explicitStrength: explicitGrade,
+  }).value;
   return {
     total,
     dia: dia ? dia.toUpperCase() : null,
     grade,
     placementEstimated: true,
   };
+}
+
+function extractRectCoverFaces(barElement, fallbackElement) {
+  const faces = {
+    startX: readNumber(barElement, fallbackElement, 'depth_cover_start_X'),
+    endX: readNumber(barElement, fallbackElement, 'depth_cover_end_X'),
+    startY: readNumber(barElement, fallbackElement, 'depth_cover_start_Y'),
+    endY: readNumber(barElement, fallbackElement, 'depth_cover_end_Y'),
+  };
+  return Object.values(faces).every((value) => value === null) ? null : faces;
+}
+
+function attachRectCoverFaces(arrangement, coverFaces) {
+  Object.defineProperty(arrangement, 'coverFaces', {
+    value: coverFaces,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+  return arrangement;
 }
 
 function extractCover(barElement, fallbackElement, isCircular) {
@@ -348,8 +379,16 @@ function extractRectBarInfo(rectBar, barArrangement, defaultPosition) {
   // 主筋径
   const dMain = readAttribute(rectBar, barArrangement, 'D_main', 'dia_main');
   const dSub = readAttribute(rectBar, barArrangement, 'D_sub');
-  const gradeMain = readAttribute(rectBar, barArrangement, 'strength_main', 'grade_main');
-  const gradeSub = readAttribute(rectBar, barArrangement, 'strength_sub');
+  const gradeMain = resolveReinforcementStrength({
+    element: rectBar,
+    diameter: dMain,
+    explicitStrength: readAttribute(rectBar, barArrangement, 'strength_main', 'grade_main'),
+  }).value;
+  const gradeSub = resolveReinforcementStrength({
+    element: rectBar,
+    diameter: dSub,
+    explicitStrength: readAttribute(rectBar, barArrangement, 'strength_sub'),
+  }).value;
   const mainDirection =
     readAttribute(rectBar, barArrangement, 'main_direction')?.toUpperCase() === 'Y' ? 'Y' : 'X';
   const countTotalAttribute = readInteger(rectBar, barArrangement, 'N_main_total');
@@ -417,15 +456,19 @@ function extractRectBarInfo(rectBar, barArrangement, defaultPosition) {
     readNumber(rectBar, barArrangement, 'pitch_band', 'pitch_stirrup', 'pitch_hoop', 'pitch') ?? 0;
 
   // 帯筋強度 - strength_bandを最優先（v2.0.2）
-  const gradeStirrup = readAttribute(
-    rectBar,
-    barArrangement,
-    'strength_band',
-    'grade_band',
-    'strength_stirrup',
-    'strength_hoop',
-    'grade_stirrup',
-  );
+  const gradeStirrup = resolveReinforcementStrength({
+    element: rectBar,
+    diameter: dStirrup,
+    explicitStrength: readAttribute(
+      rectBar,
+      barArrangement,
+      'strength_band',
+      'grade_band',
+      'strength_stirrup',
+      'strength_hoop',
+      'grade_stirrup',
+    ),
+  }).value;
 
   // 帯筋のX/Y方向本数を取得
   const nBandX =
@@ -454,18 +497,25 @@ function extractRectBarInfo(rectBar, barArrangement, defaultPosition) {
     hoop.pitch2 = pitchStirrup2;
   }
 
-  return {
-    position: normalizeBarPosition(rectBar.getAttribute('pos'), defaultPosition),
-    mainBar,
-    hoop,
-    coreBar: extractCoreBar(rectBar, barArrangement),
-    cover: extractCover(rectBar, barArrangement, false),
-  };
+  return attachRectCoverFaces(
+    {
+      position: normalizeBarPosition(rectBar.getAttribute('pos'), defaultPosition),
+      mainBar,
+      hoop,
+      coreBar: extractCoreBar(rectBar, barArrangement),
+      cover: extractCover(rectBar, barArrangement, false),
+    },
+    extractRectCoverFaces(rectBar, barArrangement),
+  );
 }
 
 function extractBarLayers(rectBar, barArrangement, dMain, gradeMain, nMainX, nMainY) {
   const alternateDia = readAttribute(rectBar, barArrangement, 'D_2nd_main');
-  const alternateGrade = readAttribute(rectBar, barArrangement, 'strength_2nd_main');
+  const alternateGrade = resolveReinforcementStrength({
+    element: rectBar,
+    diameter: alternateDia,
+    explicitStrength: readAttribute(rectBar, barArrangement, 'strength_2nd_main'),
+  }).value;
   const firstAlternateX = readInteger(rectBar, barArrangement, 'N_2nd_main_X_1st');
   const firstAlternateY = readInteger(rectBar, barArrangement, 'N_2nd_main_Y_1st');
   const mainCountX = readInteger(rectBar, barArrangement, 'N_main_X_2nd');
@@ -520,7 +570,11 @@ function extractCircleBarInfo(circleBar, barArrangement, defaultPosition) {
 
   // 主筋径
   const dMain = readAttribute(circleBar, barArrangement, 'D_main', 'dia_main');
-  const gradeMain = readAttribute(circleBar, barArrangement, 'strength_main', 'grade_main');
+  const gradeMain = resolveReinforcementStrength({
+    element: circleBar,
+    diameter: dMain,
+    explicitStrength: readAttribute(circleBar, barArrangement, 'strength_main', 'grade_main'),
+  }).value;
   const center = readNumber(circleBar, barArrangement, 'D1', 'center');
 
   const mainBar = {
@@ -561,15 +615,19 @@ function extractCircleBarInfo(circleBar, barArrangement, defaultPosition) {
     0;
 
   // 帯筋強度 - strength_bandを最優先（v2.0.2）
-  const gradeStirrup = readAttribute(
-    circleBar,
-    barArrangement,
-    'strength_band',
-    'grade_band',
-    'strength_stirrup',
-    'strength_hoop',
-    'grade_stirrup',
-  );
+  const gradeStirrup = resolveReinforcementStrength({
+    element: circleBar,
+    diameter: dStirrup,
+    explicitStrength: readAttribute(
+      circleBar,
+      barArrangement,
+      'strength_band',
+      'grade_band',
+      'strength_stirrup',
+      'strength_hoop',
+      'grade_stirrup',
+    ),
+  }).value;
 
   const hoop = {
     dia: dStirrup ? dStirrup.toUpperCase() : null,

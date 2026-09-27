@@ -1,0 +1,174 @@
+/* 生XMLビュー: 検証結果一覧 */
+.xml-issue-list {
+  flex-shrink: 0;
+  max-height: min(42vh, 360px);
+  border-bottom: var(--border-width) solid var(--border-color);
+  background: var(--bg-window);
+  overflow: hidden;
+}
+
+.xml-issue-list.hidden,
+.xml-issue-list-body.hidden {
+  display: none;
+}
+
+.xml-issue-list-toggle {
+  width: 100%;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 0;
+  background: color-mix(in srgb, var(--bg-panel) 92%, var(--color-primary) 8%);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.xml-issue-list-toggle:hover {
+  background: var(--bg-hover);
+}
+
+.xml-issue-list-chevron {
+  width: 1em;
+  color: var(--text-secondary);
+}
+
+.xml-issue-list-title {
+  font-weight: 600;
+}
+
+.xml-issue-list-count {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.xml-issue-list-body {
+  max-height: min(36vh, 310px);
+  overflow: auto;
+  padding: 4px 6px 6px;
+  background: var(--bg-panel);
+}
+
+.xml-issue-kind-group,
+.xml-issue-subgroup {
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 65%, transparent);
+}
+
+.xml-issue-kind-group > summary,
+.xml-issue-subgroup > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 3px 5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.xml-issue-kind-group > summary {
+  font-weight: 600;
+}
+
+.xml-issue-subgroup > summary {
+  padding-left: 14px;
+  font-family: var(--font-family-monospace, monospace);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.xml-issue-kind-group > summary:hover,
+.xml-issue-subgroup > summary:hover {
+  background: var(--bg-hover);
+}
+
+.xml-issue-kind-content {
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 45%, transparent);
+}
+
+.xml-issue-count-badge {
+  min-width: 2.2em;
+  margin-left: auto;
+  padding: 1px 5px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-body) 72%, var(--color-primary) 28%);
+  color: var(--text-secondary);
+  text-align: center;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.xml-issue-subgroup-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xml-issue-jump-btn,
+.xml-issue-more-btn {
+  flex: 0 0 auto;
+  min-height: 21px;
+  padding: 1px 7px;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  background: var(--bg-body);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.xml-issue-jump-btn:hover,
+.xml-issue-more-btn:hover {
+  border-color: var(--color-primary);
+  background: var(--bg-hover);
+}
+
+.xml-issue-subgroup-rows {
+  border-top: 1px dashed color-mix(in srgb, var(--border-color) 55%, transparent);
+}
+
+.xml-issue-more-btn {
+  display: block;
+  width: calc(100% - 32px);
+  margin: 5px 8px 5px 24px;
+  min-height: 26px;
+  color: var(--text-secondary);
+}
+
+.xml-issue-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.7fr) minmax(180px, 2fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 25px;
+  padding: 2px 5px 2px 24px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 35%, transparent);
+  font-size: 10px;
+}
+
+.xml-issue-row-error {
+  border-left: 3px solid var(--color-error, #c62828);
+}
+
+.xml-issue-row-warning {
+  border-left: 3px solid var(--color-warning, #e65100);
+}
+
+.xml-issue-location,
+.xml-issue-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xml-issue-location {
+  font-family: var(--font-family-monospace, monospace);
+  color: var(--text-secondary);
+}
+
+.xml-issue-message {
+  color: var(--text-primary);
+}

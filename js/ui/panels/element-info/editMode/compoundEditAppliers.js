@@ -60,7 +60,9 @@ function resolveJointAssignmentTarget202(doc, mod) {
   if (mod.targetKind === 'section') {
     const section = doc.querySelector(selectorById(mod.targetTag, mod.targetId));
     if (!section) return null;
-    return Array.from(section.children || []).find((child) => child.tagName === mod.figureTag) || null;
+    return (
+      Array.from(section.children || []).find((child) => child.tagName === mod.figureTag) || null
+    );
   }
   return null;
 }

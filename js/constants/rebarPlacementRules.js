@@ -33,6 +33,8 @@ export const BEAM_REBAR_PLACEMENT_RULES = {
   defaultCoverMm: 40,
   /** 主筋呼び名の既定値（STBに D_main が無い場合） */
   defaultMainBarDia: 'D25',
+  /** 位置情報欠損時の既存2D断面リスト互換主筋芯 [mm] */
+  defaultMainCenterMm: 72,
   /** あばら筋呼び名の既定値（STBに D_stirrup が無い場合） */
   defaultStirrupDia: 'D10',
   /** 腹筋呼び名の既定値 */

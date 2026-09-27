@@ -30,7 +30,9 @@ export function parseNumericRebarDiameterMm(value, fallback = 0) {
  * @returns {number}
  */
 export function parseDtRebarDiameterMm(value, fallback = 25) {
-  const match = String(value || '').toUpperCase().match(/[DT](\d+)/);
+  const match = String(value || '')
+    .toUpperCase()
+    .match(/[DT](\d+)/);
   if (!match) return fallback;
   const parsed = Number.parseFloat(match[1]);
   return Number.isFinite(parsed) ? parsed : fallback;

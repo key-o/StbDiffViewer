@@ -73,7 +73,11 @@ function createInput(attr, options) {
       opt.textContent = value || '（未設定）';
       select.appendChild(opt);
     }
-    const preferred = preferredValue(attr, options, attr.default != null ? String(attr.default) : '');
+    const preferred = preferredValue(
+      attr,
+      options,
+      attr.default != null ? String(attr.default) : '',
+    );
     if ([...select.options].some((option) => option.value === preferred)) select.value = preferred;
     return select;
   }
@@ -90,7 +94,11 @@ function createInput(attr, options) {
       if (c.maxExclusive != null) input.max = String(Number(c.maxExclusive) - Number.EPSILON);
     }
     if (attr.type === 'integer') input.step = '1';
-    const preferred = preferredValue(attr, options, attr.default != null ? String(attr.default) : '');
+    const preferred = preferredValue(
+      attr,
+      options,
+      attr.default != null ? String(attr.default) : '',
+    );
     if (preferred !== '') input.value = preferred;
     return input;
   }

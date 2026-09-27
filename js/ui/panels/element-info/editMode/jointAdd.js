@@ -13,7 +13,12 @@
 
 import { getState } from '../../../../data/state/globalState.js';
 import { showSuccess } from '../../../common/toast.js';
-import { ensureContainer, findDirectChild, generateNextId, emitStructuralChange } from './domHelpers.js';
+import {
+  ensureContainer,
+  findDirectChild,
+  generateNextId,
+  emitStructuralChange,
+} from './domHelpers.js';
 import { updateEditingSummary } from './editHistory.js';
 import { getModifications } from './editState.js';
 
@@ -123,7 +128,8 @@ function validatePositiveDistance(value, label) {
 function setTrackedAttribute(element, name, value, changes, { skipBlank = false } = {}) {
   if (skipBlank && (value === undefined || value === null || String(value).trim() === '')) return;
   const oldValue = element.hasAttribute(name) ? element.getAttribute(name) : null;
-  const normalized = value === undefined || value === null || String(value).trim() === '' ? null : String(value);
+  const normalized =
+    value === undefined || value === null || String(value).trim() === '' ? null : String(value);
   if (oldValue === normalized) return;
   if (normalized === null) element.removeAttribute(name);
   else element.setAttribute(name, normalized);
@@ -133,7 +139,8 @@ function setTrackedAttribute(element, name, value, changes, { skipBlank = false 
 function resolveSectionFigure(doc, sectionTag, sectionId, figureTag) {
   const section = doc.querySelector(selectorById(sectionTag, sectionId));
   if (!section) return { section: null, figure: null };
-  const figure = Array.from(section.children || []).find((child) => child.tagName === figureTag) || null;
+  const figure =
+    Array.from(section.children || []).find((child) => child.tagName === figureTag) || null;
   return { section, figure };
 }
 
@@ -157,9 +164,7 @@ function steelDefinitionKind(definition) {
 function directFigureChildForEndpoint(figure, family, endpoint) {
   const children = Array.from(figure?.children || []);
   if (children.length === 0) return null;
-  const pos = family === 'column'
-    ? endpoint === 'START' ? 'BOTTOM' : 'TOP'
-    : endpoint;
+  const pos = family === 'column' ? (endpoint === 'START' ? 'BOTTOM' : 'TOP') : endpoint;
   const exact = children.find((child) => child.getAttribute('pos') === pos);
   if (exact) return exact;
   // Same / Straight は位置属性を持たず、両端に同じ形状を適用する。
@@ -190,7 +195,9 @@ function endpointSteelKindForSection202(doc, sectionTag, sectionId, figureTag, f
 
   const shapeElement = child.hasAttribute('shape')
     ? child
-    : Array.from(child.querySelectorAll('*')).find((descendant) => descendant.hasAttribute('shape'));
+    : Array.from(child.querySelectorAll('*')).find((descendant) =>
+        descendant.hasAttribute('shape'),
+      );
   const shape = shapeElement?.getAttribute('shape');
   return steelDefinitionKind(findSteelDefinitionByName(doc, shape));
 }
@@ -344,7 +351,8 @@ export function assignJointDefinition202({
       return { success: false, error: `${jointTag} は指定断面へ割り当てできません` };
     }
     const resolved = resolveSectionFigure(doc, targetTag, targetId, figureTag);
-    if (!resolved.section) return { success: false, error: `${targetTag} #${targetId} が見つかりません` };
+    if (!resolved.section)
+      return { success: false, error: `${targetTag} #${targetId} が見つかりません` };
     if (!resolved.figure) return { success: false, error: `${figureTag} が断面内にありません` };
     target = resolved.figure;
     emitType = targetTag.slice(3);
@@ -422,11 +430,7 @@ export function assignJointDefinition202({
   let removeJointOnUndo = false;
   if (combineWithCreation) {
     const last = modifications[modifications.length - 1];
-    if (
-      last?.op === 'add' &&
-      last.tagName === jointTag &&
-      String(last.id) === String(jointId)
-    ) {
+    if (last?.op === 'add' && last.tagName === jointTag && String(last.id) === String(jointId)) {
       modifications.pop();
       removeJointOnUndo = true;
     }
@@ -473,15 +477,24 @@ export function addJointArrangement({ memberTag, memberId, attrs = {} }) {
   const kindMember = MEMBER_KIND_BY_TAG[memberTag];
   if (!kindMember) return { success: false, id: null, error: '継手を配置できない部材種別です' };
   const member = doc.querySelector(selectorById(memberTag, memberId));
-  if (!member) return { success: false, id: null, error: `${memberTag} #${memberId} が見つかりません` };
+  if (!member)
+    return { success: false, id: null, error: `${memberTag} #${memberId} が見つかりません` };
   const idSection = member.getAttribute('id_section');
   if (!idSection) return { success: false, id: null, error: '対象部材に id_section がありません' };
 
   const startingPoint = String(attrs.starting_point || '').trim();
   if (!['START', 'END'].includes(startingPoint)) {
-    return { success: false, id: null, error: 'starting_point は START または END を指定してください' };
+    return {
+      success: false,
+      id: null,
+      error: 'starting_point は START または END を指定してください',
+    };
   }
-  if (attrs.distance === undefined || attrs.distance === null || String(attrs.distance).trim() === '') {
+  if (
+    attrs.distance === undefined ||
+    attrs.distance === null ||
+    String(attrs.distance).trim() === ''
+  ) {
     return { success: false, id: null, error: 'distance を入力してください' };
   }
   if (!Number.isFinite(Number(attrs.distance))) {

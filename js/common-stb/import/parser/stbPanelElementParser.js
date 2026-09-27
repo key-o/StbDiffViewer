@@ -50,6 +50,18 @@ export function extractSlabElements(xmlDoc) {
       }
     }
 
+    // STB 2.0.2では壁と同様に StbOpenIdList で開口を参照する。
+    // 数量計算などの後段が壁/床で同じ関連付け契約を利用できるよう保持する。
+    const openIds = [];
+    const openList = slabEl.getElementsByTagName('StbOpenIdList')[0];
+    if (openList) {
+      const openElements = Array.from(openList.getElementsByTagName('StbOpenId'));
+      for (const openEl of openElements) {
+        const openId = openEl.getAttribute('id');
+        if (openId) openIds.push(openId);
+      }
+    }
+
     if (id && idSection && nodeIds.length >= 3) {
       const elementData = {
         id: id,
@@ -62,6 +74,7 @@ export function extractSlabElements(xmlDoc) {
         isFoundation: isFoundation === 'true',
         node_ids: nodeIds,
         offsets: offsets,
+        open_ids: openIds,
       };
       const slabExtMap = parseStbExtensions(slabEl.ownerDocument, STB_TAG_NAMES.SLAB);
       const slabExtProps = slabExtMap.get(id);
@@ -217,11 +230,14 @@ export function extractOpeningElements(xmlDoc) {
   const openingMap = new Map();
   const version = detectStbVersion(xmlDoc);
 
-  if (version === '2.1.0' && parseElements(xmlDoc, 'StbOpenArrangement').length > 0) {
-    // STB 2.1.0: StbOpenArrangement から開口情報を取得
+  if (
+    (version === '2.1.0' || version === '2.1.1') &&
+    parseElements(xmlDoc, 'StbOpenArrangement').length > 0
+  ) {
+    // STB 2.1.x: StbOpenArrangement から開口情報を取得
     extractOpeningsFromArrangements(xmlDoc, openingMap);
   } else {
-    // STB 2.0.2 または 2.1.0で StbOpen を使用している場合
+    // STB 2.0.2 または互換データで StbOpen を使用している場合
     extractOpeningsFromStbOpen(xmlDoc, openingMap);
   }
 
@@ -267,7 +283,7 @@ function extractOpeningsFromStbOpen(xmlDoc, openingMap) {
 }
 
 /**
- * STB 2.1.0形式: StbOpenArrangement要素から開口情報を抽出
+ * STB 2.1.x形式: StbOpenArrangement要素から開口情報を抽出
  * @param {Document} xmlDoc - XMLドキュメント
  * @param {Map} openingMap - 開口マップ
  */

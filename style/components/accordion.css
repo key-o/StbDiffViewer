@@ -300,10 +300,6 @@
   color: var(--text-muted);
 }
 
-.version-badge-inline.version-ss7 {
-  border-left: 2px solid #f59e0b;
-}
-
 .version-badge-inline.version-ifc {
   border-left: 2px solid #06b6d4;
 }

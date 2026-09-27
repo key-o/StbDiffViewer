@@ -7,10 +7,19 @@
  * @module data/extractors/sectionListUtils
  */
 
+import { incrementRebarPerformanceCounter } from '../../utils/rebarPerformanceMetrics.js';
+
 const STB_NAMESPACES = [
   'https://www.building-smart.or.jp/dl',
   'https://www.building-smart.or.jp/dl/stbridge',
 ];
+
+function childElements(parent) {
+  if (parent?.children && typeof parent.children.length === 'number') {
+    return Array.from(parent.children);
+  }
+  return Array.from(parent?.childNodes || []).filter((child) => child?.nodeType === 1);
+}
 
 /**
  * 要素を取得するヘルパー（名前空間対応）
@@ -33,7 +42,7 @@ export function querySelector(parent, selector) {
     }
   }
   // 直接子要素検索
-  const children = parent.children || [];
+  const children = childElements(parent);
   for (let i = 0; i < children.length; i++) {
     if (children[i].tagName === selector || children[i].localName === selector) {
       return children[i];
@@ -50,6 +59,12 @@ export function querySelector(parent, selector) {
  */
 export function querySelectorAll(parent, selector) {
   if (!parent) return [];
+  // Document直下からのcollection取得だけを「全文書走査」として数える。
+  // Element配下の局所探索は別物なので、このhard-gate counterには含めない。
+  if (parent.nodeType === 9) {
+    incrementRebarPerformanceCounter('dom.fullCollectionTraversal.count');
+  }
+
   const results = [];
   try {
     const nodeList = parent.querySelectorAll(selector);
@@ -71,7 +86,7 @@ export function querySelectorAll(parent, selector) {
   }
   // 再帰的に子要素を検索
   function findAll(el) {
-    const children = el.children || [];
+    const children = childElements(el);
     for (let i = 0; i < children.length; i++) {
       const child = children[i];
       if (child.tagName === selector || child.localName === selector) {

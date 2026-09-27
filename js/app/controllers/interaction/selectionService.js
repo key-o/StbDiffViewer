@@ -5,6 +5,12 @@
 import * as THREE from 'three';
 
 import { InteractionEvents, SelectionEvents } from '../../../constants/eventTypes.js';
+import { RenderableLifecycleEvents } from '../../../constants/renderableLifecycleEvents.js';
+import {
+  cloneSemanticSelectionIdentity,
+  createSemanticSelectionIdentity,
+  sameSemanticSelectionIdentity,
+} from './semanticSelection.js';
 import {
   buildMultiSelectionSummaryData,
   findSelectableAncestor,
@@ -38,6 +44,9 @@ export function createSelectionService(dependencies = {}) {
     logger = { warn() {} },
     controls = null,
     applyHighlightMaterial = () => false,
+    clearHighlightMaterial = (obj, material) => {
+      if (material) obj.material = material;
+    },
     getBatchElementCenter = () => null,
     createOrUpdateOrbitCenterHelper = () => {},
     hideOrbitCenterHelper = () => {},
@@ -49,6 +58,8 @@ export function createSelectionService(dependencies = {}) {
   let selectedObjects = [];
   /** @type {Map<THREE.Object3D, THREE.Material|THREE.Material[]>} */
   const originalMaterials = new Map();
+  /** Object3D は差し替わり得るため、選択意味を semantic identity として別管理する。 */
+  const semanticSelections = new Map();
 
   const selectionLimit = Number.isFinite(maxSelectionCount)
     ? Math.max(0, Math.trunc(maxSelectionCount))
@@ -62,15 +73,36 @@ export function createSelectionService(dependencies = {}) {
     if (typeof logger?.warn === 'function') logger.warn(message, error);
   }
 
+  function cloneMaterialSnapshot(material) {
+    if (Array.isArray(material)) {
+      return material.map((item) => item?.clone?.() || item);
+    }
+    return material?.clone?.() || material || null;
+  }
+
+  function disposeMaterialSnapshot(material) {
+    if (Array.isArray(material)) {
+      material.forEach((item) => item?.dispose?.());
+      return;
+    }
+    material?.dispose?.();
+  }
+
   function isSelectable(obj, userData = obj?.userData) {
     if (!obj || !userData) return false;
     const elementType = userData.elementType || userData.stbNodeType;
-    return Boolean(elementType && elementType !== 'Axis' && elementType !== 'Story');
+    return Boolean(
+      (userData.isRebarInstanceSelection || elementType) &&
+      elementType !== 'Axis' &&
+      elementType !== 'Story',
+    );
   }
 
   function restoreMaterial(obj) {
-    if (!originalMaterials.has(obj)) return;
-    obj.material = originalMaterials.get(obj);
+    const originalMaterial = originalMaterials.get(obj);
+    if (originalMaterial || obj?.userData?.isRebarInstanceSelection) {
+      clearHighlightMaterial(obj, originalMaterial);
+    }
     originalMaterials.delete(obj);
   }
 
@@ -106,6 +138,16 @@ export function createSelectionService(dependencies = {}) {
     return [...selectedObjects];
   }
 
+  function getSelectedIdentities() {
+    return selectedObjects
+      .map(
+        (object) =>
+          semanticSelections.get(object) || createSemanticSelectionIdentity(object?.userData),
+      )
+      .filter(Boolean)
+      .map(cloneSemanticSelectionIdentity);
+  }
+
   function getSelectedCenter() {
     if (selectedObjects.length === 0) return null;
     try {
@@ -117,8 +159,8 @@ export function createSelectionService(dependencies = {}) {
       return combinedBox.isEmpty() ? null : combinedBox.getCenter(new THREE.Vector3());
     } catch (error) {
       warn('選択中心取得: 計算失敗', error);
-      return null;
     }
+    return null;
   }
 
   function highlightObject(obj) {
@@ -130,29 +172,69 @@ export function createSelectionService(dependencies = {}) {
       return false;
     }
 
-    if (Array.isArray(obj.material)) {
-      originalMaterials.set(
-        obj,
-        obj.material.map((material) => material.clone()),
-      );
-    } else if (obj.material) {
-      originalMaterials.set(obj, obj.material.clone());
-    }
+    const snapshot = obj.userData?.isRebarInstanceSelection
+      ? obj.userData.sourceMesh?.material
+      : cloneMaterialSnapshot(obj.material);
+    if (snapshot) originalMaterials.set(obj, snapshot);
 
     applyHighlightMaterial(obj, 'highlight');
     selectedObjects.push(obj);
+    const identity = createSemanticSelectionIdentity(obj.userData);
+    if (identity) semanticSelections.set(obj, identity);
     return true;
+  }
+
+  /**
+   * 色モードや配筋ghost切替で選択中オブジェクトへベース材が再適用された後、
+   * その材を新しい復元元として保存し直して選択ハイライトを再適用する。
+   * これにより、配筋ON/OFFを選択後に切り替えても選択色を維持し、解除時には
+   * 現在の透明度・色モードへ正しく復元できる。
+   *
+   * @param {Function|null} [scheduleRender] - 再描画コールバック
+   * @returns {number} ハイライトを再適用した選択数
+   */
+  function refreshSelectedMaterials(scheduleRender = render) {
+    let refreshedCount = 0;
+
+    for (const obj of selectedObjects) {
+      if (!obj?.material) continue;
+
+      const isRebarSelection = obj.userData?.isRebarInstanceSelection === true;
+      const baseMaterial = isRebarSelection ? obj.userData.sourceMesh?.material : obj.material;
+      const nextSnapshot = isRebarSelection ? baseMaterial : cloneMaterialSnapshot(baseMaterial);
+      if (!nextSnapshot) continue;
+
+      const previousSnapshot = originalMaterials.get(obj);
+      if (previousSnapshot && !isRebarSelection) disposeMaterialSnapshot(previousSnapshot);
+      originalMaterials.set(obj, nextSnapshot);
+
+      if (applyHighlightMaterial(obj, 'highlight')) refreshedCount += 1;
+    }
+
+    if (refreshedCount > 0) requestRender(scheduleRender);
+    return refreshedCount;
   }
 
   function deselectObject(obj) {
     const index = selectedObjects.indexOf(obj);
     if (index < 0) return false;
     restoreMaterial(obj);
+    semanticSelections.delete(obj);
     selectedObjects.splice(index, 1);
     return true;
   }
 
   function toggleObject(obj) {
+    if (obj?.userData?.isRebarInstanceSelection) {
+      const identity = createSemanticSelectionIdentity(obj.userData);
+      const selectedMatch = selectedObjects.find((selectedObject) => {
+        const selectedIdentity =
+          semanticSelections.get(selectedObject) ||
+          createSemanticSelectionIdentity(selectedObject?.userData);
+        return sameSemanticSelectionIdentity(identity, selectedIdentity);
+      });
+      if (selectedMatch) return deselectObject(selectedMatch);
+    }
     if (selectedObjects.includes(obj)) return deselectObject(obj);
     if (selectedObjects.length >= selectionLimit) {
       warn(`選択: 上限到達 (${selectionLimit}要素)`);
@@ -175,6 +257,7 @@ export function createSelectionService(dependencies = {}) {
     for (const obj of selectedObjects) restoreMaterial(obj);
     selectedObjects = [];
     originalMaterials.clear();
+    semanticSelections.clear();
 
     if (hadSelection) {
       clearElementInfoPanel();
@@ -193,6 +276,16 @@ export function createSelectionService(dependencies = {}) {
 
     if (selectedObjects.length === 1) {
       const userData = selectedObjects[0].userData || {};
+      if (userData.isRebarInstanceSelection) {
+        eventBus.emit(InteractionEvents.DISPLAY_REBAR_INFO, {
+          rebarKind: userData.rebarKind,
+          barDiameterMm: userData.barDiameterMm,
+          instanceId: userData.rebarInstanceId,
+          modelSource: userData.modelSource,
+        });
+        return;
+      }
+
       const elementType = normalizeSelectedElementType(userData);
       let idA;
       let idB;
@@ -307,19 +400,90 @@ export function createSelectionService(dependencies = {}) {
     return addedCount;
   }
 
+  /**
+   * element-ID局所再生成で Object3D が差し替わった後、選択状態を semantic identity のまま
+   * replacement object へ移送する。oldObject は scene から除去済みでも参照可能である。
+   *
+   * @param {Array<{oldObject:THREE.Object3D,newObject:THREE.Object3D}>} replacementPairs
+   * @param {Function|null} [scheduleRender]
+   * @returns {number} 移送した選択数
+   */
+  function rebindSelectedObjects(replacementPairs, scheduleRender = render) {
+    const pairMap = new Map();
+    for (const pair of Array.isArray(replacementPairs) ? replacementPairs : []) {
+      if (pair?.oldObject && pair?.newObject) pairMap.set(pair.oldObject, pair.newObject);
+    }
+    if (pairMap.size === 0 || selectedObjects.length === 0) return 0;
+
+    const nextSelected = [];
+    let reboundCount = 0;
+
+    for (const oldObject of selectedObjects) {
+      const newObject = pairMap.get(oldObject) || oldObject;
+      if (newObject !== oldObject) {
+        reboundCount += 1;
+        const materialSnapshot = originalMaterials.get(oldObject);
+        if (materialSnapshot) {
+          if (!originalMaterials.has(newObject)) originalMaterials.set(newObject, materialSnapshot);
+          else disposeMaterialSnapshot(materialSnapshot);
+          originalMaterials.delete(oldObject);
+        }
+
+        const identity =
+          semanticSelections.get(oldObject) || createSemanticSelectionIdentity(oldObject.userData);
+        semanticSelections.delete(oldObject);
+        if (identity) semanticSelections.set(newObject, identity);
+
+        // replacementが現在のhighlight materialを継承していない実装でも選択表示を維持する。
+        if (newObject.material !== oldObject.material) {
+          applyHighlightMaterial(newObject, 'highlight');
+        }
+      }
+
+      if (!nextSelected.includes(newObject)) nextSelected.push(newObject);
+    }
+
+    selectedObjects = nextSelected;
+    if (reboundCount > 0) requestRender(scheduleRender);
+    return reboundCount;
+  }
+
   function updateOrbitCenter() {
     return setOrbitCenter(getSelectedCenter());
+  }
+
+  if (typeof eventBus?.on === 'function') {
+    eventBus.on(RenderableLifecycleEvents.MATERIALS_CHANGED, () => {
+      refreshSelectedMaterials();
+    });
+    eventBus.on(RenderableLifecycleEvents.RENDERABLES_REPLACED, ({ replacementPairs } = {}) => {
+      rebindSelectedObjects(replacementPairs, null);
+    });
+    eventBus.on(RenderableLifecycleEvents.REBAR_MESHES_REMOVED, ({ meshes } = {}) => {
+      const removedMeshes = new Set(Array.isArray(meshes) ? meshes : []);
+      const removedSelections = selectedObjects.filter((obj) =>
+        removedMeshes.has(obj?.userData?.sourceMesh),
+      );
+      if (removedSelections.length === 0) return;
+      for (const obj of removedSelections) deselectObject(obj);
+      showElementInfo();
+      hideOrbitCenterHelper();
+      requestRender();
+    });
   }
 
   return {
     getSelectedCenter,
     getSelectedObjects,
+    getSelectedIdentities,
     resetSelection,
     selectElement3D,
     selectMultipleElements3D,
     highlightObject,
+    refreshSelectedMaterials,
     deselectObject,
     toggleObject,
+    rebindSelectedObjects,
     updateOrbitCenter,
     showElementInfo,
     clearElementInfoPanel,

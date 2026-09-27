@@ -6,6 +6,7 @@
  */
 
 import { getState } from '../../../data/state/globalState.js';
+import editDocumentProvider from '../../../app/editing/editDocumentProvider.js';
 import { SECTION_CONFIG } from '../../../common-stb/import/config/sectionConfig.js';
 import { extractAllSections } from '../../../common-stb/import/extractor/sectionExtractor.js';
 import { escapeHtml } from '../../../utils/htmlUtils.js';
@@ -106,13 +107,13 @@ export function findSectionNode(doc, sectionId, elementType = null) {
  * @param {string} shapeName - 断面形状名
  * @returns {Object | null} 断面寸法情報、または null
  */
-export function findSteelSectionInfo(shapeName) {
-  const docA = getState('models.documentA');
+export function findSteelSectionInfo(shapeName, document = null) {
+  const docA = editDocumentProvider.getActiveEditDocument();
   const docB = getState('models.documentB');
-  if (!docA && !docB) return null;
+  if (!document && !docA && !docB) return null;
 
-  // どちらかのdocからStbSecSteelを取得
-  const doc = docA || docB;
+  // 呼び出し元の断面ノードが属する document を優先し、A/B を混同しない。
+  const doc = document || docA || docB;
   if (!doc) return null;
   const steel = doc.querySelector('StbSecSteel');
   if (!steel) return null;
@@ -184,7 +185,7 @@ export function extractSectionData(sectionNode) {
 
   // shapeName属性からの断面寸法取得
   if (data.shape) {
-    const steelInfo = findSteelSectionInfo(data.shape);
+    const steelInfo = findSteelSectionInfo(data.shape, sectionNode.ownerDocument);
     if (steelInfo) {
       Object.assign(data, steelInfo);
     }

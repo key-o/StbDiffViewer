@@ -16,13 +16,13 @@ import { createLogger, WarnCategory } from '../../utils/logger.js';
 
 const logger = createLogger('interaction');
 import {
-  scene,
   camera,
   getActiveCamera,
   renderer,
   controls,
   elementGroups,
   getBatchElementCenter,
+  getRebarDisplayManager,
 } from '../../viewer/index.js';
 import { getState } from '../../data/state/globalState.js';
 import { eventBus, InteractionEvents, ToastEvents } from '../../data/events/index.js';
@@ -37,7 +37,10 @@ import {
   normalizeSelectionModelSide,
   resolveTwoObjectComparisonTarget,
 } from './interaction/selectionInfoUtils.js';
-import { applyHighlightMaterial } from './interaction/selectionHighlight.js';
+import {
+  applyHighlightMaterial,
+  clearHighlightMaterial,
+} from './interaction/selectionHighlight.js';
 import { createSelectionService } from './interaction/selectionService.js';
 import {
   createSelectionCandidateSession,
@@ -49,6 +52,9 @@ import {
   hasMeasurementHoverPreview,
 } from './interaction/measurementHover.js';
 import { handleContextMenu } from './interaction/contextMenu3D.js';
+import { createSelectionRaycastTargetIndex } from './interaction/selectionRaycastTargets.js';
+import { createRebarSelectionCandidate } from './interaction/rebarSelectionCandidate.js';
+import { isRebarSelectionModeActive } from './interaction/rebarSelectionMode.js';
 
 // 分割モジュールの公開APIを従来通り本モジュールから提供する
 export {
@@ -61,6 +67,7 @@ export {
 // レイキャスト用オブジェクト
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
+const selectionRaycastTargets = createSelectionRaycastTargetIndex(elementGroups);
 
 /** common/viewerモードが有効でアダプターが利用可能かを返す */
 function isCommonViewerReady() {
@@ -100,12 +107,14 @@ const HOVER_RAYCAST_INTERVAL_MS = 50;
 let lastHoverRaycastTime = 0;
 
 const selectionCandidateSession = createSelectionCandidateSession({
-  collectCandidates: collectSelectionCandidates,
+  collectCandidates: (intersects, options) =>
+    collectSelectionCandidates(intersects, {
+      ...options,
+      includeRebar: isRebarSelectionModeActive(),
+    }),
   raycast: performRaycast,
   applyPreview: (candidate) => applyHighlightMaterial(candidate, 'selectionCandidate'),
-  restorePreview: (candidate, material) => {
-    candidate.material = material;
-  },
+  restorePreview: clearHighlightMaterial,
   render: () => interactionScheduleRender?.(),
   showCandidate: ({ message }) => {
     eventBus.emit(ToastEvents.SHOW_INFO, {
@@ -136,6 +145,7 @@ const selectionService = createSelectionService({
   getAdapter: () => (isCommonViewerReady() ? getState('viewer.adapter') : null),
   controls: dynamicControls,
   applyHighlightMaterial,
+  clearHighlightMaterial,
   getBatchElementCenter,
   createOrUpdateOrbitCenterHelper,
   hideOrbitCenterHelper,
@@ -467,19 +477,44 @@ function performRaycast(event) {
 
   raycaster.setFromCamera(mouse, getActiveCamera() || camera);
 
-  return raycaster.intersectObjects(scene.children, true);
+  const elementTargets = selectionRaycastTargets.getTargets();
+  const targets = isRebarSelectionModeActive()
+    ? [...elementTargets, ...(getRebarDisplayManager()?.getVisibleGroups?.() || [])]
+    : elementTargets;
+  return raycaster.intersectObjects(targets, true);
 }
 
 export function collectSelectionCandidates(intersects, options = {}) {
-  const { includeAxisStory = true } = options;
+  const { includeAxisStory = true, includeRebar = false } = options;
+  const rebarCandidates = [];
   const lineCandidates = [];
   const meshOrSpriteCandidates = [];
   const axisOrStoryCandidates = [];
   const seenObjects = new Set();
+  const seenRebarInstances = new Set();
 
   for (const intersect of Array.isArray(intersects) ? intersects : []) {
     const obj = intersect?.object;
     const userData = obj?.userData;
+    if (userData?.isRebar === true) {
+      if (
+        !includeRebar ||
+        !obj?.visible ||
+        obj.parent?.visible === false ||
+        isPointClipped(intersect?.point)
+      ) {
+        continue;
+      }
+
+      const candidate = createRebarSelectionCandidate(intersect);
+      if (!candidate) continue;
+      const instanceKey = `${obj.uuid}:${candidate.userData.rebarInstanceId ?? 'mesh'}`;
+      if (seenRebarInstances.has(instanceKey)) continue;
+      seenRebarInstances.add(instanceKey);
+      rebarCandidates.push(candidate);
+      continue;
+    }
+
     const elementType = userData?.elementType || userData?.stbNodeType;
     const groupVisible = elementType ? elementGroups[elementType]?.visible : false;
 
@@ -506,7 +541,12 @@ export function collectSelectionCandidates(intersects, options = {}) {
     }
   }
 
-  const merged = [...lineCandidates, ...meshOrSpriteCandidates, ...axisOrStoryCandidates];
+  const merged = [
+    ...rebarCandidates,
+    ...lineCandidates,
+    ...meshOrSpriteCandidates,
+    ...axisOrStoryCandidates,
+  ];
   return merged.length > MAX_SELECTION_CANDIDATES
     ? merged.slice(0, MAX_SELECTION_CANDIDATES)
     : merged;
@@ -529,16 +569,31 @@ function isPointClipped(point) {
 
 /**
  * 交差結果から優先度に基づいて最適なオブジェクトを選択
- * 優先順位: 線要素 > 面要素 > Axis/Story
+ * 通常は線要素 > 面要素 > Axis/Story、鉄筋選択モード中は鉄筋を先にする。
  * @param {THREE.Intersection[]} intersects - レイキャストの交差結果
  * @returns {THREE.Object3D|null} 選択すべきオブジェクト
  */
 function findBestIntersection(intersects) {
-  return collectSelectionCandidates(intersects, { includeAxisStory: false })[0] || null;
+  return (
+    collectSelectionCandidates(intersects, {
+      includeAxisStory: false,
+      includeRebar: isRebarSelectionModeActive(),
+    })[0] || null
+  );
 }
 
 function buildPendingSelectionCandidateMessage(candidate, candidateIndex, candidateCount) {
   const userData = candidate?.userData || {};
+  if (userData.isRebarInstanceSelection) {
+    const modelSource =
+      normalizeSelectionModelSide(userData.modelSource) || userData.modelSource || '-';
+    const diameter = userData.barDiameterMm ? ` D${userData.barDiameterMm}` : '';
+    return (
+      `鉄筋候補 ${candidateIndex + 1}/${candidateCount}: ` +
+      `${userData.rebarKind || '鉄筋'}${diameter} [${modelSource}]`
+    );
+  }
+
   const elementType =
     normalizeSelectedElementType(userData) ||
     userData.elementType ||

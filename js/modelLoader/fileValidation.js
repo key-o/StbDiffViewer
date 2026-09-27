@@ -98,6 +98,13 @@ export function setLoadingState(isLoading) {
     }
   }
 
+  // モデル解除ボタンは比較処理中に押せると、入力値だけが解除されて
+  // 読み込み中のモデル状態と不整合になるため、比較ボタンと同じ期間ロックする。
+  document.querySelectorAll('.clear-file-btn').forEach((clearButton) => {
+    const input = document.getElementById(clearButton.dataset.target);
+    clearButton.disabled = isLoading || !input?.files?.length;
+  });
+
   const overlay = document.getElementById('overlay');
   if (overlay) {
     overlay.style.cursor = isLoading ? 'wait' : 'default';

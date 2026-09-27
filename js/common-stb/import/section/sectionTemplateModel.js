@@ -269,7 +269,10 @@ export function validateTemplateTree(formState) {
 
       const selected = findMatchingChoiceOption(group, groupChildren);
       if (!selected) {
-        errors.push({ element: formState.elementName, error: 'choice の子要素構成がXSD定義と一致しません' });
+        errors.push({
+          element: formState.elementName,
+          error: 'choice の子要素構成がXSD定義と一致しません',
+        });
         continue;
       }
       for (const member of selected.members || [selected]) {
@@ -300,9 +303,14 @@ export function validateTemplateTree(formState) {
     }
   }
 
-  const actualNames = children.filter((child) => knownNames.has(child.elementName)).map((child) => child.elementName);
+  const actualNames = children
+    .filter((child) => knownNames.has(child.elementName))
+    .map((child) => child.elementName);
   if (errors.length === 0 && actualNames.join('\u0000') !== expectedNames.join('\u0000')) {
-    errors.push({ element: formState.elementName, error: '子要素の順序がXSDの sequence 定義と一致しません' });
+    errors.push({
+      element: formState.elementName,
+      error: '子要素の順序がXSDの sequence 定義と一致しません',
+    });
   }
 
   for (const child of children) errors.push(...validateTemplateTree(child));

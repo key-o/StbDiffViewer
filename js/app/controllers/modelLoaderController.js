@@ -39,6 +39,11 @@ import {
   LoadingIndicatorEvents,
 } from '../../constants/eventTypes.js';
 import comparisonKeyManager from '../comparisonKeyManager.js';
+import {
+  calculateLinearMemberQuantities,
+  summarizeQuantityStore,
+} from '../../quantities/QuantityService.js';
+import { buildQuantityFacts } from '../../quantities/analytics/QuantityFactBuilder.js';
 
 const log = createLogger('ModelLoader');
 
@@ -47,6 +52,16 @@ function schedulePostLoadTask(task) {
     requestIdleCallback(task, { timeout: 200 });
   } else {
     setTimeout(task, 0);
+  }
+}
+
+function buildQuantityFactsSafely(parsedData, store, { modelSide, document }) {
+  if (!parsedData || !store) return null;
+  try {
+    return buildQuantityFacts(parsedData, store, { modelSide, document });
+  } catch (error) {
+    log.warn(`モデル${modelSide}の数量分析fact構築に失敗しました。個別数量は保持します。`, error);
+    return null;
   }
 }
 
@@ -318,7 +333,7 @@ export async function compareModels(scheduleRender, { camera, controls } = {}) {
     ({ modelADocument, modelBDocument, nodeMapA, nodeMapB, stories, axesData, sectionMaps } =
       processingResult);
 
-    const { versionInfo, calDataA, calDataB, originalTextA, originalTextB } = processingResult;
+    const { versionInfo, calDataA, calDataB } = processingResult;
 
     // Save all model data to global state
     setState('models.documentA', modelADocument);
@@ -332,9 +347,6 @@ export async function compareModels(scheduleRender, { camera, controls } = {}) {
     setState('models.versionInfo', versionInfo);
     setState('models.calDataA', calDataA);
     setState('models.calDataB', calDataB);
-    // SS7元CSVテキストを保存（SS7再エクスポート時のパススルー用）
-    setState('models.ss7OriginalCsvTextA', originalTextA);
-    setState('models.ss7OriginalCsvTextB', originalTextB);
     setState('models.stbVersionA', versionInfo.versionA);
     setState('models.stbVersionB', versionInfo.versionB);
 
@@ -545,11 +557,57 @@ export async function compareModels(scheduleRender, { camera, controls } = {}) {
 
     // 初回表示モード適用で必要になる解析結果を先に温めて、99%フェーズのブロッキングを減らす。
     const prewarmStart = performance.now();
-    if (modelADocument) parseStbFile(modelADocument, { modelKey: 'A', saveToGlobalState: true });
-    if (modelBDocument) parseStbFile(modelBDocument, { modelKey: 'B', saveToGlobalState: true });
+    const stbDataA = modelADocument
+      ? parseStbFile(modelADocument, { modelKey: 'A', saveToGlobalState: true })
+      : null;
+    const stbDataB = modelBDocument
+      ? parseStbFile(modelBDocument, { modelKey: 'B', saveToGlobalState: true })
+      : null;
     log.info(
       `[compareModels] parseStbFile pre-warm: ${(performance.now() - prewarmStart).toFixed(0)}ms`,
     );
+
+    // STB属性/DOMとは分離した派生数量をA/Bそれぞれ独立storeへ構築する。
+    // 数量計算の失敗でモデル読込自体を中断しない（結果statusでfail-closedに保持）。
+    try {
+      const quantityStart = performance.now();
+      const derivedQuantitiesA = stbDataA
+        ? calculateLinearMemberQuantities(stbDataA, { modelSide: 'A', document: modelADocument })
+        : null;
+      const derivedQuantitiesB = stbDataB
+        ? calculateLinearMemberQuantities(stbDataB, { modelSide: 'B', document: modelBDocument })
+        : null;
+      setState('models.derivedQuantitiesA', derivedQuantitiesA);
+      setState('models.derivedQuantitiesB', derivedQuantitiesB);
+
+      // Analytics用QuantityFactはDerivedQuantityStoreから派生する二次キャッシュ。
+      // Fact構築失敗でElementInfoの個別数量まで失わないよう、A/Bごとに独立してfail-closedとする。
+      const quantityFactsA = buildQuantityFactsSafely(stbDataA, derivedQuantitiesA, {
+        modelSide: 'A',
+        document: modelADocument,
+      });
+      const quantityFactsB = buildQuantityFactsSafely(stbDataB, derivedQuantitiesB, {
+        modelSide: 'B',
+        document: modelBDocument,
+      });
+      setState('models.quantityFactsA', quantityFactsA);
+      setState('models.quantityFactsB', quantityFactsB);
+      log.info(
+        `[compareModels] derived quantities: ${(performance.now() - quantityStart).toFixed(0)}ms`,
+        {
+          A: derivedQuantitiesA ? summarizeQuantityStore(derivedQuantitiesA) : null,
+          B: derivedQuantitiesB ? summarizeQuantityStore(derivedQuantitiesB) : null,
+          factsA: quantityFactsA?.length ?? 0,
+          factsB: quantityFactsB?.length ?? 0,
+        },
+      );
+    } catch (error) {
+      setState('models.derivedQuantitiesA', null);
+      setState('models.derivedQuantitiesB', null);
+      setState('models.quantityFactsA', null);
+      setState('models.quantityFactsB', null);
+      log.warn('派生数量の構築に失敗しました。モデル表示は継続します。', error);
+    }
 
     // Phase 5: Visualization Finalization
     eventBus.emit(LoadingIndicatorEvents.UPDATE, {

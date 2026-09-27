@@ -1,168 +1,159 @@
 /**
  * @fileoverview RC柱主筋の断面内配置算定（3D配筋用）
- *
- * 柱断面の配筋情報（本数・呼び径・かぶり・dt）から、主筋芯の断面内座標を求める。
- * ST-Bridgeには鉄筋の3次元位置が含まれないため、ここでの位置は
- * かぶり・dt の設定から構成した想定配置である（梁貫通孔検討と同じ考え方）。
- *
- * 柱頭・柱脚で本数が異なる断面（NotSame）は、本数の少ない側を通し筋として
- * 全長に描き、多い側との差分を「柱頭／柱脚カットオフ筋」として切り出す。
- * カットオフ筋の長さは柱の内法高さに依存するため、ここでは断面内座標だけを
- * 持ち、材軸方向の範囲は columnAnchoragePlacement が部材ごとに決める。
- *
- * 座標系は断面ローカルで、断面中心が原点。
- * u はSTBのX方向（width_X）、v はSTBのY方向（width_Y）に対応する。
- * これは viewer の矩形/円形プロファイル（原点中心）とそのまま一致する。
- *
- * @module data/extractors/rebar3d/columnRebarPlacement
  */
-
-import { barDiameterMm, barOuterDiameterMm } from '../../../constants/beamOpeningRules.js';
-import { COLUMN_REBAR_PLACEMENT_RULES } from '../../../constants/rebarPlacementRules.js';
+import { REBAR_STANDARD_RULES } from '../../../constants/rebarStandardRules.js';
 import { extractRcColumnSections } from '../columnSectionListExtractor.js';
-import { createSegment, evenlySpaced, pickExtraBars, resolveDt } from './rebarSectionUtils.js';
+import { buildColumnArrangementFacts } from './columnRebarFacts.js';
+import { annotateColumnArrangementTopology } from './columnRebarTopology.js';
+import { createSegment } from './rebarSectionUtils.js';
 
-/**
- * 矩形柱の周囲配筋（1段目）を組み立てる
- * @param {Object} params - 配置パラメータ
- * @param {number} params.width - 断面幅 X [mm]
- * @param {number} params.height - 断面幅 Y [mm]
- * @param {number} params.dtX - X方向のdt [mm]
- * @param {number} params.dtY - Y方向のdt [mm]
- * @param {number} params.countX - X方向の本数（上下辺の本数）
- * @param {number} params.countY - Y方向の本数（左右辺の本数）
- * @param {number} params.diaMm - 主筋の呼び径 [mm]
- * @param {string|null} params.grade - 鉄筋種別
- * @returns {Array<{u:number, v:number, dia:number, corner:boolean, grade:string|null}>} 主筋芯
- */
-function buildRectPerimeterBars({ width, height, dtX, dtY, countX, countY, diaMm, grade }) {
-  const halfSpanX = width / 2 - dtX;
-  const halfSpanY = height / 2 - dtY;
-  const { minInnerSpanMm } = COLUMN_REBAR_PLACEMENT_RULES;
-  if (halfSpanX * 2 < minInnerSpanMm || halfSpanY * 2 < minInnerSpanMm) return [];
+const SAME_POSITION_TOLERANCE_MM = 1e-6;
+const SAME_POSITION_TOLERANCE_SQ = SAME_POSITION_TOLERANCE_MM ** 2;
 
-  const xs = evenlySpaced(-halfSpanX, halfSpanX, countX);
-  const ys = evenlySpaced(-halfSpanY, halfSpanY, countY);
-  if (xs.length === 0 || ys.length === 0) return [];
-
-  const bars = [];
-  const push = (u, v, corner) => bars.push({ u, v, dia: diaMm, corner, grade: grade || null });
-
-  // 下辺・上辺（Y方向の両端）にX方向の本数を並べる。両端は四隅
-  for (const [index, u] of xs.entries()) {
-    const isEdgeX = index === 0 || index === xs.length - 1;
-    push(u, ys[0], isEdgeX);
-    if (ys.length > 1) push(u, ys[ys.length - 1], isEdgeX);
-  }
-  // 左辺・右辺（X方向の両端）は角を除いた中間のみ
-  for (let i = 1; i < ys.length - 1; i++) {
-    push(xs[0], ys[i], false);
-    if (xs.length > 1) push(xs[xs.length - 1], ys[i], false);
-  }
-  return bars;
-}
-
-/**
- * 円形柱の周囲配筋（1段目）を組み立てる
- *
- * 円形柱には四隅が無いため、180°フックの対象（corner）は付けない。
- * @param {Object} params - 配置パラメータ
- * @param {number} params.diameter - 断面直径 [mm]
- * @param {number} params.dt - dt [mm]
- * @param {number} params.count - 主筋本数
- * @param {number} params.diaMm - 主筋の呼び径 [mm]
- * @param {string|null} params.grade - 鉄筋種別
- * @returns {Array<{u:number, v:number, dia:number, corner:boolean, grade:string|null}>} 主筋芯
- */
-function buildCircleBars({ diameter, dt, count, diaMm, grade }) {
-  const radius = diameter / 2 - dt;
-  if (radius <= 0 || count <= 0) return [];
-  return Array.from({ length: count }, (_, index) => {
-    const angle = (index / count) * Math.PI * 2;
-    return {
-      u: radius * Math.cos(angle),
-      v: radius * Math.sin(angle),
-      dia: diaMm,
-      corner: false,
-      grade: grade || null,
-    };
-  });
-}
-
-/**
- * 配筋1組（SAME / TOP / BOTTOM のいずれか）から主筋芯と dt を組み立てる
- * @param {Object} dimensions - 断面寸法
- * @param {Object} arrangement - {mainBar, hoop, cover}
- * @param {Object} options - {coverMm}
- * @returns {Object|null} {bars, dt, coverMm, hoopDia, mainDia, estimated}
- */
 function buildArrangement(dimensions, arrangement, options) {
-  const mainBar = arrangement?.mainBar;
-  if (!mainBar) return null;
+  return annotateColumnArrangementTopology(
+    buildColumnArrangementFacts(dimensions, arrangement, options),
+    dimensions,
+  );
+}
 
-  const rules = COLUMN_REBAR_PLACEMENT_RULES;
-  const coverMm = options.coverMm ?? arrangement.cover ?? rules.defaultCoverMm;
-  const mainDiaName = mainBar.dia || rules.defaultMainBarDia;
-  const hoopDiaName = arrangement.hoop?.dia || rules.defaultHoopDia;
-  const mainDiaMm = barDiameterMm(mainDiaName, barDiameterMm(rules.defaultMainBarDia));
-  const mainOuterMm = barOuterDiameterMm(mainDiaName, mainDiaMm);
-  const hoopOuterMm = barOuterDiameterMm(hoopDiaName, barDiameterMm(rules.defaultHoopDia));
-  const grade = mainBar.grade || null;
+function normalizedGrade(grade) {
+  return REBAR_STANDARD_RULES.normalizeGrade(grade) || String(grade || '').toUpperCase() || null;
+}
 
-  if (dimensions.type === 'CIRCLE') {
-    const diameter = dimensions.diameter || 0;
-    const count = mainBar.countTotal || mainBar.count || 0;
-    if (diameter <= 0 || count <= 0) return null;
+function identityKey(bar) {
+  return [
+    bar?.role || 'main',
+    bar?.layer ?? '',
+    bar?.diaName || bar?.dia || '',
+    normalizedGrade(bar?.grade) || '',
+  ]
+    .map((value) => String(value).toUpperCase())
+    .join('|');
+}
 
-    const dt = resolveDt(mainBar.dt, coverMm, hoopOuterMm, mainOuterMm);
-    const bars = buildCircleBars({ diameter, dt: dt.value, count, diaMm: mainDiaMm, grade });
-    if (bars.length === 0) return null;
-    return {
-      bars,
-      dt: { r: dt.value },
-      coverMm,
-      hoopDia: hoopDiaName,
-      mainDia: mainDiaName,
-      estimated: dt.estimated,
-    };
+function finitePosition(bar) {
+  const u = Number(bar?.u);
+  const v = Number(bar?.v);
+  return Number.isFinite(u) && Number.isFinite(v) ? { u, v } : null;
+}
+
+function distanceSquared(first, second) {
+  const left = finitePosition(first);
+  const right = finitePosition(second);
+  if (!left || !right) return Infinity;
+  return (left.u - right.u) ** 2 + (left.v - right.v) ** 2;
+}
+
+function groupWithIndex(bars) {
+  const groups = new Map();
+  for (const [index, bar] of (bars || []).entries()) {
+    const key = identityKey(bar);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ bar, index });
+  }
+  return groups;
+}
+
+function exactStraightMatches(top, bottom, semanticKey) {
+  const matches = [];
+  const remainingTop = top.slice();
+  const remainingBottom = bottom.slice();
+
+  while (remainingTop.length > 0 && remainingBottom.length > 0) {
+    const round = [];
+    for (const topItem of remainingTop) {
+      const candidates = remainingBottom.filter(
+        (bottomItem) => distanceSquared(topItem.bar, bottomItem.bar) <= SAME_POSITION_TOLERANCE_SQ,
+      );
+      if (candidates.length !== 1) continue;
+      const bottomItem = candidates[0];
+      const reverse = remainingTop.filter(
+        (candidate) => distanceSquared(candidate.bar, bottomItem.bar) <= SAME_POSITION_TOLERANCE_SQ,
+      );
+      if (reverse.length !== 1 || reverse[0] !== topItem) continue;
+      round.push({ topItem, bottomItem });
+    }
+    if (round.length === 0) break;
+    for (const { topItem, bottomItem } of round) {
+      matches.push({
+        top: topItem.bar,
+        bottom: bottomItem.bar,
+        distanceSquared: 0,
+        matchBasis: 'same-position',
+        semanticKey,
+      });
+      remainingTop.splice(remainingTop.indexOf(topItem), 1);
+      remainingBottom.splice(remainingBottom.indexOf(bottomItem), 1);
+    }
   }
 
-  const width = dimensions.width || 0;
-  const height = dimensions.height || 0;
-  const countX = mainBar.countX || 0;
-  const countY = mainBar.countY || 0;
-  if (width <= 0 || height <= 0 || countX <= 0 || countY <= 0) return null;
+  return { matches, remainingTop, remainingBottom };
+}
 
-  const dtX = resolveDt(mainBar.dtX, coverMm, hoopOuterMm, mainOuterMm);
-  const dtY = resolveDt(mainBar.dtY, coverMm, hoopOuterMm, mainOuterMm);
-  const bars = buildRectPerimeterBars({
-    width,
-    height,
-    dtX: dtX.value,
-    dtY: dtY.value,
-    countX,
-    countY,
-    diaMm: mainDiaMm,
-    grade,
-  });
-  if (bars.length === 0) return null;
+/**
+ * TOP/BOTTOM bar factsを role/layer/dia/grade で対応付ける。
+ *
+ * 全体の距離greedyより先に同一断面内座標を確定し、直線で通せる筋を別のslotへ
+ * 付け替えない。残筋は従来互換の最短距離 one-to-one でidentityを保持するが、
+ * 位置差がある組は memberTransitionRequired として後段へ送り、3D本体では直線化しない。
+ */
+export function matchColumnBarFacts(topBars = [], bottomBars = []) {
+  const topGroups = groupWithIndex(topBars);
+  const bottomGroups = groupWithIndex(bottomBars);
+  const keys = new Set([...topGroups.keys(), ...bottomGroups.keys()]);
+  const matches = [];
 
+  for (const key of keys) {
+    const topGroup = topGroups.get(key) || [];
+    const bottomGroup = bottomGroups.get(key) || [];
+    if (topGroup.length === 0 || bottomGroup.length === 0) continue;
+
+    const exact = exactStraightMatches(topGroup, bottomGroup, key);
+    matches.push(...exact.matches);
+
+    const candidates = [];
+    for (const top of exact.remainingTop) {
+      for (const bottom of exact.remainingBottom) {
+        candidates.push({ top, bottom, distance: distanceSquared(top.bar, bottom.bar) });
+      }
+    }
+    candidates.sort(
+      (a, b) =>
+        a.distance - b.distance || a.top.index - b.top.index || a.bottom.index - b.bottom.index,
+    );
+    const usedTop = new Set();
+    const usedBottom = new Set();
+    for (const candidate of candidates) {
+      if (!Number.isFinite(candidate.distance)) continue;
+      if (usedTop.has(candidate.top.index) || usedBottom.has(candidate.bottom.index)) continue;
+      usedTop.add(candidate.top.index);
+      usedBottom.add(candidate.bottom.index);
+      matches.push({
+        top: candidate.top.bar,
+        bottom: candidate.bottom.bar,
+        distanceSquared: candidate.distance,
+        matchBasis: 'nearest-position-transition',
+        semanticKey: key,
+      });
+    }
+  }
+
+  const matchedTop = new Set(matches.map((match) => match.top));
+  const matchedBottom = new Set(matches.map((match) => match.bottom));
   return {
-    bars,
-    dt: { x: dtX.value, y: dtY.value },
-    coverMm,
-    hoopDia: hoopDiaName,
-    mainDia: mainDiaName,
-    estimated: dtX.estimated || dtY.estimated,
+    matches,
+    unmatchedTop: topBars.filter((bar) => !matchedTop.has(bar)),
+    unmatchedBottom: bottomBars.filter((bar) => !matchedBottom.has(bar)),
   };
 }
 
 /**
- * 柱頭・柱脚の配筋差からカットオフ筋を切り出す
- * @param {Object} dimensions - 断面寸法
- * @param {Array<Object>} arrangements - 配筋の一覧（position を持つ）
- * @param {Object} options - {coverMm}
- * @returns {{through:Object, cutoff:{zone:string, bars:Array}|null}|null} 通し筋とカットオフ筋
+ * 柱頭・柱脚の配筋差を通し筋と端部筋に分ける。
+ *
+ * 位置一致筋はそのまま通し、位置差のある対応筋はidentityを維持しつつ
+ * memberTransitionRequiredを付ける。遷移位置・折曲げ形状はST-Bridgeから一意に
+ * 決められないため、renderer側で全長直線化せずfail-closedにする。
  */
 function splitByPosition(dimensions, arrangements, options) {
   const byPosition = (position) => arrangements.find((item) => item.position === position);
@@ -170,29 +161,44 @@ function splitByPosition(dimensions, arrangements, options) {
   const bottom = buildArrangement(dimensions, byPosition('BOTTOM'), options);
   if (!top || !bottom) return null;
 
-  // 本数が同じなら柱頭・柱脚を作り分ける必要はない（配筋差なし）
-  if (top.bars.length === bottom.bars.length) return { through: bottom, cutoff: null };
+  const matched = matchColumnBarFacts(top.bars, bottom.bars);
+  const memberTransitions = [];
+  const throughBars = matched.matches.map((match) => {
+    const memberTransitionRequired = match.distanceSquared > SAME_POSITION_TOLERANCE_SQ;
+    const bar = {
+      ...match.bottom,
+      endpointPosition: {
+        bottom: { u: match.bottom.u, v: match.bottom.v },
+        top: { u: match.top.u, v: match.top.v },
+      },
+      memberTransitionRequired,
+      memberTransitionBasis: match.matchBasis,
+    };
+    if (memberTransitionRequired) {
+      memberTransitions.push({
+        reason: 'column-member-position-transition-unresolved',
+        semanticKey: match.semanticKey,
+        bottomBar: match.bottom,
+        topBar: match.top,
+        distanceMm: Math.sqrt(match.distanceSquared),
+      });
+    }
+    return bar;
+  });
+  const cutoffs = [];
+  if (matched.unmatchedTop.length) cutoffs.push({ zone: 'top', bars: matched.unmatchedTop });
+  if (matched.unmatchedBottom.length) {
+    cutoffs.push({ zone: 'bottom', bars: matched.unmatchedBottom });
+  }
 
-  const more = top.bars.length > bottom.bars.length ? top : bottom;
-  const through = more === top ? bottom : top;
   return {
-    through,
-    cutoff: {
-      zone: more === top ? 'top' : 'bottom',
-      bars: pickExtraBars(more.bars, through.bars),
-    },
+    through: { ...bottom, bars: throughBars },
+    cutoffs,
+    endpointFacts: { top, bottom },
+    memberTransitions,
   };
 }
 
-/**
- * 柱断面1つ分の主筋配置（1段目のみ）を算定する
- *
- * @param {Object} sectionDetail - columnSectionListExtractor の断面詳細
- * @param {Object} [options] - 上書き設定
- * @param {number} [options.coverMm] - かぶり厚さの上書き [mm]
- * @returns {Object|null} 配置結果。算定できない場合は null
- *   {kind, shape, width, height, diameter, segments, cutoff, dt, coverMm, hoopDia, mainDia, estimated}
- */
 export function computeColumnRebarSectionLayout(sectionDetail, options = {}) {
   const dimensions = sectionDetail?.dimensions;
   if (!dimensions?.type) return null;
@@ -203,42 +209,49 @@ export function computeColumnRebarSectionLayout(sectionDetail, options = {}) {
     split?.through ??
     buildArrangement(
       dimensions,
-      { mainBar: sectionDetail.mainBar, hoop: sectionDetail.hoop, cover: sectionDetail.cover },
+      {
+        mainBar: sectionDetail.mainBar,
+        hoop: sectionDetail.hoop,
+        coreBar: sectionDetail.coreBar,
+        cover: sectionDetail.cover,
+      },
       options,
     );
   if (!built) return null;
 
   const shape = dimensions.type === 'CIRCLE' ? 'CIRCLE' : 'RECTANGLE';
+  const cutoffs = split?.cutoffs || [];
+  const memberTransitions = split?.memberTransitions || [];
   return {
     kind: 'columnMain',
     shape,
     ...(shape === 'CIRCLE'
       ? { diameter: dimensions.diameter || 0 }
       : { width: dimensions.width || 0, height: dimensions.height || 0 }),
-    // 通し筋は全長にわたって同じ配筋を描くため、材軸方向は1区間のみ
     segments: [createSegment(0, 1, built.bars)],
-    /** 柱頭／柱脚のみに必要な鉄筋。材軸方向の範囲は部材ごとに決める */
-    cutoff: split?.cutoff || null,
+    // 旧APIは片側だけのケースに限り維持する。
+    cutoff: cutoffs.length === 1 ? cutoffs[0] : null,
+    cutoffs,
+    endpointFacts: split?.endpointFacts || null,
+    memberTransitions,
     sectionName: sectionDetail.name || null,
     dt: built.dt,
+    dtFaces: built.dtFaces,
     coverMm: built.coverMm,
     hoopDia: built.hoopDia,
     mainDia: built.mainDia,
+    secondLayerInterval: built.secondLayerInterval,
+    unresolved: [
+      ...(built.unresolved || []),
+      ...memberTransitions.map((transition) => transition.reason),
+    ],
     estimated: built.estimated,
   };
 }
 
-/**
- * STB文書からRC柱断面ID → 主筋配置のマップを作る
- *
- * @param {Document} xmlDoc - STB XMLドキュメント
- * @param {Object} [options] - computeColumnRebarSectionLayout に渡す設定
- * @returns {Map<string, Object>} 断面ID → 配置結果
- */
 export function buildColumnRebarLayoutMap(xmlDoc, options = {}) {
   const layouts = new Map();
   if (!xmlDoc) return layouts;
-
   for (const [sectionId, detail] of extractRcColumnSections(xmlDoc)) {
     const layout = computeColumnRebarSectionLayout(detail, options);
     if (layout) layouts.set(sectionId, layout);

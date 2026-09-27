@@ -13,11 +13,16 @@ import { scheduleRender } from '../utils/renderScheduler.js';
 import { getCurrentColorMode, COLOR_MODES } from './colorModeState.js';
 import { eventBus, ViewEvents } from '../data/events/index.js';
 
+// `.element-color-input` は表示要素設定内で共通の色picker外観にも利用する。
+// 部材別色付けモードが制御するのは element type を持つ入力だけに限定し、
+// 鉄筋径など別の表示設定をモード切替で誤ってdisabledにしない。
+const ELEMENT_COLOR_INPUT_SELECTOR = '.element-color-input[data-element-type]';
+
 /**
  * 部材別色設定UIを初期化（表示要素テーブル内の色ボックス）
  */
 export function initializeElementColorControls() {
-  const colorInputs = document.querySelectorAll('.element-color-input');
+  const colorInputs = document.querySelectorAll(ELEMENT_COLOR_INPUT_SELECTOR);
 
   colorInputs.forEach((input) => {
     const elementType = input.dataset.elementType;
@@ -57,7 +62,7 @@ export function initializeElementColorControls() {
  * @param {boolean} enabled - trueで有効、falseでグレーアウト
  */
 export function setElementColorInputsEnabled(enabled) {
-  const colorInputs = document.querySelectorAll('.element-color-input');
+  const colorInputs = document.querySelectorAll(ELEMENT_COLOR_INPUT_SELECTOR);
   colorInputs.forEach((input) => {
     input.disabled = !enabled;
   });
@@ -84,7 +89,7 @@ export function resetElementColors() {
   colorManager.resetElementColors();
 
   // UIの色設定コントロールを更新（色ボックスの値を更新）
-  const colorInputs = document.querySelectorAll('.element-color-input');
+  const colorInputs = document.querySelectorAll(ELEMENT_COLOR_INPUT_SELECTOR);
   colorInputs.forEach((input) => {
     const elementType = input.dataset.elementType;
     if (elementType && DEFAULT_ELEMENT_COLORS[elementType]) {

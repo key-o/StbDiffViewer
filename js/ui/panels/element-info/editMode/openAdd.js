@@ -15,6 +15,7 @@ import { showSuccess } from '../../../common/toast.js';
 import { generateNextId, findDirectChild, emitStructuralChange } from './domHelpers.js';
 import { updateEditingSummary } from './editHistory.js';
 import { getModifications } from './editState.js';
+import { getLegacyMutationFailure } from './legacyMutationGate.js';
 
 const PANEL_TAGS = new Set(['StbWall', 'StbSlab']);
 const OPEN_202_ATTRS = [
@@ -36,13 +37,17 @@ function is21(version) {
   return String(version || '').startsWith('2.1');
 }
 
+function requiresOpenSection(version) {
+  return is21(version) && String(version) !== '2.1.0';
+}
+
 function validateReferences(doc, panelTag, panelId, attrs, version) {
   if (!PANEL_TAGS.has(panelTag)) return '開口の割当先は壁または床を指定してください';
   const panel = doc.querySelector(selectorById(panelTag, panelId));
   if (!panel) return `${panelTag} #${panelId} が見つかりません`;
 
-  if (is21(version) && !attrs.id_section) {
-    return 'ST-Bridge 2.1.x の開口には StbSecOpen_RC の指定が必要です';
+  if (requiresOpenSection(version) && !attrs.id_section) {
+    return '開口補強断面 StbSecOpen_RC の指定が必要です';
   }
   if (attrs.id_section) {
     const section = doc.querySelector(selectorById('StbSecOpen_RC', attrs.id_section));
@@ -173,10 +178,14 @@ function addOpen21(doc, panelTag, panelId, attrs) {
 /**
  * 開口を作成し、指定した壁または床へ同時に割り当てる。
  * モデルAのST-Bridgeバージョンに応じて正規のXML表現を選ぶ。
+ * Working Session 中は AddElementCommand 移行前のため fail-closed とする。
  * @param {{panelTag:'StbWall'|'StbSlab',panelId:string,attrs:Object<string,string>}} input
  * @returns {{success:boolean,id:string|null,tagName?:string,error?:string}}
  */
 export function addOpenWithAssignment({ panelTag, panelId, attrs = {} }) {
+  const blocked = getLegacyMutationFailure('開口追加', { id: null });
+  if (blocked) return blocked;
+
   const doc = getState('models.documentA');
   if (!doc) return { success: false, id: null, error: 'モデルAが読み込まれていません' };
 

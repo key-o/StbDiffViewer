@@ -416,29 +416,21 @@ GUIDが存在しない場合、自動的に位置情報ベース比較に切り�
 
 ## 使用ライブラリ
 
-このアプリケーションは以下のサードパーティライブラリを使用しています (StbDiffViewer フォルダで読み込まれるランタイム依存のみを記載しています; devDependencies は含めていません):
+この公開用Webアプリケーションは、主に以下のサードパーティライブラリを使用しています:
 
 - **Three.js** (r160) — MIT（3Dレンダリング）
 - **camera-controls** (v3.1.0) — MIT（カメラ操作）
 - **dxf-parser** (v1.1.2) — MIT（DXF 解析）
 - **html2canvas** (v1.4.1) — MIT（DOMキャプチャ）
 - **jsPDF** (v4.2.x) — MIT（PDF生成）
-- **Ajv** (v8.17.x) — MIT（JSON Schema検証）
 - **web-ifc / web-ifc.wasm** (v0.0.74) — MPL-2.0（IFC解析）
+- **PDF.js** (v5.4.624) — Apache-2.0（PDF図面の読み込み・表示）
 
 ---
 
 ## ライセンス
 
-STB Diff Viewer本体のライセンスは配布形態により異なります。
-
-- **本リポジトリおよびexe版:** 商用独自ライセンス（詳細は `LICENSE` を参照）
-- **Web版:** `npm run build:public` で生成される配布物は、同梱の `LICENSE` に記載されたライセンスを適用します。
-- **サードパーティのランタイムライブラリ:** 3rd-party notices は `StbDiffViewer/THIRD-PARTY-NOTICES.md` にまとめています。配布物（zip やバンドル）を作成する場合は同ファイルを同梱してください。
-
-- **StbDiffViewer のライセンス:** `StbDiffViewer` 単体で配布する場合は `StbDiffViewer/LICENSE` を同梱してください。
-
-なお、配布するバンドルやパッケージにこれらのライブラリを同梱する場合、各ライブラリのライセンス条件（NOTICE の同梱や帰属表示など）に従ってください。
+この公開用Webアプリケーション本体には、同梱の [LICENSE](./LICENSE) に記載された MIT ライセンスが適用されます。サードパーティライブラリのライセンスと帰属表示は [THIRD-PARTY-NOTICES.md](./THIRD-PARTY-NOTICES.md) および [THIRD-PARTY-LICENSES.md](./THIRD-PARTY-LICENSES.md) を参照してください。配布時には必要なライセンス文書を同梱してください。
 
 ---
 

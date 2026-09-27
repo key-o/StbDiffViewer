@@ -47,10 +47,16 @@ import { initializeCompareFileInputs } from './app/initialization/fileInputIniti
 import { initializeGlobalErrorHandling } from './app/initialization/globalErrorHandler.js';
 import { setupDevelopmentTools } from './app/initialization/devToolsInitializer.js';
 import { initArButton } from './ui/ar/arButton.js';
+import { setRebarMemberVisible } from './app/viewModes/rebarMeshRetentionController.js';
+import { getModelContext } from './app/viewModes/modelContext.js';
 
 // --- 初期化フラグ ---
 let rendererInitialized = false;
 const log = createLogger('app');
+
+// E2E・診断ツールが、canvasの存在ではなくUIイベント登録まで完了した状態を
+// 待機できるようにする。初期化途中のファイル投入はchangeイベントを取りこぼす。
+window.__appInitializationComplete = false;
 
 initializeGlobalErrorHandling();
 
@@ -77,6 +83,14 @@ window.handleCompareModelsClick = async function () {
 exposeManagers({
   displayModeManager,
   labelDisplayManager,
+});
+
+// E2E・診断用に、アプリ本体と同じモジュールインスタンスの配筋表示APIを公開する。
+// ソースURLをpage.evaluate()から再importするとviewer/sceneが別インスタンスになり、
+// 実画面とは異なる配筋グループを操作してしまうためである。
+window.__rebarDisplayApi = Object.freeze({
+  setRebarMemberVisible,
+  isModelContextReady: () => Boolean(getModelContext().modelADocument),
 });
 
 // --- DOMContentLoaded イベントリスナー ---
@@ -121,8 +135,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     initArButton().catch((e) => log.warn('AR機能の初期化をスキップ:', e));
     log.info('✓ Phase 8: AR機能の初期化が完了しました');
 
+    window.__appInitializationComplete = true;
     log.info('🎉 アプリケーションの起動が完了しました');
   } else {
+    window.__appInitializationComplete = false;
     log.error('レンダラーの初期化に失敗しました。アプリケーションを開始できません。');
     showError('3Dビューアの初期化に失敗しました。');
   }

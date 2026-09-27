@@ -1,28 +1,29 @@
 /**
  * @fileoverview RC梁（大梁・小梁）主筋の断面内配置算定（3D配筋用）
  *
- * 梁断面の配筋情報（本数・呼び径・かぶり）から、上端筋・下端筋・腹筋の
- * 断面内座標を求める。かぶり・dt の考え方は梁貫通孔（開口補強筋）検討と共通で、
- * 「主筋芯 = かぶり ＋ あばら筋の最大外径 ＋ 主筋の最大外径/2」を基本とする。
+ * 1段目・多段筋の位置解決は2D梁断面リストと同じ beamRebarPositionResolver を使用する。
+ * ST-Bridgeの center / depth_cover / 段筋重心間距離 / interval を別属性として扱い、
+ * 位置sourceをbar factsへ保持する。
  *
- * 梁は LEFT / CENTER / RIGHT で本数が変わるため、材軸方向を位置ごとの区間に
- * 分けて配置する。区間の割り方は主筋カットオフと同じ L/4 を用いる。
+ * R4では腹筋も STB明示 > ApplyConditions省略値 > project config > unresolved の順で
+ * 解決する。N_web は断面全体の腹筋本数で、左右対向ペアとして2本/段へ展開する。
  *
- * 座標系は断面ローカルで、断面中心が原点。
- * u は断面幅方向、v は梁せい方向（上が正）で、viewer の矩形プロファイル
- * （原点中心）および top-aligned 配置とそのまま一致する。
- *
- * @module data/extractors/rebar3d/beamRebarPlacement
+ * 主筋の1段目位置は2D断面リストと同じ resolver の解釈をそのまま使用する。
+ * depth_cover / project cover に対して3DだけSTP径を追加すると2D/3Dの主筋位置がずれるため、
+ * せん断補強筋による囲みは hoopPlacement 側でactual main-bar factsから解決する。
  */
 
-import {
-  barDiameterMm,
-  barOuterDiameterMm,
-  minBarClearanceMm,
-} from '../../../constants/beamOpeningRules.js';
+import { barDiameterMm, barOuterDiameterMm } from '../../../constants/beamOpeningRules.js';
 import { BEAM_REBAR_PLACEMENT_RULES } from '../../../constants/rebarPlacementRules.js';
+import {
+  assignBeamLayerGroupsToPositions,
+  normalizeBeamRebarLayers,
+  resolveBeamFirstLayerFaces,
+  resolveBeamLayerCenterSpacingMm,
+} from '../beamSectionList/beamRebarPositionResolver.js';
 import { extractRcBeamSectionDetail } from '../beamSectionList/sectionDetail.js';
 import { querySelectorAll } from '../sectionListUtils.js';
+import { resolveBeamAuxiliaryApplyPolicy, resolveBeamWebBar } from './beamAuxiliaryPlacement.js';
 import {
   createSegment,
   evenlySpaced,
@@ -31,189 +32,330 @@ import {
   resolveDt,
   resolveSpanRanges,
 } from './rebarSectionUtils.js';
+import { buildSmallBeamSupportFacts } from './smallBeamSupportFacts.js';
 
-/**
- * 1段分の主筋を断面内へ並べる
- *
- * @param {Object} params - 配置パラメータ
- * @param {number} params.width - 断面幅 [mm]
- * @param {number} params.depth - 梁せい [mm]
- * @param {number} params.count - 本数
- * @param {number} params.diaMm - 呼び径 [mm]
- * @param {number} params.dtSide - 側面からのdt [mm]
- * @param {number} params.centerFromEdge - 天端（下端）からの主筋芯距離 [mm]
- * @param {boolean} params.isTop - 上端筋か
- * @param {string|null} params.grade - 鉄筋種別（定着長さの判定に使う）
- * @returns {Array<{u:number, v:number, dia:number, role:string, grade:string|null}>} 主筋芯の配列
- */
-function buildLayerBars({ width, depth, count, diaMm, dtSide, centerFromEdge, isTop, grade }) {
-  const halfSpan = width / 2 - dtSide;
-  if (count <= 0 || halfSpan < 0) return [];
-  const v = isTop ? depth / 2 - centerFromEdge : -depth / 2 + centerFromEdge;
-  const role = isTop ? 'top' : 'bottom';
-  return evenlySpaced(-halfSpan, halfSpan, count).map((u) => ({
-    u,
-    v,
-    dia: diaMm,
-    role,
-    grade: grade || null,
-  }));
+function defaultMainFaces() {
+  const value = Number(BEAM_REBAR_PLACEMENT_RULES.defaultMainCenterMm) || 72;
+  return { top: value, bottom: value, left: value, right: value };
 }
 
-/**
- * 上端筋または下端筋の全段を組み立てる
- *
- * 2段目は「1段目の芯 ＋ 主筋の最大外径 ＋ 必要あき」だけ内側へ入る
- * （段間のあきは水平あきと同じ基準を流用する簡略化）。
- * @param {Object} bar - topBar / bottomBar
- * @param {Object} context - 断面コンテキスト
- * @returns {Array<{u:number, v:number, dia:number}>} 主筋芯の配列
- */
-function buildSideBars(bar, context) {
-  if (!bar) return [];
-  const { width, depth, coverMm, coverSide, stirrupOuter, isTop, defaultDia } = context;
+function createMainBarFact({
+  assignment,
+  x,
+  y,
+  width,
+  renderDepth,
+  side,
+  layer,
+  positionZone,
+  positionSource,
+  sidePositionSources,
+  positionDepth,
+}) {
+  const diaName = assignment.dia || BEAM_REBAR_PLACEMENT_RULES.defaultMainBarDia;
+  return {
+    u: x - width / 2,
+    v: renderDepth / 2 - y,
+    dia: barDiameterMm(diaName, barDiameterMm(BEAM_REBAR_PLACEMENT_RULES.defaultMainBarDia)),
+    diaName,
+    role: side === 'TOP' ? 'top' : 'bottom',
+    layer: layer.step,
+    grade: assignment.grade || null,
+    diaEstimated: !!assignment.diaEstimated,
+    positionZone,
+    positionSource,
+    sidePositionSources,
+    centerFromTopMm: y,
+    sectionDepthMm: positionDepth,
+  };
+}
 
-  const layers = bar.layers?.length
-    ? bar.layers
-    : [{ step: 1, count: bar.count1st ?? bar.count ?? 0, dia: bar.dia }];
+function isResolvedFaceValue(value) {
+  return value !== null && value !== undefined && value !== '';
+}
+
+function buildResolvedSideBars(bar, side, context) {
+  const layers = normalizeBeamRebarLayers(bar, BEAM_REBAR_PLACEMENT_RULES.defaultMainBarDia);
+  if (layers.length === 0) return { bars: [], layers: [], unresolved: [] };
+
+  const rawLeft = context.positionResolution.faces.left;
+  const rawRight = context.positionResolution.faces.right;
+  const rawVertical =
+    side === 'TOP' ? context.positionResolution.faces.top : context.positionResolution.faces.bottom;
+  if (
+    !isResolvedFaceValue(rawLeft) ||
+    !isResolvedFaceValue(rawRight) ||
+    !isResolvedFaceValue(rawVertical)
+  ) {
+    return {
+      bars: [],
+      layers: [],
+      unresolved: [`missing-${side.toLowerCase()}-first-layer-position`],
+    };
+  }
+
+  const left = Number(rawLeft);
+  const right = Number(rawRight);
+  const firstVertical =
+    side === 'TOP' ? Number(rawVertical) : context.positionDepth - Number(rawVertical);
+  if (!Number.isFinite(left) || !Number.isFinite(right) || !Number.isFinite(firstVertical)) {
+    return {
+      bars: [],
+      layers: [],
+      unresolved: [`missing-${side.toLowerCase()}-first-layer-position`],
+    };
+  }
+
+  const xStart = left;
+  const xEnd = context.width - right;
+  if (xEnd < xStart) {
+    return {
+      bars: [],
+      layers: [],
+      unresolved: [`invalid-horizontal-main-span:${xStart}:${xEnd}`],
+    };
+  }
 
   const bars = [];
-  for (const layer of layers) {
-    const count = layer.count || 0;
+  const layerFacts = [];
+  const unresolved = [];
+  let previousLayer = null;
+  let previousY = null;
+
+  for (let index = 0; index < layers.length; index += 1) {
+    const layer = layers[index];
+    const count = Number(layer.count) || 0;
     if (count <= 0) continue;
 
-    const diaName = layer.dia || bar.dia || defaultDia;
-    const diaMm = barDiameterMm(diaName, barDiameterMm(defaultDia));
-    const outerMm = barOuterDiameterMm(diaName, diaMm);
-    const firstCenter = coverMm + stirrupOuter + outerMm / 2;
-    const step = layer.step || 1;
-    const centerFromEdge =
-      step === 1 ? firstCenter : firstCenter + (step - 1) * (outerMm + minBarClearanceMm(diaMm));
+    let y;
+    let positionSource;
+    if (index === 0) {
+      y = firstVertical;
+      positionSource =
+        side === 'TOP'
+          ? context.positionResolution.faceSources.top
+          : context.positionResolution.faceSources.bottom;
+    } else {
+      const spacing = resolveBeamLayerCenterSpacingMm({
+        previousLayer,
+        currentLayer: layer,
+        layerSpacing: context.positionResolution.layerSpacing,
+        applyDefaults: context.positionResolution.applyDefaults,
+      });
+      if (!Number.isFinite(spacing.value)) {
+        unresolved.push(`unresolved-${side.toLowerCase()}-layer-${layer.step}`);
+        break;
+      }
+      y = side === 'TOP' ? previousY + spacing.value : previousY - spacing.value;
+      positionSource = spacing.source;
+    }
 
-    bars.push(
-      ...buildLayerBars({
-        width,
-        depth,
-        count,
-        diaMm,
-        // 側面のdtも段ごとの呼び径で構成する
-        dtSide: resolveDt(null, coverSide, stirrupOuter, outerMm).value,
-        centerFromEdge,
-        isTop,
-        grade: layer.grade || bar.grade || null,
+    if (!Number.isFinite(y) || y < 0 || y > context.positionDepth) {
+      unresolved.push(`out-of-section-${side.toLowerCase()}-layer-${layer.step}`);
+      break;
+    }
+
+    const xPositions = evenlySpaced(xStart, xEnd, count);
+    const assignments = assignBeamLayerGroupsToPositions(layer, xPositions);
+    const placements = assignments.map((assignment) =>
+      createMainBarFact({
+        assignment,
+        x: assignment.position,
+        y,
+        width: context.width,
+        renderDepth: context.renderDepth,
+        side,
+        layer,
+        positionZone: context.positionZone,
+        positionSource,
+        sidePositionSources: {
+          left: context.positionResolution.faceSources.left,
+          right: context.positionResolution.faceSources.right,
+        },
+        positionDepth: context.positionDepth,
       }),
     );
+    bars.push(...placements);
+    layerFacts.push({
+      step: layer.step,
+      count,
+      dia: layer.dia,
+      y,
+      xPositions,
+      positionSource,
+    });
+    previousLayer = layer;
+    previousY = y;
   }
-  return bars;
+
+  return { bars, layers: layerFacts, unresolved };
 }
 
 /**
- * 腹筋を組み立てる
- *
- * STBの本数は左右合計のため、段数 = 本数/2 として上端筋〜下端筋の間へ
- * 等間隔に配置し、各段の左右（側面のdt位置）に1本ずつ置く。
- * 本数が奇数の場合は段数を四捨五入するため、生成本数がSTBの値と1本ずれる
- * （想定配置なので許容する）。
- * @param {Object} webBar - {count, dia}
- * @param {Object} context - 断面コンテキスト
- * @returns {Array<{u:number, v:number, dia:number}>} 腹筋芯の配列
+ * 解決済み腹筋を左右面へ展開する。
+ * ST-Bridgeの N_web は断面全体の本数なので、偶数本を左右対向ペアへ分ける。
+ * 奇数本は左右への割付情報が無いため、推定せず unresolved とする。
  */
-function buildWebBars(webBar, context) {
-  const count = webBar?.count || 0;
-  if (count <= 0) return [];
+function buildWebBars(webResolution, context) {
+  if (webResolution?.status !== 'resolved') return { bars: [], unresolved: [] };
+  const webBar = webResolution.value;
+  const count = Number(webBar?.count) || 0;
+  if (count <= 0 || !webBar?.dia) return { bars: [], unresolved: [] };
+  if (!Number.isInteger(count) || count % 2 !== 0) {
+    return { bars: [], unresolved: [`web-bar-count-not-pairable:${count}`] };
+  }
 
-  const { width, topV, bottomV, stirrupOuter, coverMm, defaultWebDia } = context;
-  const diaMm = barDiameterMm(webBar.dia || defaultWebDia, barDiameterMm(defaultWebDia));
-  const outerMm = barOuterDiameterMm(webBar.dia || defaultWebDia, diaMm);
+  const { width, topV, bottomV, stirrupOuter, coverMm, positionZone } = context;
+  const diaName = webBar.dia;
+  const diaMm = barDiameterMm(diaName, 0);
+  if (!(diaMm > 0)) return { bars: [], unresolved: ['web-bar-invalid-diameter'] };
+  const outerMm = barOuterDiameterMm(diaName, diaMm);
   const halfSpan = width / 2 - (coverMm + stirrupOuter + outerMm / 2);
-  if (halfSpan < 0) return [];
+  if (halfSpan < 0) return { bars: [], unresolved: ['web-bar-invalid-horizontal-span'] };
 
-  const layerCount = Math.max(1, Math.round(count / 2));
+  const levelCount = count / 2;
   const bars = [];
-  for (let i = 1; i <= layerCount; i++) {
-    const v = topV + ((bottomV - topV) * i) / (layerCount + 1);
+  for (let i = 1; i <= levelCount; i += 1) {
+    const v = topV + ((bottomV - topV) * i) / (levelCount + 1);
     bars.push(
-      { u: -halfSpan, v, dia: diaMm, role: 'web', grade: webBar.grade || null },
-      { u: halfSpan, v, dia: diaMm, role: 'web', grade: webBar.grade || null },
+      {
+        u: -halfSpan,
+        v,
+        dia: diaMm,
+        diaName,
+        role: 'web',
+        layer: null,
+        grade: webBar.grade || null,
+        positionZone,
+        positionSource: webResolution.source,
+      },
+      {
+        u: halfSpan,
+        v,
+        dia: diaMm,
+        diaName,
+        role: 'web',
+        layer: null,
+        grade: webBar.grade || null,
+        positionZone,
+        positionSource: webResolution.source,
+      },
     );
   }
-  return bars;
+  return { bars, unresolved: [] };
 }
 
-/**
- * 断面の1位置分の鉄筋を組み立てる
- * @param {Object} position - positions[key]
- * @param {Object} fallbackCover - 断面共通のかぶり
- * @param {Object} options - {coverMm} 上書き設定
- * @param {number} depth - 代表梁せい [mm]（メッシュの天端基準と揃えるため断面共通）
- * @returns {{bars:Array, estimated:boolean, coverMm:number}|null} 位置ごとの配置
- */
-function buildPositionBars(position, fallbackCover, options, depth) {
-  const width = position?.width || 0;
-  if (width <= 0 || depth <= 0) return null;
+function buildPositionBars(position, fallbackCover, options, renderDepth, positionZone) {
+  const width = Number(position?.width) || 0;
+  const positionDepth = Number(position?.depth) || renderDepth;
+  if (width <= 0 || positionDepth <= 0 || renderDepth <= 0) return null;
 
   const rules = BEAM_REBAR_PLACEMENT_RULES;
-  const cover = position.cover || fallbackCover || {};
-  const resolveCover = (value) => options.coverMm ?? value ?? rules.defaultCoverMm;
-  const coverTop = resolveCover(cover.top);
-  const coverBottom = resolveCover(cover.bottom);
-  const coverSide = resolveCover(cover.left ?? cover.right);
-
+  const explicitCoverOverride = Number.isFinite(Number(options.coverMm))
+    ? Number(options.coverMm)
+    : null;
   const stirrupDiaName = position.stirrup?.dia || rules.defaultStirrupDia;
   const stirrupOuter = barOuterDiameterMm(stirrupDiaName, barDiameterMm(rules.defaultStirrupDia));
+  const positionResolution = resolveBeamFirstLayerFaces({
+    positionData: position,
+    fallbackCover,
+    fallbackFaces: explicitCoverOverride === null ? defaultMainFaces() : null,
+    fallbackSource: 'compatibility-2d-schedule',
+    useSourceCover: explicitCoverOverride === null,
+    fallbackCoverMm: explicitCoverOverride,
+    allowFallbackWhenNotApplicable: false,
+  });
 
+  const mainContext = {
+    width,
+    positionDepth,
+    renderDepth,
+    positionZone,
+    positionResolution,
+  };
+  const top = buildResolvedSideBars(position.topBar, 'TOP', mainContext);
+  const bottom = buildResolvedSideBars(position.bottomBar, 'BOTTOM', mainContext);
+  const mainBars = [...top.bars, ...bottom.bars];
+
+  const compatibilityCover = position.cover || fallbackCover || {};
+  const resolveCover = (value) => explicitCoverOverride ?? value ?? rules.defaultCoverMm;
+  const coverTop = resolveCover(compatibilityCover.top);
+  const coverBottom = resolveCover(compatibilityCover.bottom);
+  const coverSide = resolveCover(compatibilityCover.left ?? compatibilityCover.right);
   const topDiaName = position.topBar?.dia || rules.defaultMainBarDia;
   const bottomDiaName = position.bottomBar?.dia || rules.defaultMainBarDia;
   const topOuter = barOuterDiameterMm(topDiaName, barDiameterMm(rules.defaultMainBarDia));
 
-  const shared = {
+  const topV = top.bars.length
+    ? Math.max(...top.bars.map((bar) => bar.v))
+    : renderDepth / 2 - (coverTop + stirrupOuter);
+  const bottomV = bottom.bars.length
+    ? Math.min(...bottom.bars.map((bar) => bar.v))
+    : renderDepth / 2 - (positionDepth - (coverBottom + stirrupOuter));
+  const webResolution = resolveBeamWebBar(position, options.auxiliaryPolicy);
+  const webBuild = buildWebBars(webResolution, {
     width,
-    depth,
+    topV,
+    bottomV,
     stirrupOuter,
-    coverSide,
-    defaultDia: rules.defaultMainBarDia,
-  };
-
-  const topBars = buildSideBars(position.topBar, {
-    ...shared,
-    coverMm: coverTop,
-    isTop: true,
+    coverMm: coverSide,
+    positionZone,
   });
-  const bottomBars = buildSideBars(position.bottomBar, {
-    ...shared,
-    coverMm: coverBottom,
-    isTop: false,
-  });
+  const webBars = webBuild.bars;
 
-  const bars = [...topBars, ...bottomBars];
-
-  // 腹筋は上端筋1段目〜下端筋1段目の間へ入れる
-  const topV = topBars.length
-    ? Math.max(...topBars.map((bar) => bar.v))
-    : depth / 2 - (coverTop + stirrupOuter);
-  const bottomV = bottomBars.length
-    ? Math.min(...bottomBars.map((bar) => bar.v))
-    : -depth / 2 + (coverBottom + stirrupOuter);
-  bars.push(
-    ...buildWebBars(position.webBar, {
-      width,
-      topV,
-      bottomV,
-      stirrupOuter,
-      coverMm: coverSide,
-      defaultWebDia: rules.defaultWebBarDia,
-    }),
-  );
-
+  const bars = [...mainBars, ...webBars];
   if (bars.length === 0) return null;
+
+  const unresolved = [
+    ...positionResolution.unresolved,
+    ...top.unresolved,
+    ...bottom.unresolved,
+    ...(webResolution?.status === 'unresolved' ? webResolution.unresolved : []),
+    ...webBuild.unresolved,
+  ];
+  const estimated =
+    unresolved.length > 0 ||
+    Object.values(positionResolution.faceSources).some(
+      (source) => source !== 'stb-center' && source !== 'stb-cover',
+    ) ||
+    [...top.layers, ...bottom.layers].some(
+      (layer) => layer.positionSource === 'standard-table-2-4',
+    ) ||
+    (webResolution?.status === 'resolved' &&
+      !['stb-direct', 'stb-section', 'stb-apply-default'].includes(webResolution.source));
 
   return {
     bars,
-    estimated: true,
+    mainBars,
+    webBars,
+    widthMm: width,
+    firstLayerFacesMm: {
+      left: Number.isFinite(positionResolution.faces.left) ? positionResolution.faces.left : null,
+      right: Number.isFinite(positionResolution.faces.right)
+        ? positionResolution.faces.right
+        : null,
+      top: Number.isFinite(positionResolution.faces.top) ? positionResolution.faces.top : null,
+      bottom: Number.isFinite(positionResolution.faces.bottom)
+        ? positionResolution.faces.bottom
+        : null,
+    },
+    stirrupOuterMm: stirrupOuter,
+    webResolution,
+    topLayers: top.layers,
+    bottomLayers: bottom.layers,
+    positionZone,
+    positionDepthMm: positionDepth,
+    positionSources: positionResolution.faceSources,
+    unresolved,
+    estimated,
     coverMm: coverTop,
     dt: {
-      top: coverTop + stirrupOuter + topOuter / 2,
-      side: resolveDt(null, coverSide, stirrupOuter, topOuter).value,
+      top: Number.isFinite(positionResolution.faces.top)
+        ? positionResolution.faces.top
+        : coverTop + stirrupOuter + topOuter / 2,
+      side: Number.isFinite(positionResolution.faces.left)
+        ? positionResolution.faces.left
+        : resolveDt(null, coverSide, stirrupOuter, topOuter).value,
     },
     mainDia: topDiaName,
     bottomDia: bottomDiaName,
@@ -221,29 +363,16 @@ function buildPositionBars(position, fallbackCover, options, depth) {
   };
 }
 
-/**
- * RC梁断面1つ分の主筋配置を算定する
- *
- * @param {Object} sectionDetail - extractRcBeamSectionDetail の結果
- * @param {Object} [options] - 上書き設定
- * @param {number} [options.coverMm] - かぶり厚さの上書き [mm]
- * @returns {Object|null} 配置結果。算定できない場合は null
- *   {kind, shape, segments, positionPattern, coverMm, mainDia, stirrupDia, estimated}
- */
 export function computeBeamRebarSectionLayout(sectionDetail, options = {}) {
   const keys = orderedPositionKeys(sectionDetail);
   if (keys.length === 0) return null;
 
-  // 梁は天端基準で1つの押し出し断面として描かれるため、鉛直位置の基準となる
-  // 梁せいは断面共通の代表値（先頭位置）を使う。
-  // RC梁のメッシュ生成側（viewer/geometry/generators/ProfileBasedBeamGenerator.js）が
-  // 単一断面の押し出しで描いていることが前提。ビューアがせい変化に対応した際は
-  // ここも区間ごとのせいへ追従させる必要がある。
-  const depth = sectionDetail.positions[keys[0]]?.depth || 0;
-  if (depth <= 0) return null;
+  const renderDepth = Number(sectionDetail.positions[keys[0]]?.depth) || 0;
+  if (renderDepth <= 0) return null;
 
   const ranges = resolveSpanRanges(keys);
   const segments = [];
+  const positionFacts = {};
   let meta = null;
 
   for (const { key, startRatio, endRatio } of ranges) {
@@ -251,10 +380,17 @@ export function computeBeamRebarSectionLayout(sectionDetail, options = {}) {
       sectionDetail.positions[key],
       sectionDetail.cover,
       options,
-      depth,
+      renderDepth,
+      key,
     );
     if (!built) continue;
-    segments.push(createSegment(startRatio, endRatio, built.bars));
+    const segment = createSegment(startRatio, endRatio, built.bars);
+    segment.positionZone = key;
+    segment.positionDepthMm = built.positionDepthMm;
+    segment.positionSources = built.positionSources;
+    segment.unresolved = built.unresolved;
+    segments.push(segment);
+    positionFacts[key] = built;
     meta = meta || built;
   }
 
@@ -263,8 +399,9 @@ export function computeBeamRebarSectionLayout(sectionDetail, options = {}) {
   return {
     kind: 'beamMain',
     shape: 'RECTANGLE',
-    depth,
+    depth: renderDepth,
     segments,
+    positionFacts,
     sectionName: sectionDetail.name || null,
     concreteStrength: sectionDetail.concrete?.strength || null,
     positionPattern: sectionDetail.positionPattern || 'SAME',
@@ -272,32 +409,30 @@ export function computeBeamRebarSectionLayout(sectionDetail, options = {}) {
     dt: meta.dt,
     mainDia: meta.mainDia,
     stirrupDia: meta.stirrupDia,
-    estimated: true,
+    estimated: Object.values(positionFacts).some((fact) => fact.estimated),
+    unresolved: Object.values(positionFacts).flatMap((fact) =>
+      fact.unresolved.map((reason) => `${fact.positionZone}:${reason}`),
+    ),
   };
 }
 
-/**
- * STB文書からRC梁断面ID → 主筋配置のマップを作る
- *
- * 大梁と小梁は断面IDの採番空間が独立しているため、既存の
- * `girderSections` / `beamSections` と同様にマップを分けて返す。
- * @param {Document} xmlDoc - STB XMLドキュメント
- * @param {Object} [options] - computeBeamRebarSectionLayout に渡す設定
- * @returns {{girder: Map<string, Object>, beam: Map<string, Object>}} 断面ID → 配置結果
- */
 export function buildBeamRebarLayoutMaps(xmlDoc, options = {}) {
   const girder = new Map();
   const beam = new Map();
   if (!xmlDoc) return { girder, beam };
+  const auxiliaryPolicy = resolveBeamAuxiliaryApplyPolicy(xmlDoc);
+  const resolvedOptions = { ...options, auxiliaryPolicy };
+  const supportFacts =
+    options.includeSupportFacts === true ? buildSmallBeamSupportFacts(xmlDoc) : undefined;
 
   for (const tagName of ['StbSecGirder_RC', 'StbSecBeam_RC']) {
     for (const element of querySelectorAll(xmlDoc, tagName)) {
       const detail = extractRcBeamSectionDetail(element);
       if (!detail?.id) continue;
-      const layout = computeBeamRebarSectionLayout(detail, options);
+      const layout = computeBeamRebarSectionLayout(detail, resolvedOptions);
       if (!layout) continue;
       (isGirderSection(element) ? girder : beam).set(detail.id, layout);
     }
   }
-  return { girder, beam };
+  return supportFacts ? { girder, beam, supportFacts } : { girder, beam };
 }

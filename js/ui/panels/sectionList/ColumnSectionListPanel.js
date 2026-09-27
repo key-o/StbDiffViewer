@@ -14,7 +14,7 @@ import { exportColumnSectionListToDxf } from './SectionListDxfExporter.js';
 import {
   BASELINE_COLUMN_COVER_FACES,
   normalizeColumnCoverFaces,
-} from './columnSectionCover.js';
+} from '../../../components/rcColumnVisual/columnSectionCover.js';
 import { createLogger } from '../../../utils/logger.js';
 
 const log = createLogger('ui/ColumnSectionListPanel');

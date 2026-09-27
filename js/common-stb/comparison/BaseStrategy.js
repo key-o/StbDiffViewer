@@ -62,6 +62,22 @@ function createAttributeMismatchPair(dataA, dataB, attributeComparison = {}) {
   };
 }
 
+function safeStringify(value) {
+  try {
+    return JSON.stringify(value) ?? '';
+  } catch (error) {
+    return '';
+  }
+}
+
+function compareByDeterministicSignature(itemA, itemB) {
+  const compareResult = String(itemA).localeCompare(String(itemB));
+  if (compareResult !== 0) {
+    return compareResult;
+  }
+  return 0;
+}
+
 export class BaseStrategy {
   /**
    * 戦略名を取得
@@ -133,7 +149,10 @@ export class BasicStrategy extends BaseStrategy {
     for (const elementA of elementsA) {
       const { key, data } = keyExtractor(elementA, nodeMapA);
       if (key !== null) {
-        keysA.set(key, data);
+        if (!keysA.has(key)) {
+          keysA.set(key, []);
+        }
+        keysA.get(key).push(data);
       } else {
         nullKeyCountA++;
         if (classifyNullKeysAsOnly && data !== null) {
@@ -145,7 +164,10 @@ export class BasicStrategy extends BaseStrategy {
     for (const elementB of elementsB) {
       const { key, data } = keyExtractor(elementB, nodeMapB);
       if (key !== null) {
-        keysB.set(key, data);
+        if (!keysB.has(key)) {
+          keysB.set(key, []);
+        }
+        keysB.get(key).push(data);
       } else {
         nullKeyCountB++;
         if (classifyNullKeysAsOnly && data !== null) {
@@ -161,9 +183,103 @@ export class BasicStrategy extends BaseStrategy {
       );
     }
 
-    for (const [key, dataAItem] of keysA.entries()) {
-      if (keysB.has(key)) {
-        const dataBItem = keysB.get(key);
+    for (const [key, dataAList] of keysA.entries()) {
+      const dataBList = keysB.get(key) || [];
+
+      if (attributeComparator && dataAList.length > 0 && dataBList.length > 0) {
+        const candidateMatches = [];
+
+        if (dataAList.length === 1 && dataBList.length === 1) {
+          const attributeComparison = evaluateAttributeComparator(
+            attributeComparator,
+            dataAList[0],
+            dataBList[0],
+          );
+          if (!attributeComparison.matches) {
+            mismatch.push(
+              createAttributeMismatchPair(dataAList[0], dataBList[0], attributeComparison),
+            );
+          } else {
+            matched.push({ dataA: dataAList[0], dataB: dataBList[0] });
+          }
+
+          keysB.delete(key);
+          continue;
+        }
+
+        for (let aIndex = 0; aIndex < dataAList.length; aIndex += 1) {
+          for (let bIndex = 0; bIndex < dataBList.length; bIndex += 1) {
+            const attributeComparison = evaluateAttributeComparator(
+              attributeComparator,
+              dataAList[aIndex],
+              dataBList[bIndex],
+            );
+            if (attributeComparison.matches) {
+              candidateMatches.push({
+                aIndex,
+                bIndex,
+                aLabel: safeStringify(dataAList[aIndex]),
+                bLabel: safeStringify(dataBList[bIndex]),
+              });
+            }
+          }
+        }
+
+        const matchedA = new Array(dataAList.length).fill(false);
+        const matchedB = new Array(dataBList.length).fill(false);
+
+        candidateMatches.sort((left, right) => {
+          const leftA = left.aLabel;
+          const rightA = right.aLabel;
+          const aCompare = compareByDeterministicSignature(leftA, rightA);
+          if (aCompare !== 0) {
+            return aCompare;
+          }
+
+          const leftB = left.bLabel;
+          const rightB = right.bLabel;
+          const bCompare = compareByDeterministicSignature(leftB, rightB);
+          if (bCompare !== 0) {
+            return bCompare;
+          }
+
+          return left.aIndex - right.aIndex || left.bIndex - right.bIndex;
+        });
+
+        for (const candidate of candidateMatches) {
+          if (matchedA[candidate.aIndex] || matchedB[candidate.bIndex]) {
+            continue;
+          }
+
+          matchedA[candidate.aIndex] = true;
+          matchedB[candidate.bIndex] = true;
+          matched.push({
+            dataA: dataAList[candidate.aIndex],
+            dataB: dataBList[candidate.bIndex],
+          });
+        }
+
+        dataAList.forEach((dataAItem, index) => {
+          if (!matchedA[index]) {
+            onlyA.push(dataAItem);
+          }
+        });
+        dataBList.forEach((dataBItem, index) => {
+          if (!matchedB[index]) {
+            onlyB.push(dataBItem);
+          }
+        });
+        keysB.delete(key);
+        continue;
+      }
+
+      const remainingDataA = [...dataAList];
+      const remainingDataB = [...(dataBList || [])];
+
+      while (remainingDataA.length > 0 && remainingDataB.length > 0) {
+        const dataBItem = remainingDataB.shift();
+        const dataAItem = remainingDataA.shift();
+
         const attributeComparison = evaluateAttributeComparator(
           attributeComparator,
           dataAItem,
@@ -174,13 +290,17 @@ export class BasicStrategy extends BaseStrategy {
         } else {
           matched.push({ dataA: dataAItem, dataB: dataBItem });
         }
-        keysB.delete(key);
-      } else {
-        onlyA.push(dataAItem);
       }
+
+      onlyA.push(...remainingDataA);
+      onlyB.push(...remainingDataB);
+      keysB.delete(key);
     }
 
-    onlyB.push(...keysB.values());
+    for (const remainingDataB of keysB.values()) {
+      onlyB.push(...remainingDataB);
+    }
+
     return { matched, mismatch, onlyA, onlyB };
   }
 

@@ -10,10 +10,7 @@ export {
   ConfiguredRcColumnVisualRenderer,
   default,
 } from './ConfiguredRcColumnVisualRenderer.js';
-export {
-  buildColumnScheduleGeometry,
-  parseColumnBarDiameterMm,
-} from './columnScheduleModel.js';
+export { buildColumnScheduleGeometry, parseColumnBarDiameterMm } from './columnScheduleModel.js';
 export {
   REBAR_SYMBOLS,
   addBarSymbolDefs,

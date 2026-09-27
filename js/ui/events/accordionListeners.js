@@ -60,12 +60,16 @@ function handleAccordionToggle(event) {
     content.classList.remove('collapsed');
     content.removeAttribute('inert');
     header.classList.remove('collapsed');
+    header.setAttribute('aria-expanded', 'true');
+    content.setAttribute('aria-hidden', 'false');
     logger.info(`${LogCategory.EVENT} アコーディオン展開: ${targetId}`);
   } else {
     // Collapse
     content.classList.add('collapsed');
     content.setAttribute('inert', '');
     header.classList.add('collapsed');
+    header.setAttribute('aria-expanded', 'false');
+    content.setAttribute('aria-hidden', 'true');
     logger.info(`${LogCategory.EVENT} アコーディオン折畳: ${targetId}`);
   }
 
@@ -94,10 +98,14 @@ function initializeAccordionStates() {
       content.classList.remove('collapsed');
       content.removeAttribute('inert');
       header.classList.remove('collapsed');
+      header.setAttribute('aria-expanded', 'true');
+      content.setAttribute('aria-hidden', 'false');
     } else {
       content.classList.add('collapsed');
       content.setAttribute('inert', '');
       header.classList.add('collapsed');
+      header.setAttribute('aria-expanded', 'false');
+      content.setAttribute('aria-hidden', 'true');
     }
   });
 }
@@ -133,8 +141,12 @@ export function expandAllAccordions() {
   contents.forEach((content) => {
     content.classList.remove('collapsed');
     content.removeAttribute('inert');
+    content.setAttribute('aria-hidden', 'false');
   });
-  headers.forEach((header) => header.classList.remove('collapsed'));
+  headers.forEach((header) => {
+    header.classList.remove('collapsed');
+    header.setAttribute('aria-expanded', 'true');
+  });
 
   // Save states
   headers.forEach((header) => {
@@ -155,8 +167,12 @@ export function collapseAllAccordions() {
   contents.forEach((content) => {
     content.classList.add('collapsed');
     content.setAttribute('inert', '');
+    content.setAttribute('aria-hidden', 'true');
   });
-  headers.forEach((header) => header.classList.add('collapsed'));
+  headers.forEach((header) => {
+    header.classList.add('collapsed');
+    header.setAttribute('aria-expanded', 'false');
+  });
 
   // Save states
   headers.forEach((header) => {

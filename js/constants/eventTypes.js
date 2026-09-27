@@ -266,6 +266,8 @@ export const EditEvents = {
   EDIT_STARTED: 'edit:started',
   /** 属性値が変更された */
   ATTRIBUTE_CHANGED: 'edit:attributeChanged',
+  /** Working Document の内容が編集操作で更新された */
+  WORKING_DOCUMENT_CHANGED: 'edit:workingDocumentChanged',
   /** 編集起因の再比較が完了した（ペイロード: { changedElementTypes: string[] }） */
   RECOMPARISON_COMPLETED: 'edit:recomparisonCompleted',
   /** 編集がキャンセルされた */
@@ -332,8 +334,12 @@ export const MeasurementEvents = {
   FIRST_POINT_PICKED: 'measurement:firstPointPicked',
   /** 測定が完了した */
   MEASUREMENT_COMPLETED: 'measurement:completed',
+  /** 測定削除が要求された（描画サーフェス共通） */
+  DELETE_REQUESTED: 'measurement:deleteRequested',
   /** 測定が個別削除された */
   MEASUREMENT_DELETED: 'measurement:deleted',
+  /** 2点選択シーケンスを1点目待ちへ戻す */
+  SEQUENCE_RESET: 'measurement:sequenceReset',
   /** 全測定がクリアされた */
   ALL_CLEARED: 'measurement:allCleared',
 };
@@ -358,6 +364,8 @@ export const FinalizationEvents = {
 export const InteractionEvents = {
   /** 要素情報を表示 */
   DISPLAY_ELEMENT_INFO: 'interaction:displayElementInfo',
+  /** 選択された鉄筋ジオメトリの情報を表示 */
+  DISPLAY_REBAR_INFO: 'interaction:displayRebarInfo',
   /** 複数選択サマリー情報を表示 */
   DISPLAY_MULTI_SELECTION_INFO: 'interaction:displayMultiSelectionInfo',
   /** ツリーで要素を選択 */

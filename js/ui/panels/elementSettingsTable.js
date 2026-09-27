@@ -8,14 +8,18 @@ import {
   STRUCTURAL_SYSTEM_ELEMENT_TYPES,
   STRUCTURAL_SYSTEM_LABELS,
 } from '../../constants/structuralSystems.js';
+import { appendRebarDiameterSettingsRows } from './rebarDiameterSettingsRows.js';
 
 const ELEMENT_GROUP_SETTINGS = [
   {
     id: 'WallGroup',
+    type: 'WallGroup',
     label: '壁 (StbWall)',
     jpName: '壁',
     childTypes: ['ShearWall', 'Wall'],
     displayId: 'toggleWallGroupDisplay',
+    rebarType: 'checkbox',
+    rebarId: 'toggleWallRebarDisplay',
   },
 ];
 
@@ -70,6 +74,8 @@ const ELEMENT_SETTINGS = [
     displayId: null,
     solidId: 'toggleColumnView',
     solidName: 'columnViewMode',
+    rebarType: 'checkbox',
+    rebarId: 'toggleColumnRebarDisplay',
     defaultVisible: true,
     defaultSolid: true,
     defaultLabel: false,
@@ -82,6 +88,8 @@ const ELEMENT_SETTINGS = [
     displayId: null,
     solidId: 'toggleGirderView',
     solidName: 'girderViewMode',
+    rebarType: 'checkbox',
+    rebarId: 'toggleGirderRebarDisplay',
     defaultVisible: true,
     defaultSolid: true,
     defaultLabel: false,
@@ -94,6 +102,8 @@ const ELEMENT_SETTINGS = [
     displayId: null,
     solidId: 'toggleBeam3DView',
     solidName: 'beam3DViewMode',
+    rebarType: 'checkbox',
+    rebarId: 'toggleBeamRebarDisplay',
     defaultVisible: true,
     defaultSolid: true,
     defaultLabel: false,
@@ -130,6 +140,8 @@ const ELEMENT_SETTINGS = [
     displayId: 'toggleSlabView',
     solidId: 'toggleSlab3DView',
     solidName: 'slab3DViewMode',
+    rebarType: 'checkbox',
+    rebarId: 'toggleSlabRebarDisplay',
     defaultVisible: true,
     defaultSolid: true,
     defaultLabel: false,
@@ -190,6 +202,8 @@ const ELEMENT_SETTINGS = [
     displayId: 'togglePileView',
     solidId: 'togglePile3DView',
     solidName: 'pile3DViewMode',
+    rebarType: 'checkbox',
+    rebarId: 'togglePileRebarDisplay',
     defaultVisible: true,
     defaultSolid: true,
     defaultLabel: false,
@@ -202,6 +216,8 @@ const ELEMENT_SETTINGS = [
     displayId: 'toggleFootingView',
     solidId: null,
     solidName: null,
+    rebarType: 'checkbox',
+    rebarId: 'toggleFootingRebarDisplay',
     defaultVisible: true,
     defaultSolid: true,
     defaultLabel: false,
@@ -214,6 +230,8 @@ const ELEMENT_SETTINGS = [
     displayId: 'toggleStripFootingView',
     solidId: 'toggleStripFooting3DView',
     solidName: 'stripFooting3DViewMode',
+    rebarType: 'checkbox',
+    rebarId: 'toggleStripFootingRebarDisplay',
     defaultVisible: false,
     defaultSolid: false,
     defaultLabel: false,
@@ -322,6 +340,25 @@ function createSolidCell(setting) {
   return td;
 }
 
+function createRebarCell(setting) {
+  const td = document.createElement('td');
+  td.className = 'element-rebar-cell';
+
+  if (setting.rebarType !== 'checkbox') {
+    td.textContent = '-';
+    return td;
+  }
+
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.id = setting.rebarId;
+  input.name = 'rebarToggle';
+  input.value = setting.type;
+  input.title = `${setting.jpName}の鉄筋を表示`;
+  td.appendChild(input);
+  return td;
+}
+
 function createLabelCell(setting) {
   const td = document.createElement('td');
   const input = document.createElement('input');
@@ -377,6 +414,7 @@ function createElementGroupRow(group) {
   tr.appendChild(displayTd);
 
   tr.appendChild(createEmptyCell(''));
+  tr.appendChild(createRebarCell(group));
   tr.appendChild(createEmptyCell(''));
   tr.appendChild(createEmptyCell(''));
 
@@ -414,8 +452,8 @@ function createStructuralSystemRows(setting, systems) {
     displayTd.appendChild(input);
     subTr.appendChild(displayTd);
 
-    // 立体/ラベル/色は空セル
-    for (let i = 0; i < 3; i++) {
+    // 立体/鉄筋/ラベル/色は空セル
+    for (let i = 0; i < 4; i++) {
       subTr.appendChild(document.createElement('td'));
     }
 
@@ -455,6 +493,7 @@ function appendElementSettingRow(tbody, setting, options = {}) {
 
   tr.appendChild(createDisplayCell(setting));
   tr.appendChild(createSolidCell(setting));
+  tr.appendChild(createRebarCell(setting));
   tr.appendChild(createLabelCell(setting));
   tr.appendChild(createColorCell(setting));
 
@@ -469,9 +508,38 @@ function appendElementSettingRow(tbody, setting, options = {}) {
   }
 }
 
+function ensureRebarHeader(tbody) {
+  const headerRow = tbody.closest('table')?.querySelector('thead tr');
+  if (!headerRow || headerRow.querySelector('[data-element-settings-column="rebar"]')) return;
+
+  const th = document.createElement('th');
+  th.scope = 'col';
+  th.dataset.elementSettingsColumn = 'rebar';
+  th.textContent = '鉄筋';
+  th.title = 'RC部材の3D配筋をカテゴリ単位で表示';
+
+  const labelToggle = headerRow.querySelector('#masterToggleLabel');
+  const labelHeader = labelToggle?.closest('th');
+  if (labelHeader) headerRow.insertBefore(th, labelHeader);
+  else headerRow.appendChild(th);
+}
+
+function retireLegacyRebarVisibilityControls() {
+  const mainToggle = document.getElementById('toggleRebarDisplay');
+  const mainLabel = mainToggle?.closest('label');
+  if (mainLabel) mainLabel.hidden = true;
+
+  const hoopToggle = document.getElementById('toggleHoopDisplay');
+  const hoopControl = hoopToggle?.closest('.rebar-display-control');
+  if (hoopControl) hoopControl.hidden = true;
+}
+
 export function renderElementSettingsRows() {
   const tbody = document.getElementById('element-settings-body');
   if (!tbody) return;
+
+  ensureRebarHeader(tbody);
+  retireLegacyRebarVisibilityControls();
 
   const renderedGroups = new Set();
 
@@ -487,6 +555,8 @@ export function renderElementSettingsRows() {
       parentGroupId: parentGroup?.id || null,
     });
   }
+
+  appendRebarDiameterSettingsRows(tbody);
 
   // トグル展開/折りたたみのイベントリスナー
   setupStructuralSystemToggles();

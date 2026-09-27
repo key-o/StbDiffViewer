@@ -46,7 +46,7 @@ function generatePlacementWidthStyle(columns) {
  */
 function renderTypeCell(value, valueClass, statuses, elementType, criteria = null) {
   if (value <= 0) {
-    return '<td class="diff-cell-zero">0</td>';
+    return `<td class="${valueClass} diff-cell-zero">0</td>`;
   }
   if (statuses && elementType) {
     return `<td class="${valueClass} diff-clickable" title="クリックで3D表示を絞り込み"${filterClickAttrs(statuses, elementType, criteria)}>${value}</td>`;
@@ -62,7 +62,7 @@ function renderTypeCell(value, valueClass, statuses, elementType, criteria = nul
  */
 function renderTypeTotalCell(value, valueClass, statuses = null, criteria = null) {
   if (value <= 0) {
-    return '<td class="diff-cell-zero">0</td>';
+    return `<td class="${valueClass} diff-cell-zero">0</td>`;
   }
   if (statuses) {
     return `<td class="${valueClass} diff-clickable" title="クリックで3D表示を絞り込み"${filterClickAttrs(statuses, null, criteria)}>${value}</td>`;

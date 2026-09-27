@@ -7,7 +7,7 @@
  * @module ui/panels/element-info/addMemberForm/formState
  */
 
-import { getState } from '../../../../data/state/globalState.js';
+import editDocumentProvider from '../../../../app/editing/editDocumentProvider.js';
 import { MEMBER_SECTION_CONFIG } from './fieldDefs.js';
 
 export const formState = {
@@ -22,7 +22,7 @@ export function refreshModelData(elementType) {
 }
 
 function getNodeIds() {
-  const doc = getState('models.documentA');
+  const doc = editDocumentProvider.getActiveEditDocument();
   if (!doc) return [];
   const ids = [];
   for (const node of doc.querySelectorAll('StbNode')) {
@@ -55,12 +55,12 @@ export function structureForSectionTag(tagName) {
 }
 
 /**
- * documentA から指定部材タイプが参照可能な断面を取得する。
+ * active edit document から指定部材タイプが参照可能な断面を取得する。
  * @returns {Array<{id:string,tag:string,name:string,structure:string|null}>}
  */
 function getMemberSections(elementType) {
   const config = MEMBER_SECTION_CONFIG[elementType];
-  const doc = getState('models.documentA');
+  const doc = editDocumentProvider.getActiveEditDocument();
   if (!config || !doc) return [];
   const sections = doc.querySelector('StbSections');
   if (!sections) return [];

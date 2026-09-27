@@ -172,7 +172,10 @@ export function getColumnSchedulePositionModelWidth(
   sectionDimensionMm,
   profile = BASELINE_RC_SCHEDULE_PROFILE,
 ) {
-  const extra = schedulePaperMmToModelMm(profile?.layout?.columnPositionExtraPaperMm || 16, profile);
+  const extra = schedulePaperMmToModelMm(
+    profile?.layout?.columnPositionExtraPaperMm || 16,
+    profile,
+  );
   return Math.max(0, Number(sectionDimensionMm) || 0) + extra;
 }
 

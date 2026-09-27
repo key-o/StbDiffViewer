@@ -65,6 +65,115 @@ export class BaseSectionListRenderer {
   }
 
   /**
+   * 項目列付きのグリッドヘッダーを生成する。
+   * 柱・梁の断面リストで共通の固定列レイアウトを使用する。
+   * @param {Array<string>} symbols - 符号一覧
+   * @param {Object} options - 固定列幅
+   * @returns {HTMLElement} thead要素
+   */
+  renderLabeledGridHeader(symbols, { floorColumnWidth = 70, labelColumnWidth = 78 } = {}) {
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+
+    const thFloor = document.createElement('th');
+    thFloor.className = 'section-grid-header-floor';
+    thFloor.textContent = '階';
+    headerRow.appendChild(thFloor);
+
+    const thLabel = document.createElement('th');
+    thLabel.className = 'section-grid-header-row-label';
+    thLabel.textContent = '項目';
+    Object.assign(thLabel.style, {
+      position: 'sticky',
+      top: '0',
+      left: `${floorColumnWidth}px`,
+      zIndex: '19',
+      width: `${labelColumnWidth}px`,
+      minWidth: `${labelColumnWidth}px`,
+      boxSizing: 'border-box',
+      textAlign: 'center',
+      whiteSpace: 'nowrap',
+      background: 'var(--bg-tertiary, #e8e8e8)',
+      borderBottom: '2px solid var(--border-color, #999)',
+    });
+    headerRow.appendChild(thLabel);
+
+    symbols.forEach((symbol) => {
+      const thSymbol = document.createElement('th');
+      thSymbol.className = 'section-grid-header-symbol';
+      thSymbol.textContent = symbol;
+      headerRow.appendChild(thSymbol);
+    });
+
+    thead.appendChild(headerRow);
+    return thead;
+  }
+
+  /**
+   * 項目列付きのグリッド本体を生成する。
+   * 断面種別ごとのセル内容はサブクラスの描画メソッドへ委譲する。
+   * @param {Array<Object>} stories - 階一覧
+   * @param {Array<string>} symbols - 符号一覧
+   * @param {Map} grid - グリッドデータ
+   * @param {Object} options - 固定列幅
+   * @returns {HTMLElement} tbody要素
+   */
+  renderLabeledGridBody(
+    stories,
+    symbols,
+    grid,
+    { floorColumnWidth = 70, labelColumnWidth = 78 } = {},
+  ) {
+    const tbody = document.createElement('tbody');
+
+    stories.forEach((story) => {
+      const tr = document.createElement('tr');
+      const diagramHeight = this.getStoryDiagramHeight(story, symbols, grid);
+
+      const tdFloor = document.createElement('td');
+      tdFloor.className = 'section-grid-floor-cell';
+      tdFloor.textContent = story.name;
+      tr.appendChild(tdFloor);
+
+      const tdLabels = document.createElement('td');
+      tdLabels.className = 'section-grid-row-label-cell';
+      Object.assign(tdLabels.style, {
+        position: 'sticky',
+        left: `${floorColumnWidth}px`,
+        zIndex: '4',
+        width: `${labelColumnWidth}px`,
+        minWidth: `${labelColumnWidth}px`,
+        padding: '0',
+        boxSizing: 'border-box',
+        verticalAlign: 'top',
+        background: 'var(--bg-secondary, #f5f5f5)',
+      });
+      tdLabels.innerHTML = this.renderGridRowLabels(diagramHeight);
+      tr.appendChild(tdLabels);
+
+      symbols.forEach((symbol) => {
+        const tdSection = document.createElement('td');
+        tdSection.className = 'section-grid-section-cell';
+        tdSection.style.padding = '0';
+
+        const raw = this.getGridCellData(grid, story.id, symbol);
+        if (raw) {
+          tdSection.innerHTML = this.renderGridCell(raw, diagramHeight);
+        } else {
+          tdSection.innerHTML = this.renderEmptyGridCell(diagramHeight);
+          tdSection.classList.add('empty');
+        }
+
+        tr.appendChild(tdSection);
+      });
+
+      tbody.appendChild(tr);
+    });
+
+    return tbody;
+  }
+
+  /**
    * グリッド形式で断面リストテーブルをレンダリング
    * @param {Object} data - extractXxxSectionGridの出力
    * @param {HTMLElement} container - 描画先コンテナ
