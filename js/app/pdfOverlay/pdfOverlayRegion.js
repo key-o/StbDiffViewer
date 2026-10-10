@@ -1,5 +1,6 @@
 /** @fileoverview PDFページの選択領域とSTB平面図対応をPDF user-spaceで管理する。 */
 import { transformPoint } from '../../data/drawing/affine2d.js';
+import { planViewContextSnapshot } from '../../data/drawing/drawingModel.js';
 
 const REGION_SCHEMA_VERSION = 1;
 const COORDINATE_TOLERANCE = 1e-6;
@@ -164,7 +165,7 @@ export function createPdfRegionMapping({ pdfInfo, pageRender, region, drawing } 
     stb: {
       modelKey: drawing.source.modelKey,
       modelRevision: drawing.source.modelRevision,
-      view: JSON.parse(JSON.stringify(drawing.view)),
+      view: JSON.parse(JSON.stringify(planViewContextSnapshot(drawing.view))),
     },
   };
   mapping.key = JSON.stringify([
@@ -196,7 +197,8 @@ export function inspectPdfRegionMapping(mapping, { pdfInfo, pageRender, drawing 
     return stale('PDF_ROTATION_CHANGED');
   if (mapping.stb?.modelKey !== drawing?.source?.modelKey) return stale('MODEL_CHANGED');
   if (mapping.stb?.modelRevision !== drawing?.source?.modelRevision) return stale('STB_CHANGED');
-  if (!sameJson(mapping.stb?.view, drawing?.view)) return stale('STB_VIEW_CHANGED');
+  if (!sameJson(planViewContextSnapshot(mapping.stb?.view), planViewContextSnapshot(drawing?.view)))
+    return stale('STB_VIEW_CHANGED');
   try {
     const region = normalizePdfRegion(mapping.region, normalizeViewBox(pageRender.viewBox));
     if (!sameJson(region, mapping.region)) return stale('REGION_INVALID');

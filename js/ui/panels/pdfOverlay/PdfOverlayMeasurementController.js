@@ -6,6 +6,7 @@ import {
   areParallelDirections,
   createProjectedPlanMeasurement,
   findNearestDrawingSegment,
+  findNearestReferenceDrawingSegment,
 } from '../../../app/pdfOverlay/planMeasurement.js';
 import { showInfo, showWarning } from '../../common/toast.js';
 
@@ -120,6 +121,7 @@ export class PdfOverlayMeasurementController {
     this.panel = panel;
     this.active = false;
     this.firstPick = null;
+    this.hoverHit = null;
     this.measurements = [];
     this.nextId = 1;
     this.suppressNextStageClick = false;
@@ -140,9 +142,10 @@ export class PdfOverlayMeasurementController {
     eventBus.on(MeasurementEvents.MODE_EXITED, () => {
       this.active = false;
       this.firstPick = null;
-      this.measurements = [];
-      this.nextId = 1;
+      this.hoverHit = null;
       this.panel.e['pdf-overlay-stage']?.classList.remove('measurement-mode');
+      // 完了済み寸法はコマンド終了後も図面上に残す。
+      // 再度測定モードへ入った際もID・一覧を継続するため nextId も維持する。
       this.panel.renderOverlay();
     });
     eventBus.on(MeasurementEvents.DELETE_REQUESTED, ({ id } = {}) => {
@@ -154,8 +157,9 @@ export class PdfOverlayMeasurementController {
   }
 
   resetPendingSequence() {
-    if (!this.firstPick) return false;
+    if (!this.firstPick && !this.hoverHit) return false;
     this.firstPick = null;
+    this.hoverHit = null;
     this.panel.renderOverlay();
     return true;
   }
@@ -184,36 +188,161 @@ export class PdfOverlayMeasurementController {
   invalidateDrawing() {
     const ids = this.measurements.map((measurement) => measurement.id);
     this.firstPick = null;
+    this.hoverHit = null;
     this.measurements = [];
     this.nextId = 1;
     for (const id of ids) eventBus.emit(MeasurementEvents.MEASUREMENT_DELETED, { id });
     if (this.active) eventBus.emit(MeasurementEvents.SEQUENCE_RESET);
   }
 
+  invalidatePdfMeasurements() {
+    const removed = this.measurements.filter((measurement) => measurement.pageNumber != null);
+    if (!removed.length && !this.firstPick && !this.hoverHit) return false;
+
+    this.firstPick = null;
+    this.hoverHit = null;
+    this.measurements = this.measurements.filter((measurement) => measurement.pageNumber == null);
+    for (const measurement of removed)
+      eventBus.emit(MeasurementEvents.MEASUREMENT_DELETED, { id: measurement.id });
+    if (this.active) eventBus.emit(MeasurementEvents.SEQUENCE_RESET);
+    return true;
+  }
+
   findHit(event) {
-    return findNearestDrawingSegment({
-      drawing: this.panel.drawing,
-      modelToCss: this.panel.currentModelToCss,
-      cssPoint: this.panel.stagePoint(event),
-      tolerancePx: SNAP_TOLERANCE_PX,
+    const cssPoint = this.panel.stagePoint(event);
+    const stbHit = this.panel.drawing
+      ? findNearestDrawingSegment({
+          drawing: this.panel.drawing,
+          modelToCss: this.panel.currentModelToCss,
+          cssPoint,
+          tolerancePx: SNAP_TOLERANCE_PX,
+        })
+      : null;
+    const referenceHit =
+      this.panel.referenceDrawings?.length || 0
+        ? findNearestReferenceDrawingSegment({
+            referenceDrawings: this.panel.referenceDrawings,
+            referenceDisplaySettings: this.panel.referenceDisplaySettings || {},
+            modelToCss: this.panel.currentModelToCss,
+            cssPoint,
+            tolerancePx: SNAP_TOLERANCE_PX,
+            parallelToTangent: this.firstPick?.tangent || null,
+          })
+        : null;
+    if (!stbHit) return referenceHit;
+    if (!referenceHit) return stbHit;
+    return referenceHit.cssDistance < stbHit.cssDistance ? referenceHit : stbHit;
+  }
+
+  isDrawingMeasurementViewport() {
+    const mode = this.panel.viewportMode();
+    return mode === 'pdf' || mode === 'sheet';
+  }
+
+  resolveVisualRoot(svg) {
+    if (this.panel.viewportMode() !== 'sheet') return svg;
+    let overlay = svg.querySelector?.('.pdf-overlay-measurement-viewport') || null;
+    if (overlay) return overlay;
+
+    const width = Number(this.panel.sheetLayout?.previewWidthPx);
+    const height = Number(this.panel.sheetLayout?.previewHeightPx);
+    if (!(width > 0) || !(height > 0)) return svg;
+
+    const previewViewBox = this.panel.sheetLayout?.previewViewBox;
+    overlay = createSvg('svg', {
+      x: Number.isFinite(previewViewBox?.minX) ? previewViewBox.minX : 0,
+      y: Number.isFinite(previewViewBox?.minY) ? previewViewBox.minY : 0,
+      width: Number.isFinite(previewViewBox?.widthMm) ? previewViewBox.widthMm : '100%',
+      height: Number.isFinite(previewViewBox?.heightMm) ? previewViewBox.heightMm : '100%',
+      viewBox: `0 0 ${width} ${height}`,
+      preserveAspectRatio: 'none',
+      class: 'pdf-overlay-measurement-viewport',
     });
+    svg.append(overlay);
+    return overlay;
+  }
+
+  handleStagePointerMove(event) {
+    if (!this.active) return false;
+    if (
+      !this.isDrawingMeasurementViewport() ||
+      (!this.panel.drawing && !(this.panel.referenceDrawings?.length || 0)) ||
+      !this.panel.currentModelToCss ||
+      event?.target?.closest?.('.pdf-overlay-measurement-draggable')
+    ) {
+      this.hoverHit = null;
+      this.renderHoverPreview();
+      return true;
+    }
+
+    this.hoverHit = this.findHit(event);
+    this.renderHoverPreview();
+    return true;
+  }
+
+  handleStagePointerLeave() {
+    if (!this.hoverHit) return false;
+    this.hoverHit = null;
+    this.renderHoverPreview();
+    return true;
+  }
+
+  renderHoverPreview() {
+    const layer = this.panel.e?.['pdf-overlay-svg-layer'];
+    const svg = layer?.querySelector?.('svg');
+    if (!svg) return;
+    svg.querySelector?.('.pdf-overlay-measurement-hover')?.remove();
+    if (!this.active || !this.hoverHit || !this.panel.currentModelToCss) return;
+    const visualRoot = this.resolveVisualRoot(svg);
+    this.appendHoverVisual(visualRoot, this.hoverHit, this.panel.currentModelToCss);
+  }
+
+  appendHoverVisual(svg, hit, modelToCss) {
+    const secondPick = Boolean(this.firstPick);
+    const invalid = secondPick && !areParallelDirections(this.firstPick.tangent, hit.tangent);
+    const group = createSvg('g', {
+      class: [
+        'pdf-overlay-measurement-hover',
+        secondPick ? 'second-pick' : 'first-pick',
+        invalid ? 'invalid' : '',
+      ]
+        .filter(Boolean)
+        .join(' '),
+    });
+    const start = transformPoint(modelToCss, hit.segment.start);
+    const end = transformPoint(modelToCss, hit.segment.end);
+    const point = transformPoint(modelToCss, hit.point);
+
+    line(group, start, end, 'pdf-overlay-measurement-hover-line');
+    group.append(
+      createSvg('circle', {
+        cx: point[0],
+        cy: point[1],
+        r: 5,
+        class: 'pdf-overlay-measurement-hover-point',
+        'vector-effect': 'non-scaling-stroke',
+      }),
+    );
+    svg.append(group);
   }
 
   handleStageClick(event) {
     if (!this.active) return false;
 
     if (
-      this.panel.viewportMode() !== 'pdf' ||
-      !this.panel.drawing ||
+      !this.isDrawingMeasurementViewport() ||
+      (!this.panel.drawing && !(this.panel.referenceDrawings?.length || 0)) ||
       !this.panel.currentModelToCss
     ) {
-      showWarning('PDF照合表示でSTB図面を生成してから寸法測定してください。');
+      showWarning(
+        '簡易CADまたはDXF参照を表示してから寸法測定してください。PDFの読み込みは不要です。',
+      );
       return true;
     }
 
     const hit = this.findHit(event);
     if (!hit) {
-      showWarning('STB要素の線の近くをクリックしてください。');
+      showWarning('STBまたはDXF参照の図面線・円弧の近くをクリックしてください。');
       return true;
     }
 
@@ -224,47 +353,65 @@ export class PdfOverlayMeasurementController {
         reason: 'first-pick',
       });
       this.firstPick = hit;
-      const elementType = hit.ref?.elementType || null;
+      this.hoverHit = null;
+      const isReference = hit.sourceKind === 'dxf' || hit.ref?.kind === 'dxf-entity';
+      const elementType = isReference ? null : hit.ref?.elementType || null;
       eventBus.emit(MeasurementEvents.FIRST_POINT_PICKED, {
         point: [...hit.point],
         normal: [...hit.normal],
         surface: 'pdf-overlay',
         elementInfo: {
-          elementType,
-          elementLabel: elementType ? ELEMENT_LABELS[elementType] || elementType : null,
+          elementType: isReference ? `DXF:${hit.ref?.entityType || 'ENTITY'}` : elementType,
+          elementLabel: isReference
+            ? `DXF ${hit.ref?.entityType || 'ENTITY'}`
+            : elementType
+              ? ELEMENT_LABELS[elementType] || elementType
+              : null,
           elementName: hit.mark || null,
-          modelSide: hit.ref?.modelKey || null,
+          modelSide: isReference ? hit.ref?.documentId || null : hit.ref?.modelKey || null,
         },
       });
       this.panel.renderOverlay();
-      showInfo('1本目のSTB線を取得しました。2本目の線をクリックしてください。');
+      showInfo(
+        '1本目を取得しました。曲線はクリック位置の接線として扱います。2本目の平行線・平行接線をクリックしてください。',
+      );
       return true;
     }
 
     if (!areParallelDirections(this.firstPick.tangent, hit.tangent)) {
-      showWarning('平行なSTB線を選択してください。PDF図面の寸法測定は平行線間に限定しています。');
+      showWarning(
+        '平行な図面線・平行接線を選択してください。曲線はクリック位置の局所接線で判定します。',
+      );
       return true;
     }
 
     const projected = createProjectedPlanMeasurement(this.firstPick, hit);
     if (!projected) {
-      showWarning('1 mm未満のため測定を確定しません。別のSTB線を選択してください。');
+      showWarning('1 mm未満のため測定を確定しません。別の図面線を選択してください。');
       return true;
     }
 
+    const viewportMode = this.panel.viewportMode();
     const modelToPdf =
-      this.panel.pageRender?.cssToPdf && this.panel.currentModelToCss
+      viewportMode === 'pdf' && this.panel.pageRender?.cssToPdf && this.panel.currentModelToCss
         ? multiplyAffine(this.panel.pageRender.cssToPdf, this.panel.currentModelToCss)
         : null;
     const measurement = {
       ...projected,
       id: `${ID_PREFIX}${this.nextId++}`,
-      pageNumber: this.panel.pageRender?.pageNumber ?? null,
+      pageNumber: viewportMode === 'pdf' ? (this.panel.pageRender?.pageNumber ?? null) : null,
       modelToPdf,
       offsetModelMm: null,
     };
+    // Resolve the initial screen placement once; subsequent zoom/pan/DPR cannot change DXF intent.
+    if (viewportMode === 'sheet')
+      measurement.offsetModelMm = resolveMeasurementOffsetModelMm(
+        measurement,
+        this.panel.currentModelToCss,
+      );
     this.measurements.push(measurement);
     this.firstPick = null;
+    this.hoverHit = null;
 
     eventBus.emit(MeasurementEvents.MEASUREMENT_COMPLETED, {
       id: measurement.id,
@@ -288,25 +435,63 @@ export class PdfOverlayMeasurementController {
     return true;
   }
 
+  completedSheetMeasurements() {
+    return this.measurements
+      .filter((measurement) => measurement.pageNumber == null)
+      .map((measurement) => {
+        if (!Number.isFinite(measurement.offsetModelMm))
+          measurement.offsetModelMm = resolveMeasurementOffsetModelMm(
+            measurement,
+            this.panel.currentModelToCss,
+          );
+        return measurement;
+      });
+  }
+
+  appendSheetMeasurementControls(svg, measurement) {
+    const dimension = this.panel.sheetRenderPlan?.dimensions.find(
+      (candidate) => candidate.measurementId === measurement.id,
+    );
+    const compiled = dimension?.primitives.find((primitive) => primitive.role === 'dimension-line');
+    const target = [...svg.querySelectorAll('.pdf-overlay-measurement-draggable')].find(
+      (group) => group.getAttribute('data-measurement-id') === measurement.id,
+    );
+    if (!compiled || !target) return;
+    target.classList.toggle('is-inactive', !this.active);
+    const [start, end] = compiled.points.paper.map((point) =>
+      transformPoint(this.panel.sheetLayout.paperToCss, point),
+    );
+    line(target, start, end, 'pdf-overlay-measurement-hit');
+    this.bindMeasurementDrag(target, measurement, this.panel.currentModelToCss);
+  }
+
   appendVisuals(svg) {
     if (!svg || !this.panel.currentModelToCss) return;
-    if (!this.firstPick && this.measurements.length === 0) return;
+    if (!this.firstPick && this.measurements.length === 0 && !this.hoverHit) return;
 
     const pageNumber = this.panel.pageRender?.pageNumber ?? null;
     const visibleMeasurements = this.measurements.filter(
-      (measurement) => measurement.pageNumber == null || measurement.pageNumber === pageNumber,
+      (measurement) =>
+        measurement.pageNumber == null ||
+        (this.panel.viewportMode() !== 'sheet' && measurement.pageNumber === pageNumber),
     );
-    if (!this.firstPick && visibleMeasurements.length === 0) return;
+    if (!this.firstPick && visibleMeasurements.length === 0 && !this.hoverHit) return;
 
+    const visualRoot = this.resolveVisualRoot(svg);
     const group = createSvg('g', {
       class: 'pdf-overlay-measurements',
     });
 
-    for (const measurement of visibleMeasurements)
-      this.appendMeasurement(group, measurement, this.panel.currentModelToCss);
+    for (const measurement of visibleMeasurements) {
+      if (this.panel.viewportMode() === 'sheet')
+        this.appendSheetMeasurementControls(svg, measurement);
+      else this.appendMeasurement(group, measurement, this.panel.currentModelToCss);
+    }
     if (this.firstPick) this.appendFirstPick(group, this.firstPick, this.panel.currentModelToCss);
 
-    svg.append(group);
+    visualRoot.append(group);
+    if (this.active && this.hoverHit)
+      this.appendHoverVisual(visualRoot, this.hoverHit, this.panel.currentModelToCss);
   }
 
   appendFirstPick(group, hit, modelToCss) {
@@ -359,7 +544,7 @@ export class PdfOverlayMeasurementController {
     line(group, p2, dimEnd, 'pdf-overlay-measurement-extension');
 
     const draggable = createSvg('g', {
-      class: 'pdf-overlay-measurement-draggable',
+      class: 'pdf-overlay-measurement-draggable' + (this.active ? '' : ' is-inactive'),
       'data-measurement-id': measurement.id,
     });
     line(draggable, dimStart, dimEnd, 'pdf-overlay-measurement-hit');
@@ -401,11 +586,12 @@ export class PdfOverlayMeasurementController {
 
   bindMeasurementDrag(target, measurement, modelToCss) {
     target.addEventListener('click', (event) => {
+      if (!this.active) return;
       event.preventDefault();
       event.stopPropagation();
     });
     target.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0) return;
+      if (!this.active || event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
 

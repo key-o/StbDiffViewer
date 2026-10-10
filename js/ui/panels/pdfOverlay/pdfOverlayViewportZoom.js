@@ -37,6 +37,85 @@ export function sheetPreviewPxPerMm(viewZoom) {
 }
 
 /**
+ * 部材本体の中心をclient座標へ写像する。タグや引出線のbboxは含めない。
+ * getScreenCTMにより、A3の入れ子SVG・PDF配置・図面回転・表示倍率を一度だけ適用する。
+ */
+export function getPdfOverlayMemberClientCenter(member) {
+  const rawX = member?.getAttribute?.('data-member-center-x');
+  const rawY = member?.getAttribute?.('data-member-center-y');
+  if (rawX == null || rawY == null || rawX === '' || rawY === '') return null;
+  const x = Number(rawX);
+  const y = Number(rawY);
+  const matrix = member.getScreenCTM?.();
+  if (
+    !matrix ||
+    ![x, y, matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f].every(Number.isFinite) ||
+    Math.abs(matrix.a * matrix.d - matrix.b * matrix.c) < 1e-12
+  )
+    return null;
+  const point = [matrix.a * x + matrix.c * y + matrix.e, matrix.b * x + matrix.d * y + matrix.f];
+  return point.every(Number.isFinite) ? point : null;
+}
+
+function finiteRect(rect, label) {
+  if (!rect || ![rect.left, rect.top, rect.width, rect.height].every(Number.isFinite))
+    throw new TypeError(`${label}が不正です。`);
+  if (!(rect.width > 0) || !(rect.height > 0))
+    throw new RangeError(`${label}の幅と高さは正の値にしてください。`);
+  return rect;
+}
+
+function finitePoint(value, label) {
+  if (!Array.isArray(value) || value.length !== 2 || !value.every(Number.isFinite))
+    throw new TypeError(`${label}が不正です。`);
+  return value;
+}
+
+/**
+ * zoom前のカーソル位置をstage内の正規化座標として保存する。
+ * content originもzoom前の値を固定し、再描画時のscroll anchoringや一時的なlayout変化に依存しない。
+ */
+export function capturePdfOverlayZoomAnchor({
+  clientX,
+  clientY,
+  scrollLeft = 0,
+  scrollTop = 0,
+  scrollRect,
+  stageRect,
+} = {}) {
+  if (![clientX, clientY, scrollLeft, scrollTop].every(Number.isFinite))
+    throw new TypeError('ズーム基準位置が不正です。');
+  const viewport = finiteRect(scrollRect, 'スクロール領域');
+  const stage = finiteRect(stageRect, '図面領域');
+  return Object.freeze({
+    stageFraction: Object.freeze([
+      (clientX - stage.left) / stage.width,
+      (clientY - stage.top) / stage.height,
+    ]),
+    viewportPoint: Object.freeze([clientX - viewport.left, clientY - viewport.top]),
+    stageContentOrigin: Object.freeze([
+      stage.left - viewport.left + scrollLeft,
+      stage.top - viewport.top + scrollTop,
+    ]),
+  });
+}
+
+/**
+ * zoom後のstage寸法から、zoom前と同じstage点を同じviewport位置へ戻すscroll量を求める。
+ */
+export function resolvePdfOverlayZoomScroll(anchor, stageRect) {
+  if (!anchor || typeof anchor !== 'object') throw new TypeError('ズーム基準が不正です。');
+  const stageFraction = finitePoint(anchor.stageFraction, '図面内ズーム位置');
+  const viewportPoint = finitePoint(anchor.viewportPoint, 'viewport内ズーム位置');
+  const stageContentOrigin = finitePoint(anchor.stageContentOrigin, '図面content原点');
+  const stage = finiteRect(stageRect, '図面領域');
+  return Object.freeze({
+    left: stageContentOrigin[0] + stage.width * stageFraction[0] - viewportPoint[0],
+    top: stageContentOrigin[1] + stage.height * stageFraction[1] - viewportPoint[1],
+  });
+}
+
+/**
  * PDF照合を選んでいてもPDFページが未読込ならA3 sheetへフォールバックする。
  * STB単独表示も常にA3 sheetを使う。
  */

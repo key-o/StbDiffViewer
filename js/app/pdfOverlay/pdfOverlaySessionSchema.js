@@ -4,8 +4,21 @@ import {
   REGISTRATION_COORDINATE_UNITS,
   REGISTRATION_SCHEMA_VERSION,
 } from './registration.js';
+import {
+  DEFAULT_DRAWING_TAG_ORIENTATION_MODE,
+  DRAWING_DETAIL_TAG_TEMPLATE_VERSIONS,
+  DRAWING_TAG_TEMPLATES,
+  normalizeDrawingTagOrientationMode as normalizeDrawingTagOrientationModeConfig,
+} from '../../config/drawingTagTemplates.js';
+import { BUILTIN_TAG_FAMILIES } from '../../data/drawing/tags/tagFamilyRegistry.js';
+import { planViewContextSnapshot } from '../../data/drawing/drawingModel.js';
+import {
+  createEmptyTagFamilyState,
+  normalizeTagFamilyState,
+} from '../../data/drawing/tags/tagFamilyStore.js';
 
 export const PDF_OVERLAY_SESSION_SCHEMA_VERSION = 1;
+export const PDF_OVERLAY_TAG_PLACEMENT_SCHEMA_VERSION = 2;
 export const PDF_OVERLAY_SESSION_KIND = 'stb-diff-viewer.pdf-overlay-session';
 export const PDF_OVERLAY_REVIEW_STATES = Object.freeze(['unreviewed', 'confirmed', 'mismatch']);
 
@@ -20,12 +33,25 @@ const SESSION_KEYS = new Set([
   'selectedRegion',
   'regionMapping',
   'drawing',
+  'drawingRotationDeg',
+  'tagOrientationMode',
   'registration',
   'placement',
   'memberReviews',
   'drawingMemos',
+  'tagPlacements',
+  'tagFamilyState',
 ]);
-const REQUIRED_SESSION_KEYS = new Set([...SESSION_KEYS].filter((key) => key !== 'placement'));
+const REQUIRED_SESSION_KEYS = new Set(
+  [...SESSION_KEYS].filter(
+    (key) =>
+      key !== 'placement' &&
+      key !== 'tagPlacements' &&
+      key !== 'drawingRotationDeg' &&
+      key !== 'tagOrientationMode' &&
+      key !== 'tagFamilyState',
+  ),
+);
 
 export class SessionError extends Error {
   constructor(code, path, message) {
@@ -190,7 +216,7 @@ function normalizeView(value, path) {
   const view = cloneJson(assertRecord(value, path), path);
   if (view.type !== 'plan' || typeof view.storyId !== 'string' || !view.storyId.trim())
     fail('INVALID_STB_VIEW', path, 'STB drawing view must identify a plan and story.');
-  return view;
+  return cloneJson(planViewContextSnapshot(view), path);
 }
 
 export function normalizeDrawing(value, path = 'drawing') {
@@ -392,6 +418,30 @@ export function normalizeRegistration(value, path = 'registration') {
   };
 }
 
+export function normalizeDrawingRotationDeg(value = 0, path = 'drawingRotationDeg') {
+  if (!Number.isFinite(value))
+    fail('INVALID_DRAWING_ROTATION', path, 'Drawing rotation must be a finite number.');
+  const normalized = ((value % 360) + 360) % 360;
+  if (![0, 90, 180, 270].includes(normalized))
+    fail('INVALID_DRAWING_ROTATION', path, 'Drawing rotation must be 0, 90, 180, or 270 degrees.');
+  return normalized;
+}
+
+export function normalizeTagOrientationMode(
+  value = DEFAULT_DRAWING_TAG_ORIENTATION_MODE,
+  path = 'tagOrientationMode',
+) {
+  try {
+    return normalizeDrawingTagOrientationModeConfig(value);
+  } catch {
+    fail(
+      'INVALID_TAG_ORIENTATION_MODE',
+      path,
+      'Tag orientation mode must be follow-drawing, follow-member, or keep-screen-down.',
+    );
+  }
+}
+
 export function normalizePlacement(value, path = 'placement') {
   if (value == null) return null;
   assertRecord(value, path);
@@ -435,6 +485,104 @@ function normalizeIdentity(value, path) {
       'Member identity must be [modelKey, elementType, elementId].',
     );
   return value.map((part, index) => assertString(part, `${path}[${index}]`));
+}
+
+function normalizePair(value, path) {
+  if (!Array.isArray(value) || value.length !== 2)
+    fail('INVALID_POINT', path, `${path} must contain two coordinates.`);
+  value.forEach((coordinate, index) => assertFinite(coordinate, `${path}[${index}]`));
+  return [...value];
+}
+
+export function normalizeTagPlacement(
+  value,
+  index,
+  { tagFamilyState = createEmptyTagFamilyState() } = {},
+) {
+  const path = `tagPlacements[${index}]`;
+  assertRecord(value, path);
+  assertKeys(
+    value,
+    new Set([
+      'schemaVersion',
+      'identity',
+      'drawing',
+      'template',
+      'anchorModel',
+      'offsetModel',
+      'rotationDeg',
+      'leader',
+    ]),
+    path,
+  );
+  if (value.schemaVersion !== PDF_OVERLAY_TAG_PLACEMENT_SCHEMA_VERSION)
+    fail(
+      value.schemaVersion == null
+        ? 'TAG_PLACEMENT_SCHEMA_VERSION_MISSING'
+        : 'TAG_PLACEMENT_SCHEMA_VERSION_MISMATCH',
+      `${path}.schemaVersion`,
+      `Expected tag placement schema version ${PDF_OVERLAY_TAG_PLACEMENT_SCHEMA_VERSION}.`,
+    );
+
+  const drawing = normalizeDrawing(value.drawing, `${path}.drawing`);
+  if (!drawing)
+    fail('TAG_PLACEMENT_CONTEXT_MISSING', path, 'Tag placement requires an STB drawing identity.');
+
+  const identity = normalizeIdentity(value.identity, `${path}.identity`);
+  if (identity[0] !== drawing.source.modelKey)
+    fail(
+      'TAG_PLACEMENT_MODEL_MISMATCH',
+      `${path}.identity[0]`,
+      'Tag placement member model must match its drawing model.',
+    );
+
+  const template = assertRecord(value.template, `${path}.template`);
+  assertKeys(template, new Set(['id', 'version']), `${path}.template`);
+  const templateId = assertString(template.id, `${path}.template.id`);
+  // 図面符号テンプレートと、built-in詳細タグの配置identity(旧テンプレートID)。
+  const legacyDefinition =
+    DRAWING_TAG_TEMPLATES[templateId] ||
+    (Object.hasOwn(DRAWING_DETAIL_TAG_TEMPLATE_VERSIONS, templateId)
+      ? { version: DRAWING_DETAIL_TAG_TEMPLATE_VERSIONS[templateId] }
+      : null);
+  const normalizedFamilyState = normalizeTagFamilyState(tagFamilyState, {
+    builtIns: BUILTIN_TAG_FAMILIES,
+  });
+  const familyDefinition = [...BUILTIN_TAG_FAMILIES, ...normalizedFamilyState.families].find(
+    (candidate) => candidate.id === templateId,
+  );
+  const definition = legacyDefinition || familyDefinition;
+  if (!definition)
+    fail('UNKNOWN_TAG_TEMPLATE', `${path}.template.id`, 'Unknown drawing tag template/family.');
+  if (!Number.isSafeInteger(template.version) || template.version !== definition.version)
+    fail(
+      'TAG_TEMPLATE_VERSION_MISMATCH',
+      `${path}.template.version`,
+      'Drawing tag template/family version is unsupported.',
+    );
+
+  const rotation = assertFinite(value.rotationDeg ?? 0, `${path}.rotationDeg`);
+  const rotationDeg = ((rotation % 360) + 360) % 360;
+  if (![0, 90, 180, 270].includes(rotationDeg))
+    fail(
+      'INVALID_TAG_ROTATION',
+      `${path}.rotationDeg`,
+      'Tag rotation must be 0, 90, 180, or 270 degrees.',
+    );
+  const leader = value.leader ?? true;
+  if (typeof leader !== 'boolean')
+    fail('INVALID_TAG_LEADER', `${path}.leader`, 'Tag leader flag must be boolean.');
+
+  return {
+    schemaVersion: PDF_OVERLAY_TAG_PLACEMENT_SCHEMA_VERSION,
+    identity,
+    drawing,
+    template: { id: templateId, version: template.version },
+    anchorModel: normalizePair(value.anchorModel, `${path}.anchorModel`),
+    offsetModel: normalizePair(value.offsetModel ?? [0, 0], `${path}.offsetModel`),
+    rotationDeg,
+    leader,
+  };
 }
 
 function normalizeReviewContext(value, path) {
@@ -490,32 +638,61 @@ export function normalizeDrawingMemo(value, index) {
   ) {
     fail('MEMBER_BOUND_DRAWING_MEMO', path, 'Drawing memos cannot reference an STB member.');
   }
-  assertKeys(value, new Set(['id', 'pageNumber', 'pdfPoint', 'text']), path);
+  assertKeys(
+    value,
+    new Set(['id', 'pageNumber', 'pdfPoint', 'drawing', 'modelPoint', 'text']),
+    path,
+  );
   const id = assertString(value.id, `${path}.id`);
-  const pageNumber =
-    value.pageNumber == null ? null : assertPositiveInteger(value.pageNumber, `${path}.pageNumber`);
-  let pdfPoint = null;
-  if (value.pdfPoint != null) {
-    if (!Array.isArray(value.pdfPoint) || value.pdfPoint.length !== 2)
+  const point = (candidate, pointPath) => {
+    if (candidate == null) return null;
+    if (!Array.isArray(candidate) || candidate.length !== 2)
       fail(
         'INVALID_DRAWING_MEMO_POINT',
-        `${path}.pdfPoint`,
+        pointPath,
         'Drawing memo point must contain two coordinates.',
       );
-    value.pdfPoint.forEach((coordinate, pointIndex) =>
-      assertFinite(coordinate, `${path}.pdfPoint[${pointIndex}]`),
+    candidate.forEach((coordinate, pointIndex) =>
+      assertFinite(coordinate, `${pointPath}[${pointIndex}]`),
     );
-    pdfPoint = [...value.pdfPoint];
-  }
+    return [...candidate];
+  };
+  const pageNumber =
+    value.pageNumber == null ? null : assertPositiveInteger(value.pageNumber, `${path}.pageNumber`);
+  const pdfPoint = point(value.pdfPoint, `${path}.pdfPoint`);
+  const drawing = value.drawing == null ? null : normalizeDrawing(value.drawing, `${path}.drawing`);
+  const modelPoint = point(value.modelPoint, `${path}.modelPoint`);
   if (pageNumber == null && pdfPoint != null)
     fail(
       'INVALID_DRAWING_MEMO_POINT',
       `${path}.pageNumber`,
-      'A positioned drawing memo requires a page number.',
+      'A positioned PDF memo requires a page number.',
+    );
+  if ((drawing == null) !== (modelPoint == null))
+    fail(
+      'INVALID_DRAWING_MEMO_CONTEXT',
+      path,
+      'A model-positioned drawing memo requires both drawing and modelPoint.',
+    );
+  if ((drawing || modelPoint) && (pageNumber != null || pdfPoint != null))
+    fail(
+      'AMBIGUOUS_DRAWING_MEMO_CONTEXT',
+      path,
+      'A drawing memo cannot be positioned in PDF-space and model-space at the same time.',
     );
   if (typeof value.text !== 'string')
     fail('INVALID_MEMO', `${path}.text`, 'Drawing memo text must be a string.');
-  return { id, pageNumber, pdfPoint, text: value.text };
+
+  const normalized = { id, text: value.text };
+  if ('pageNumber' in value || 'pdfPoint' in value) {
+    normalized.pageNumber = pageNumber;
+    normalized.pdfPoint = pdfPoint;
+  }
+  if (drawing) {
+    normalized.drawing = drawing;
+    normalized.modelPoint = modelPoint;
+  }
+  return normalized;
 }
 
 export function normalizeDocument(value) {
@@ -540,12 +717,20 @@ export function normalizeDocument(value) {
   const selectedRegion = normalizeRegion(value.selectedRegion, 'selectedRegion');
   const regionMapping = normalizeMapping(value.regionMapping);
   const drawing = normalizeDrawing(value.drawing);
+  const drawingRotationDeg = normalizeDrawingRotationDeg(value.drawingRotationDeg ?? 0);
+  const tagOrientationMode = normalizeTagOrientationMode(value.tagOrientationMode);
   const registration = normalizeRegistration(value.registration);
   const placement = normalizePlacement(value.placement ?? null);
+  const tagFamilyState = normalizeTagFamilyState(
+    value.tagFamilyState ?? createEmptyTagFamilyState(),
+    { builtIns: BUILTIN_TAG_FAMILIES },
+  );
   if (!Array.isArray(value.memberReviews))
     fail('INVALID_TYPE', 'memberReviews', 'memberReviews must be an array.');
   if (!Array.isArray(value.drawingMemos))
     fail('INVALID_TYPE', 'drawingMemos', 'drawingMemos must be an array.');
+  if (value.tagPlacements != null && !Array.isArray(value.tagPlacements))
+    fail('INVALID_TYPE', 'tagPlacements', 'tagPlacements must be an array.');
   const memberReviews = value.memberReviews.map(normalizeMemberReview);
   const seenMemberKeys = new Set();
   for (const [index, review] of memberReviews.entries()) {
@@ -555,6 +740,27 @@ export function normalizeDocument(value) {
     seenMemberKeys.add(key);
   }
   const drawingMemos = value.drawingMemos.map(normalizeDrawingMemo);
+  const tagPlacements = (value.tagPlacements ?? []).map((placement, index) =>
+    normalizeTagPlacement(placement, index, { tagFamilyState }),
+  );
+  const seenPlacementKeys = new Set();
+  for (const [index, placement] of tagPlacements.entries()) {
+    const key = stableStringify([
+      placement.drawing.source.modelKey,
+      placement.drawing.source.modelRevision,
+      placement.drawing.view,
+      ...placement.identity,
+      placement.template.id,
+      placement.template.version,
+    ]);
+    if (seenPlacementKeys.has(key))
+      fail(
+        'DUPLICATE_TAG_PLACEMENT',
+        `tagPlacements[${index}]`,
+        'Tag placements must be unique per STB drawing/member/template.',
+      );
+    seenPlacementKeys.add(key);
+  }
   const seenMemoIds = new Set();
   for (const [index, memo] of drawingMemos.entries()) {
     if (seenMemoIds.has(memo.id))
@@ -574,9 +780,13 @@ export function normalizeDocument(value) {
     selectedRegion,
     regionMapping,
     drawing,
+    drawingRotationDeg,
+    tagOrientationMode,
     registration,
     placement,
     memberReviews,
     drawingMemos,
+    tagPlacements,
+    tagFamilyState,
   };
 }

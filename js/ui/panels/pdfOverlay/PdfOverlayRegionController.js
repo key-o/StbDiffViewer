@@ -30,6 +30,7 @@ export class PdfOverlayRegionController {
         this.regionSelectionArmed = true;
         this.panel.anchorPickTarget = null;
         this.panel.gizmoPickOrigin = false;
+        this.panel.renderOverlay();
         this.panel.setStatus('PDF上で図面領域をドラッグ選択してください。');
         showInfo('PDF上で図面領域をドラッグ選択してください。');
       };
@@ -57,7 +58,11 @@ export class PdfOverlayRegionController {
     e['pdf-overlay-stage'].addEventListener('pointerdown', (event) => this.beginSelection(event));
     e['pdf-overlay-stage'].addEventListener('pointermove', (event) => this.updateSelection(event));
     e['pdf-overlay-stage'].addEventListener('pointerup', (event) => this.finishSelection(event));
-    e['pdf-overlay-stage'].addEventListener('pointercancel', () => this.cancelSelection());
+    e['pdf-overlay-stage'].addEventListener('pointercancel', () => {
+      if (!this.regionSelectionArmed && !this.regionSelectionDrag) return;
+      this.cancelSelection();
+      this.panel.renderOverlay();
+    });
   }
 
   clear() {
@@ -140,7 +145,6 @@ export class PdfOverlayRegionController {
       this.regionMapping = null;
       this.panel.sessionUi?.invalidateReviews('REGION_CHANGED');
       this.renderStatus();
-      this.panel.renderOverlay();
       showSuccess('PDF図面領域を選択しました。階を選んで対応付けてください。');
     } catch (error) {
       this.selectedRegion = null;
@@ -149,6 +153,7 @@ export class PdfOverlayRegionController {
       this.renderStatus();
       showWarning(error?.message || 'PDF図面領域を選択できませんでした。');
     }
+    this.panel.renderOverlay();
   }
 
   cancelSelection() {
@@ -254,9 +259,11 @@ export class PdfOverlayRegionController {
     return true;
   }
 
-  isSelecting() {
+  isSelecting({ includeSuppressedClick = true } = {}) {
     return (
-      this.regionSelectionArmed || Boolean(this.regionSelectionDrag) || this.suppressStageClick
+      this.regionSelectionArmed ||
+      Boolean(this.regionSelectionDrag) ||
+      (includeSuppressedClick && this.suppressStageClick)
     );
   }
 

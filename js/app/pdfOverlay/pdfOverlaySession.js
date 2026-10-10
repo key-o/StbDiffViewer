@@ -12,6 +12,8 @@ import {
   fail,
   normalizeDocument,
   normalizeDrawingMemo,
+  normalizeDrawingRotationDeg,
+  normalizeTagOrientationMode,
   normalizeMapping,
   normalizeMemberReview,
   normalizePlacement,
@@ -22,11 +24,13 @@ import {
   sameJson,
   stableStringify,
 } from './pdfOverlaySessionSchema.js';
+import { planViewContextSnapshot } from '../../data/drawing/drawingModel.js';
 
 export {
   PDF_OVERLAY_REVIEW_STATES,
   PDF_OVERLAY_SESSION_KIND,
   PDF_OVERLAY_SESSION_SCHEMA_VERSION,
+  PDF_OVERLAY_TAG_PLACEMENT_SCHEMA_VERSION,
 } from './pdfOverlaySessionSchema.js';
 
 function pdfIdentityFromMapping(mapping) {
@@ -125,7 +129,12 @@ function documentRegionReadiness(document) {
     return { ready: false, code: 'MODEL_CHANGED', regionKey: null };
   if (document.regionMapping.stb.modelRevision !== document.drawing.source.modelRevision)
     return { ready: false, code: 'STB_CHANGED', regionKey: null };
-  if (!sameJson(document.regionMapping.stb.view, document.drawing.view))
+  if (
+    !sameJson(
+      planViewContextSnapshot(document.regionMapping.stb.view),
+      planViewContextSnapshot(document.drawing.view),
+    )
+  )
     return { ready: false, code: 'STB_VIEW_CHANGED', regionKey: null };
   return { ready: true, code: 'CURRENT', regionKey: document.regionMapping.key };
 }
@@ -162,6 +171,18 @@ function assessCurrentDocument(document, current = {}) {
     return { ready: false, code: 'STB_CHANGED', regionKey: null, alignmentKey: null };
   if (!sameJson(drawing.view, document.drawing.view))
     return { ready: false, code: 'STB_VIEW_CHANGED', regionKey: null, alignmentKey: null };
+
+  const drawingRotationDeg = normalizeDrawingRotationDeg(
+    current.drawingRotationDeg ?? 0,
+    'current.drawingRotationDeg',
+  );
+  if (drawingRotationDeg !== document.drawingRotationDeg)
+    return {
+      ready: false,
+      code: 'DRAWING_ROTATION_CHANGED',
+      regionKey: null,
+      alignmentKey: null,
+    };
 
   const currentMapping = Object.prototype.hasOwnProperty.call(current, 'regionMapping')
     ? normalizeMapping(current.regionMapping, 'current.regionMapping')
@@ -260,6 +281,8 @@ function normalizeCreateInput(input = {}) {
     fail('INVALID_TYPE', 'memberReviews', 'memberReviews must be an array.');
   if (!Array.isArray(input.drawingMemos ?? []))
     fail('INVALID_TYPE', 'drawingMemos', 'drawingMemos must be an array.');
+  if (!Array.isArray(input.tagPlacements ?? []))
+    fail('INVALID_TYPE', 'tagPlacements', 'tagPlacements must be an array.');
   const document = {
     kind: PDF_OVERLAY_SESSION_KIND,
     schemaVersion: PDF_OVERLAY_SESSION_SCHEMA_VERSION,
@@ -269,10 +292,15 @@ function normalizeCreateInput(input = {}) {
     selectedRegion,
     regionMapping,
     drawing: drawingSnapshot(input.drawing ?? null, 'drawing'),
+    drawingRotationDeg: normalizeDrawingRotationDeg(input.drawingRotationDeg ?? 0),
+    tagOrientationMode: normalizeTagOrientationMode(input.tagOrientationMode),
     registration: normalizeRegistration(input.registration ?? null),
     placement: normalizePlacement(input.placement ?? null),
     memberReviews: (input.memberReviews ?? []).map(normalizeMemberReview),
     drawingMemos: (input.drawingMemos ?? []).map(normalizeDrawingMemo),
+    // TagFamily stateとcustom placementはnormalizeDocumentで同時に検証する。
+    tagPlacements: input.tagPlacements ?? [],
+    tagFamilyState: input.tagFamilyState,
   };
   const validated = normalizeDocument(document);
   const seen = new Set();
@@ -369,6 +397,16 @@ function reviewInvalidationCode(document, current, assessment, review) {
 }
 
 function memoInvalidationCode(document, current, memo) {
+  if (Array.isArray(memo.modelPoint) && memo.drawing) {
+    const drawing = drawingSnapshot(current.drawing ?? null, 'current.drawing');
+    if (!drawing) return 'STB_IDENTITY_MISSING';
+    if (drawing.source.modelKey !== memo.drawing.source.modelKey) return 'MODEL_CHANGED';
+    if (drawing.source.modelRevision !== memo.drawing.source.modelRevision) return 'STB_CHANGED';
+    if (!sameJson(drawing.view, memo.drawing.view)) return 'STB_VIEW_CHANGED';
+    return null;
+  }
+
+  // Legacy v1 PDF-space memo. Keep its original PDF/page validity semantics until migration.
   const pdfIdentity = pdfIdentitySnapshot(current.pdfInfo ?? null, 'current.pdfInfo');
   if (!pdfIdentity || !document.pdfIdentity) return 'PDF_IDENTITY_MISSING';
   if (pdfIdentity.sha256 !== document.pdfIdentity.sha256) return 'PDF_CHANGED';
@@ -376,6 +414,29 @@ function memoInvalidationCode(document, current, memo) {
   if (pdfIdentity.numPages !== document.pdfIdentity.numPages) return 'PDF_PAGE_COUNT_CHANGED';
   const pageNumber = current.pageNumber ?? current.pageRender?.pageNumber ?? null;
   if (memo.pageNumber != null && pageNumber !== memo.pageNumber) return 'PAGE_CHANGED';
+  return null;
+}
+
+function tagPlacementInvalidationCode(_document, current, placement) {
+  const runtimeDrawing = current.drawing;
+  if (!runtimeDrawing) return 'STB_IDENTITY_MISSING';
+  const drawing = drawingSnapshot(runtimeDrawing, 'current.drawing');
+  if (drawing.source?.modelKey !== placement.drawing.source.modelKey) return 'MODEL_CHANGED';
+  if (drawing.source?.modelRevision !== placement.drawing.source.modelRevision)
+    return 'STB_CHANGED';
+  if (!sameJson(drawing.view, placement.drawing.view)) return 'STB_VIEW_CHANGED';
+  if (placement.identity[0] !== drawing.source?.modelKey) return 'MEMBER_MODEL_CHANGED';
+
+  if (Array.isArray(runtimeDrawing.elements)) {
+    const exists = runtimeDrawing.elements.some(
+      (entry) =>
+        String(entry.ref?.modelKey) === placement.identity[0] &&
+        String(entry.ref?.elementType) === placement.identity[1] &&
+        String(entry.ref?.elementId) === placement.identity[2] &&
+        (entry.state == null || entry.state === 'drawn'),
+    );
+    if (!exists) return 'MEMBER_MISSING';
+  }
   return null;
 }
 
@@ -413,6 +474,16 @@ export function reconcilePdfOverlaySession(value, current = {}) {
       reviewState: review.reviewState,
       invalidationCode: review.invalidationCode,
     }));
+    const tagPlacementStatuses = staged.tagPlacements.map((placement) => {
+      const invalidationCode = tagPlacementInvalidationCode(document, current, placement);
+      return {
+        identity: [...placement.identity],
+        drawing: cloneJson(placement.drawing),
+        template: { ...placement.template },
+        active: invalidationCode == null,
+        invalidationCode,
+      };
+    });
     return {
       valid: true,
       code: assessment.ready ? 'CURRENT' : assessment.code,
@@ -433,6 +504,7 @@ export function reconcilePdfOverlaySession(value, current = {}) {
       },
       memberReviewStatuses,
       drawingMemoStatuses,
+      tagPlacementStatuses,
     };
   } catch (error) {
     const issue = {
