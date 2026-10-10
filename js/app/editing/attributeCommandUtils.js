@@ -10,11 +10,10 @@ import {
   resolveAffectedElementsForNode,
   resolveAffectedElementsForSection,
 } from '../../modelLoader/editImpactResolver.js';
-import { getViewerWallElementType } from '../../common-stb/walls/wallClassification.js';
+import { normalizeWallViewerElementType } from '../../common-stb/walls/wallClassification.js';
 
 const ELEMENT_TYPE_TAG_OVERRIDES = Object.freeze({
   Node: 'StbNode',
-  ShearWall: 'StbWall',
   Axis: 'StbParallelAxis',
 });
 
@@ -36,8 +35,12 @@ const MEMBER_TAG_TO_ELEMENT_TYPE = Object.freeze({
   StbFrameDampingDevice: 'FrameDampingDevice',
 });
 
+export function normalizeViewerElementType(elementType) {
+  return normalizeWallViewerElementType(String(elementType || '').trim());
+}
+
 export function resolveElementTagName(elementType) {
-  const normalized = String(elementType || '').trim();
+  const normalized = normalizeViewerElementType(elementType);
   if (!normalized) return null;
   if (normalized.startsWith('Stb')) return normalized;
   return ELEMENT_TYPE_TAG_OVERRIDES[normalized] || `Stb${normalized}`;
@@ -48,19 +51,33 @@ export function viewerElementTypeFromTagName(tagName) {
 }
 
 /**
- * XML element 自体から Viewer element type を解決する。
- * StbWall だけは同一タグ内で通常壁/耐震壁を共有するため kind_wall を参照する。
+ * XML element 自体から canonical Viewer element type を解決する。
+ * StbWall は kind_wall にかかわらず常に Wall。
  */
 export function viewerElementTypeFromElement(element) {
   if (!element?.tagName) return null;
-  if (element.tagName === 'StbWall') return getViewerWallElementType(element);
-  return viewerElementTypeFromTagName(element.tagName);
+  const tagName = element.localName || String(element.tagName).replace(/^.*:/, '');
+  return viewerElementTypeFromTagName(tagName);
 }
 
 export function findElementByTagAndId(document, tagName, elementId) {
   if (!document || !tagName || elementId === null || elementId === undefined) return null;
   const targetId = String(elementId);
-  for (const element of document.getElementsByTagName(tagName)) {
+  let elements = [];
+  if (typeof document.getElementsByTagNameNS === 'function') {
+    try {
+      elements = Array.from(document.getElementsByTagNameNS('*', tagName) || []);
+    } catch {
+      // Fall back to a local-name scan below.
+    }
+  }
+  if (elements.length === 0) {
+    elements = Array.from(document.getElementsByTagName?.('*') || []).filter((element) => {
+      const localName = element.localName || String(element.tagName || '').replace(/^.*:/, '');
+      return localName === tagName;
+    });
+  }
+  for (const element of elements) {
     if (String(element.getAttribute('id')) === targetId) return element;
   }
   return null;

@@ -13,7 +13,6 @@ import { eventBus, EditEvents } from '../../data/events/index.js';
 import { RenderableLifecycleEvents } from '../../constants/renderableLifecycleEvents.js';
 import { getState } from '../../data/state/globalState.js';
 import { STB_TAG_NAMES } from '../../constants/elementTypes.js';
-import { getViewerWallElementType } from '../../common-stb/walls/wallClassification.js';
 import { scheduleRender } from '../../utils/renderScheduler.js';
 import {
   redrawElementByType,
@@ -27,6 +26,8 @@ import {
   insertWorkingSolidElement,
   replaceWorkingSolidElement,
 } from '../editing/workingSolidGenerator.js';
+import { resolveWorkingComparisonSnapshot } from '../editing/workingComparisonSnapshot.js';
+import { isWallComparisonSnapshotVisible } from '../viewModes/wallKindFilter.js';
 import {
   displayModeManager,
   elementGroups,
@@ -45,6 +46,13 @@ const log = createLogger('editGeometrySyncController');
 let isInitialized = false;
 let removeRecomparisonListener = null;
 let removeWorkingDocumentListener = null;
+
+/**
+ * kind_wall表示で一時的にsceneから除外したWorking Wallの旧Object3Dを保持する。
+ * Undo/Redo等で再表示された際、Renderable replacement eventを旧参照→新参照で発火し、
+ * semantic selection identityを維持する。geometryは除去時にdispose済み、materialは共有のため保持される。
+ */
+const hiddenWorkingWallRenderables = new Map();
 
 const DEFAULT_WORKING_GEOMETRY_DEPENDENCIES = {
   getState,
@@ -76,14 +84,11 @@ export function setWorkingGeometrySyncDependencies(overrides = {}) {
 /** Working geometry依存をproduction既定値へ戻す。 */
 export function resetWorkingGeometrySyncDependencies() {
   workingGeometryDependencies = { ...DEFAULT_WORKING_GEOMETRY_DEPENDENCIES };
+  hiddenWorkingWallRenderables.clear();
 }
 
-/**
- * 比較タイプ → 再描画タイプの展開。
- * 比較結果では ShearWall は Wall に正規化されるが、
- * ビューアは Wall / ShearWall を別グループで描画するため両方を再描画する。
- */
-const REDRAW_TYPE_EXPANSIONS = { Wall: ['Wall', 'ShearWall'] };
+/** 比較タイプ → 再描画タイプの展開。StbWallはcanonical Wallのみ。 */
+const REDRAW_TYPE_EXPANSIONS = { Wall: ['Wall'] };
 
 /** 再描画パイプラインを持たないタイプ（編集再描画の対象外） */
 const NON_REDRAWABLE_TYPES = new Set(['Story', 'Axis']);
@@ -96,7 +101,6 @@ const ELEMENT_TAG_NAMES = {
   Brace: STB_TAG_NAMES.BRACE,
   Slab: STB_TAG_NAMES.SLAB,
   Wall: STB_TAG_NAMES.WALL,
-  ShearWall: STB_TAG_NAMES.WALL,
   Parapet: STB_TAG_NAMES.PARAPET,
   Joint: STB_TAG_NAMES.JOINT,
   Pile: STB_TAG_NAMES.PILE,
@@ -112,7 +116,7 @@ const START_NODE_ATTRIBUTES = ['id_node_start', 'id_node_bottom', 'id_node'];
 const END_NODE_ATTRIBUTES = ['id_node_end', 'id_node_top'];
 
 function isPolygonElementType(elementType) {
-  return elementType === 'Slab' || elementType === 'Wall' || elementType === 'ShearWall';
+  return elementType === 'Slab' || elementType === 'Wall';
 }
 
 function findElementById(document, elementType, elementId) {
@@ -123,13 +127,91 @@ function findElementById(document, elementType, elementId) {
     (candidate) => String(candidate.getAttribute('id')) === String(elementId),
   );
   if (!element) return null;
-  if (
-    (elementType === 'Wall' || elementType === 'ShearWall') &&
-    getViewerWallElementType(element) !== elementType
-  ) {
-    return null;
-  }
   return element;
+}
+
+function renderableCacheKey(elementType, elementId) {
+  return `${elementType}:${String(elementId)}`;
+}
+
+function resolveWorkingWallDisplayState(deps, document, elementId) {
+  const rawWall = findElementById(document, 'Wall', elementId);
+  if (!rawWall) return { visible: false, rawWall: null, snapshot: null };
+
+  const editingState = deps.getState?.('models.editing') || null;
+  const snapshot = resolveWorkingComparisonSnapshot({
+    comparisonResults: deps.getState?.('comparisonResults'),
+    sourceDocument: editingState?.sourceDocumentA || null,
+    elementType: 'Wall',
+    elementId: String(elementId),
+  });
+  return {
+    visible: isWallComparisonSnapshotVisible(rawWall, snapshot),
+    rawWall,
+    snapshot,
+  };
+}
+
+function shouldDisplayWorkingElement(deps, document, elementType, elementId) {
+  if (elementType !== 'Wall') return true;
+  return resolveWorkingWallDisplayState(deps, document, elementId).visible;
+}
+
+function rememberHiddenWallRenderables(elementType, elementId, removal) {
+  if (elementType !== 'Wall') return;
+  const removedObjects = Array.isArray(removal?.removedObjects) ? removal.removedObjects : [];
+  if (removedObjects.length === 0) return;
+  hiddenWorkingWallRenderables.set(renderableCacheKey(elementType, elementId), removedObjects);
+}
+
+function clearHiddenWallRenderables(elementType, elementId) {
+  if (elementType === 'Wall') {
+    hiddenWorkingWallRenderables.delete(renderableCacheKey(elementType, elementId));
+  }
+}
+
+function rebindHiddenWallRenderables(elementType, elementId, insertion) {
+  if (elementType !== 'Wall' || insertion?.inserted !== true) return [];
+  const key = renderableCacheKey(elementType, elementId);
+  const oldObjects = hiddenWorkingWallRenderables.get(key) || [];
+  const newObjects = Array.isArray(insertion?.addedObjects) ? insertion.addedObjects : [];
+  if (oldObjects.length === 0 || newObjects.length === 0) return [];
+
+  hiddenWorkingWallRenderables.delete(key);
+  const replacementPairs = oldObjects.map((oldObject, index) => {
+    const newObject = newObjects[Math.min(index, newObjects.length - 1)];
+    if (oldObject?.userData && newObject) {
+      newObject.userData = {
+        ...(newObject.userData || {}),
+        ...oldObject.userData,
+        elementType,
+      };
+    }
+    if (oldObject?.material && newObject) newObject.material = oldObject.material;
+    return { oldObject, newObject };
+  });
+
+  eventBus.emit(RenderableLifecycleEvents.RENDERABLES_REPLACED, {
+    elementType,
+    elementId: String(elementId),
+    replacementPairs,
+  });
+  return replacementPairs;
+}
+
+function hideWorkingWallRenderable(deps, elementType, elementId) {
+  const group = deps.elementGroups?.[elementType];
+  if (!group?.traverse) {
+    return { supported: false, removed: false, reason: 'element-group-missing' };
+  }
+  const removal = deps.removeElementRenderablesInGroup?.(group, elementType, elementId);
+  rememberHiddenWallRenderables(elementType, elementId, removal);
+  return {
+    supported: true,
+    removed: removal?.removed === true,
+    reason: 'wall-kind-hidden',
+    removal,
+  };
 }
 
 function normalizePosition(position) {
@@ -275,6 +357,9 @@ function replaceSolidElementInScene(deps, elementType, elementId, document, node
   if (!document) {
     return { supported: false, replaced: false, reason: 'working-document-missing' };
   }
+  if (!shouldDisplayWorkingElement(deps, document, elementType, elementId)) {
+    return hideWorkingWallRenderable(deps, elementType, elementId);
+  }
 
   const parsedData = deps.parseStbFile(document, { modelKey: null });
   const generatorInfo = deps.geometryGeneratorFactory?.getGeneratorInfo?.(elementType) || null;
@@ -288,6 +373,30 @@ function replaceSolidElementInScene(deps, elementType, elementId, document, node
     replace: deps.replaceElementRenderablesInGroup,
   });
   emitReplacementLifecycle(elementType, elementId, result);
+  if (result?.replaced) {
+    clearHiddenWallRenderables(elementType, elementId);
+    return result;
+  }
+
+  if (
+    result?.supported &&
+    Array.isArray(result?.meshes) &&
+    result.meshes.length > 0 &&
+    !result?.replacement?.reason
+  ) {
+    const insertion = deps.insertElementRenderablesInGroup?.(
+      group,
+      elementType,
+      elementId,
+      result.meshes,
+    );
+    rebindHiddenWallRenderables(elementType, elementId, insertion);
+    return {
+      ...result,
+      inserted: insertion?.inserted === true,
+      insertion,
+    };
+  }
   return result;
 }
 
@@ -299,6 +408,10 @@ function replacePolygonElementInScene(deps, elementType, elementId, document, no
   if (!group?.traverse) {
     return { supported: false, replaced: false, reason: 'element-group-missing' };
   }
+  if (!shouldDisplayWorkingElement(deps, document, elementType, elementId)) {
+    return hideWorkingWallRenderable(deps, elementType, elementId);
+  }
+
   const descriptor = getPolygonDescriptor(document, nodeMap, elementType, elementId);
   if (!descriptor) {
     return { supported: false, replaced: false, reason: 'polygon-descriptor-missing' };
@@ -311,6 +424,25 @@ function replacePolygonElementInScene(deps, elementType, elementId, document, no
   );
   const result = { supported: true, replaced: replacement?.replaced === true, replacement };
   emitReplacementLifecycle(elementType, elementId, result);
+  if (result.replaced) {
+    clearHiddenWallRenderables(elementType, elementId);
+    return result;
+  }
+
+  if (!replacement?.reason) {
+    const insertion = deps.insertElementRenderablesInGroup?.(
+      group,
+      elementType,
+      elementId,
+      descriptor,
+    );
+    rebindHiddenWallRenderables(elementType, elementId, insertion);
+    return {
+      ...result,
+      inserted: insertion?.inserted === true,
+      insertion,
+    };
+  }
   return result;
 }
 
@@ -453,6 +585,11 @@ export function syncWorkingDocumentGeometry(payload = {}, deps = workingGeometry
       const group = deps.elementGroups?.[change.elementType];
       if (!group?.traverse) continue;
       if (change.operation === 'add') {
+        if (
+          !shouldDisplayWorkingElement(deps, targetDocument, change.elementType, change.elementId)
+        ) {
+          continue;
+        }
         const descriptor = isPolygonElementType(change.elementType)
           ? getPolygonDescriptor(
               targetDocument,
@@ -478,6 +615,7 @@ export function syncWorkingDocumentGeometry(payload = {}, deps = workingGeometry
         );
         if (result?.inserted) lineUpdates += 1;
       } else {
+        clearHiddenWallRenderables(change.elementType, change.elementId);
         const result = deps.removeElementRenderablesInGroup?.(
           group,
           change.elementType,
@@ -490,6 +628,11 @@ export function syncWorkingDocumentGeometry(payload = {}, deps = workingGeometry
 
     if (displayMode === 'solid') {
       if (change.operation === 'add') {
+        if (
+          !shouldDisplayWorkingElement(deps, targetDocument, change.elementType, change.elementId)
+        ) {
+          continue;
+        }
         const result = insertSolidElementInScene(
           deps,
           change.elementType,
@@ -499,6 +642,7 @@ export function syncWorkingDocumentGeometry(payload = {}, deps = workingGeometry
         );
         if (result?.inserted) solidUpdates += 1;
       } else {
+        clearHiddenWallRenderables(change.elementType, change.elementId);
         const result = removeSolidElementFromScene(deps, change.elementType, change.elementId);
         if (result?.removed) solidUpdates += 1;
       }
@@ -561,7 +705,7 @@ export function syncWorkingDocumentGeometry(payload = {}, deps = workingGeometry
       targetDocument,
       targetNodeMap,
     );
-    if (result?.replaced) lineUpdates += 1;
+    if (result?.replaced || result?.inserted || result?.removed) lineUpdates += 1;
   }
 
   for (const key of solidTypes) {
@@ -575,7 +719,7 @@ export function syncWorkingDocumentGeometry(payload = {}, deps = workingGeometry
       targetDocument,
       targetNodeMap,
     );
-    if (result?.replaced) solidUpdates += 1;
+    if (result?.replaced || result?.inserted || result?.removed) solidUpdates += 1;
   }
 
   // Discard can restore a line/polygon with no single delta when the source snapshot contains
@@ -596,6 +740,8 @@ export function syncWorkingDocumentGeometry(payload = {}, deps = workingGeometry
       }
     }
   }
+
+  if (payload.reset === true) hiddenWorkingWallRenderables.clear();
 
   if (nodeUpdates > 0 || lineUpdates > 0 || solidUpdates > 0 || payload.reset === true) {
     deps.scheduleRender?.();
@@ -663,6 +809,7 @@ export function resetEditGeometrySync() {
   removeRecomparisonListener = null;
   removeWorkingDocumentListener = null;
   isInitialized = false;
+  hiddenWorkingWallRenderables.clear();
   resetWorkingGeometrySyncDependencies();
 }
 

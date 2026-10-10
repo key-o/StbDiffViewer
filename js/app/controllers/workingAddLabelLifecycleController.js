@@ -181,11 +181,40 @@ export function createWorkingAddLabelLifecycleController(dependencies = {}) {
   function handlePayload(payload = {}, expectedGeneration = generation) {
     if (expectedGeneration !== generation) return 0;
     const targetDocument = payload.targetDocument || payload.workingDocument || null;
-    const changes = Array.isArray(payload.structuralChanges) ? payload.structuralChanges : [];
-    if (!targetDocument || changes.length === 0) return 0;
+    if (!targetDocument) return 0;
 
+    const targets = new Map();
+    const structuralChanges = Array.isArray(payload.structuralChanges)
+      ? payload.structuralChanges
+      : [];
+    for (const change of structuralChanges) {
+      if (change?.operation !== 'add' || !change.elementType || change.elementId === undefined) {
+        continue;
+      }
+      const key = `${String(change.elementType)}:${String(change.elementId)}`;
+      targets.set(key, change);
+    }
+
+    // kind_wall変更でhidden→visibleとなった既存Wallはstructural addではないが、
+    // targeted insert後にlabelが存在しないため同じ補完経路へ流す。
+    const affectedElements = Array.isArray(payload.affectedElements)
+      ? payload.affectedElements
+      : [];
+    for (const element of affectedElements) {
+      if (element?.elementType !== 'Wall' || element.elementId === undefined) continue;
+      const key = `Wall:${String(element.elementId)}`;
+      if (!targets.has(key)) {
+        targets.set(key, {
+          operation: 'add',
+          elementType: 'Wall',
+          elementId: String(element.elementId),
+        });
+      }
+    }
+
+    if (targets.size === 0) return 0;
     let created = 0;
-    for (const change of changes) {
+    for (const change of targets.values()) {
       if (insertLabelForAdd(change, targetDocument)) created += 1;
     }
     if (created > 0) deps.scheduleRender?.();

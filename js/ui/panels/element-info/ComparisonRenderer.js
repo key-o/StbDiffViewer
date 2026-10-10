@@ -206,8 +206,8 @@ export function renderSectionInfo(nodeA, nodeB, showSingleColumn, modelSource, e
       };
     }
 
-    const sectionDataA = extractSectionData(sectionNodeA);
-    const sectionDataB = extractSectionData(sectionNodeB);
+    const sectionDataA = extractSectionData(sectionNodeA, elementType, nodeA);
+    const sectionDataB = extractSectionData(sectionNodeB, elementType, nodeB);
     if (sectionDataA && sectionDataB) {
       equivalenceResult = evaluateSectionEquivalence(sectionDataA, sectionDataB, elementType);
     }

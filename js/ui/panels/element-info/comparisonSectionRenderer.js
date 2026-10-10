@@ -307,11 +307,16 @@ const POS_MATCHING_ELEMENT_TYPES = new Set([
   // ブレース鉄骨
   'StbSecSteelBrace_S_NotSame',
   'StbSecSteelBrace_S_ThreeTypes',
-  // スラブ配筋
+  // スラブ配筋（ST-Bridge 2.1.x）
   'StbSecBarSlab_RC_ConventionalStandard',
   'StbSecBarSlab_RC_Conventional2Way',
   'StbSecBarSlab_RC_Conventional1Way1',
   'StbSecBarSlab_RC_Conventional1Way2',
+  // スラブ配筋（ST-Bridge 2.0.2 以前の要素名）
+  'StbSecBarSlab_RC_Standard',
+  'StbSecBarSlab_RC_2Way',
+  'StbSecBarSlab_RC_1Way1',
+  'StbSecBarSlab_RC_1Way2',
   'StbSecBarSlab_RC_Open',
   'StbSecBarSlab_RC_Truss1Way',
   // 壁配筋

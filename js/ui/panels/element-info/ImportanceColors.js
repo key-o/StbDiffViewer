@@ -20,7 +20,6 @@ const MEMBER_MAPPING = {
   Beam: 'StbModel/StbMembers/StbBeams/StbBeam',
   Brace: 'StbModel/StbMembers/StbBraces/StbBrace',
   Slab: 'StbModel/StbMembers/StbSlabs/StbSlab',
-  ShearWall: 'StbModel/StbMembers/StbWalls/StbWall',
   Wall: 'StbModel/StbMembers/StbWalls/StbWall',
   Footing: 'StbModel/StbMembers/StbFootings/StbFooting',
   StripFooting: 'StbModel/StbMembers/StbStripFootings/StbStripFooting',

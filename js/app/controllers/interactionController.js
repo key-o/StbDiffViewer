@@ -18,15 +18,15 @@ const logger = createLogger('interaction');
 import {
   camera,
   getActiveCamera,
-  renderer,
   controls,
   elementGroups,
   getBatchElementCenter,
   getRebarDisplayManager,
+  clippingStateManager,
 } from '../../viewer/index.js';
 import { getState } from '../../data/state/globalState.js';
 import { eventBus, InteractionEvents, ToastEvents } from '../../data/events/index.js';
-import { CAMERA_CONTROLS } from '../../config/renderingConstants.js';
+import { CAMERA_CONTROLS, SELECTION_PICKING } from '../../config/renderingConstants.js';
 import {
   createOrUpdateOrbitCenterHelper,
   hideOrbitCenterHelper,
@@ -106,13 +106,51 @@ const MAX_SELECTION_CANDIDATES = 10;
 const HOVER_RAYCAST_INTERVAL_MS = 50;
 let lastHoverRaycastTime = 0;
 
+function getLinePickTolerancePx(event) {
+  return event?.type === 'mousemove' || event?.type === 'mouseenter'
+    ? SELECTION_PICKING.HOVER_LINE_TOLERANCE_PX
+    : SELECTION_PICKING.CLICK_LINE_TOLERANCE_PX;
+}
+
+function getLinePickThresholdWorld(activeCamera, viewportHeightPx, tolerancePx) {
+  if (!activeCamera || !(viewportHeightPx > 0) || !(tolerancePx > 0)) {
+    return SELECTION_PICKING.MIN_LINE_THRESHOLD_MM;
+  }
+
+  let visibleWorldHeight;
+  if (activeCamera.isOrthographicCamera) {
+    const zoom = Number(activeCamera.zoom) || 1;
+    visibleWorldHeight = Math.abs(activeCamera.top - activeCamera.bottom) / zoom;
+  } else if (activeCamera.isPerspectiveCamera) {
+    let targetDistance = SELECTION_PICKING.FALLBACK_TARGET_DISTANCE_MM;
+    if (controls?.target && activeCamera.position?.distanceTo) {
+      const distance = activeCamera.position.distanceTo(controls.target);
+      if (Number.isFinite(distance) && distance > 0) targetDistance = distance;
+    }
+    const fovRad = THREE.MathUtils.degToRad(Number(activeCamera.fov) || 50);
+    visibleWorldHeight = 2 * targetDistance * Math.tan(fovRad / 2);
+  } else {
+    visibleWorldHeight = SELECTION_PICKING.FALLBACK_TARGET_DISTANCE_MM;
+  }
+
+  const threshold = (visibleWorldHeight / viewportHeightPx) * tolerancePx;
+  return THREE.MathUtils.clamp(
+    threshold,
+    SELECTION_PICKING.MIN_LINE_THRESHOLD_MM,
+    SELECTION_PICKING.MAX_LINE_THRESHOLD_MM,
+  );
+}
+
 const selectionCandidateSession = createSelectionCandidateSession({
-  collectCandidates: (intersects, options) =>
-    collectSelectionCandidates(intersects, {
+  collectCandidates: (intersects, options) => {
+    const rebarSelectionMode = isRebarSelectionModeActive();
+    return collectSelectionCandidates(intersects, {
       ...options,
-      includeRebar: isRebarSelectionModeActive(),
-    }),
-  raycast: performRaycast,
+      includeRebar: rebarSelectionMode,
+      rebarOnly: rebarSelectionMode,
+    });
+  },
+  raycast: performSelectableRaycast,
   applyPreview: (candidate) => applyHighlightMaterial(candidate, 'selectionCandidate'),
   restorePreview: clearHighlightMaterial,
   render: () => interactionScheduleRender?.(),
@@ -266,7 +304,8 @@ function handleInteractionCanvasClick(event) {
       const baseType = obj?.userData?.elementType || obj?.userData?.stbNodeType;
       if (baseType !== 'Node') continue;
       // 非表示の節点グループ・クリップ範囲外はピック対象外（通常選択と同じ可視性条件）
-      if (!obj.visible || !elementGroups.Node?.visible || isPointClipped(intersect.point)) continue;
+      if (!obj.visible || !elementGroups.Node?.visible || isPointClipped(intersect.point, obj))
+        continue;
 
       const ud =
         obj.userData.isInstanced &&
@@ -319,7 +358,7 @@ function handleInteractionCanvasContextMenu(event) {
   appliedThisRightDrag = false;
 
   handleContextMenu(event, interactionScheduleRender, {
-    performRaycast,
+    performRaycast: performSelectableRaycast,
     getSelectedObjects,
     resetSelection,
     selectElement3D,
@@ -475,7 +514,13 @@ function performRaycast(event) {
   mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
-  raycaster.setFromCamera(mouse, getActiveCamera() || camera);
+  const activeCamera = getActiveCamera() || camera;
+  raycaster.params.Line.threshold = getLinePickThresholdWorld(
+    activeCamera,
+    rect.height,
+    getLinePickTolerancePx(event),
+  );
+  raycaster.setFromCamera(mouse, activeCamera);
 
   const elementTargets = selectionRaycastTargets.getTargets();
   const targets = isRebarSelectionModeActive()
@@ -484,8 +529,26 @@ function performRaycast(event) {
   return raycaster.intersectObjects(targets, true);
 }
 
+/**
+ * 通常選択に使うRaycast結果を、現在のclippingと鉄筋選択モードへ合わせて絞り込む。
+ * 測定など「見えている半透明躯体そのもの」を対象にする機能は raw performRaycast を使う。
+ * @param {Event} event
+ * @returns {THREE.Intersection[]|null}
+ */
+function performSelectableRaycast(event) {
+  const intersects = performRaycast(event);
+  if (!intersects) return null;
+  const rebarOnly = isRebarSelectionModeActive();
+  return intersects.filter((intersect) => {
+    const object = intersect?.object;
+    if (isPointClipped(intersect?.point, object)) return false;
+    if (rebarOnly && object?.userData?.isRebar !== true) return false;
+    return true;
+  });
+}
+
 export function collectSelectionCandidates(intersects, options = {}) {
-  const { includeAxisStory = true, includeRebar = false } = options;
+  const { includeAxisStory = true, includeRebar = false, rebarOnly = false } = options;
   const rebarCandidates = [];
   const lineCandidates = [];
   const meshOrSpriteCandidates = [];
@@ -496,12 +559,15 @@ export function collectSelectionCandidates(intersects, options = {}) {
   for (const intersect of Array.isArray(intersects) ? intersects : []) {
     const obj = intersect?.object;
     const userData = obj?.userData;
+    if (userData?.isLabel === true && Number(obj?.material?.opacity) <= 0.001) {
+      continue;
+    }
     if (userData?.isRebar === true) {
       if (
         !includeRebar ||
         !obj?.visible ||
         obj.parent?.visible === false ||
-        isPointClipped(intersect?.point)
+        isPointClipped(intersect?.point, obj)
       ) {
         continue;
       }
@@ -515,10 +581,20 @@ export function collectSelectionCandidates(intersects, options = {}) {
       continue;
     }
 
+    // 鉄筋選択モードでは半透明化した躯体を視覚コンテキストとして残しつつ、
+    // 選択候補には入れない。Raycaster自体は透明度を考慮しないため候補段階で明示的に除外する。
+    if (rebarOnly) continue;
+
     const elementType = userData?.elementType || userData?.stbNodeType;
     const groupVisible = elementType ? elementGroups[elementType]?.visible : false;
 
-    if (!obj || !elementType || !groupVisible || !obj.visible || isPointClipped(intersect?.point)) {
+    if (
+      !obj ||
+      !elementType ||
+      !groupVisible ||
+      !obj.visible ||
+      isPointClipped(intersect?.point, obj)
+    ) {
       continue;
     }
     if (seenObjects.has(obj)) {
@@ -553,31 +629,44 @@ export function collectSelectionCandidates(intersects, options = {}) {
 }
 
 /**
- * 交差点がレンダラーのクリッピング平面によって切り取られているか判定する
+ * 交差点が現在のClippingStateManagerの表示範囲外か判定する。
+ * SectionBoxはrenderer-globalを空にしてmaterial-local 6面を使うため、
+ * 選択判定も同じSSOTを参照する。
  * @param {THREE.Vector3} point - 交差点のワールド座標
+ * @param {THREE.Object3D|null} object - 交差オブジェクト
  * @returns {boolean} クリップされている（不可視）場合 true
  */
-function isPointClipped(point) {
-  if (!renderer || !renderer.localClippingEnabled) return false;
-  const planes = renderer.clippingPlanes;
-  if (!planes || planes.length === 0) return false;
-  for (const plane of planes) {
-    if (plane.distanceToPoint(point) < 0) return true;
+function isPointClipped(point, object = null) {
+  if (!point) return false;
+
+  const sectionBoxActive = clippingStateManager.isSectionBoxActive();
+  if (
+    sectionBoxActive &&
+    (object?.userData?.clippingExempt === true || object?.userData?.isLabel === true)
+  ) {
+    return false;
   }
-  return false;
+
+  const planes = sectionBoxActive
+    ? clippingStateManager.getSectionBoxPlanes()
+    : clippingStateManager.getNormalPlanes();
+  if (!planes || planes.length === 0) return false;
+  return planes.some((plane) => plane.distanceToPoint(point) < 0);
 }
 
 /**
  * 交差結果から優先度に基づいて最適なオブジェクトを選択
- * 通常は線要素 > 面要素 > Axis/Story、鉄筋選択モード中は鉄筋を先にする。
+ * 通常は線要素 > 面要素 > Axis/Story。鉄筋選択モード中は鉄筋だけを候補にする。
  * @param {THREE.Intersection[]} intersects - レイキャストの交差結果
  * @returns {THREE.Object3D|null} 選択すべきオブジェクト
  */
 function findBestIntersection(intersects) {
+  const rebarSelectionMode = isRebarSelectionModeActive();
   return (
     collectSelectionCandidates(intersects, {
       includeAxisStory: false,
-      includeRebar: isRebarSelectionModeActive(),
+      includeRebar: rebarSelectionMode,
+      rebarOnly: rebarSelectionMode,
     })[0] || null
   );
 }
@@ -623,7 +712,7 @@ function processElementSelection(event, scheduleRender) {
   event.preventDefault();
   selectionCandidateSession.updatePointer(event);
 
-  const intersects = performRaycast(event);
+  const intersects = performSelectableRaycast(event);
   if (!intersects) return;
 
   // Ctrlキーが押されているか確認（複数選択モード）

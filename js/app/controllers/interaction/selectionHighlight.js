@@ -38,6 +38,8 @@ export function createHighlightMaterial(obj, colorMode = 'highlight') {
     });
   }
 
+  const liveClippingPlanes = highlightMat?.clippingPlanes;
+
   if (colorMode === 'selectionCandidate' && highlightMat?.isMaterial) {
     if (obj instanceof THREE.Line) {
       if (!selectionCandidateMaterialCache.line) {
@@ -71,6 +73,13 @@ export function createHighlightMaterial(obj, colorMode = 'highlight') {
     }
     if (!highlightMat.userData.isSelectionPreviewMaterial) {
       highlightMat.userData = { ...highlightMat.userData, isSelectionPreviewMaterial: true };
+    }
+
+    // candidate cache、特にSRC用cloneがSectionBoxのPlaneを複製して固定しないよう、
+    // ColorManagerから取得した現在のlive clipping配列へ毎回戻す。
+    if (!(obj instanceof THREE.Sprite) && 'clippingPlanes' in highlightMat) {
+      highlightMat.clippingPlanes = liveClippingPlanes;
+      highlightMat.needsUpdate = true;
     }
   }
 

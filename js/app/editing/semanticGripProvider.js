@@ -16,7 +16,6 @@ const ELEMENT_TAG_BY_TYPE = Object.freeze({
   Brace: STB_TAG_NAMES.BRACE,
   Slab: STB_TAG_NAMES.SLAB,
   Wall: STB_TAG_NAMES.WALL,
-  ShearWall: STB_TAG_NAMES.WALL,
 });
 
 const LINE_NODE_ATTRIBUTES = Object.freeze({
@@ -145,7 +144,7 @@ export function getSemanticGrips(document, identity, options = {}) {
   if (LINE_NODE_ATTRIBUTES[identity.elementType]) {
     return gripsForLineElement(document, nodeMap, identity, element);
   }
-  if (identity.elementType === 'Slab' || ['Wall', 'ShearWall'].includes(identity.elementType)) {
+  if (identity.elementType === 'Slab' || identity.elementType === 'Wall') {
     return gripsForPanel(document, nodeMap, identity, element);
   }
   return [];

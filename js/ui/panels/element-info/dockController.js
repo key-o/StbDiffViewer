@@ -21,6 +21,7 @@ const DOCK_BTN_ID = 'dock-component-info-btn';
 let isDocked = false;
 let savedCssText = '';
 let resizeObserver = null;
+let resizeFrame = null;
 let classObserver = null;
 
 /**
@@ -68,7 +69,14 @@ function dock(panel) {
   syncBodyPadding(panel);
 
   // 横幅リサイズに追従して余白を更新
-  resizeObserver = new ResizeObserver(() => syncDockWidth(panel));
+  resizeObserver = new ResizeObserver(() => {
+    if (resizeFrame != null) return;
+    // 通知中にbody余白とcanvasサイズを変えず、次の描画frameでまとめて反映する。
+    resizeFrame = requestAnimationFrame(() => {
+      resizeFrame = null;
+      if (isDocked) syncDockWidth(panel);
+    });
+  });
   resizeObserver.observe(panel);
 
   // 表示/非表示の切替に追従して余白を付け外し
@@ -89,6 +97,8 @@ function undock(panel) {
 
   resizeObserver?.disconnect();
   resizeObserver = null;
+  if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
+  resizeFrame = null;
   classObserver?.disconnect();
   classObserver = null;
 

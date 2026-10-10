@@ -9,7 +9,6 @@
 import * as THREE from 'three';
 
 import { getElementRedrawConfig } from '../../config/elementRedrawConfig.js';
-import { getViewerWallElementType } from '../../common-stb/walls/wallClassification.js';
 
 function getMapValueById(map, id) {
   if (!(map instanceof Map)) return undefined;
@@ -92,17 +91,11 @@ function isPolygonLikeConfig(config) {
 }
 
 function isSupportedPolygonElementType(elementType) {
-  return ['Slab', 'Wall', 'ShearWall', 'FrameDampingDevice'].includes(elementType);
+  return ['Slab', 'Wall', 'FrameDampingDevice'].includes(elementType);
 }
 
-function getFilteredElements(parsedData, config, elementType) {
-  const elements = Array.isArray(parsedData?.[config.elementsKey])
-    ? parsedData[config.elementsKey]
-    : [];
-  if (elementType === 'Wall' || elementType === 'ShearWall') {
-    return elements.filter((element) => getViewerWallElementType(element) === elementType);
-  }
-  return elements;
+function getFilteredElements(parsedData, config) {
+  return Array.isArray(parsedData?.[config.elementsKey]) ? parsedData[config.elementsKey] : [];
 }
 
 function findElementById(elements, elementId) {
@@ -113,14 +106,12 @@ function findElementById(elements, elementId) {
 }
 
 function getGeneratorAdditionalData(elementType, parsedData) {
-  return elementType === 'Wall' || elementType === 'ShearWall'
-    ? parsedData?.openingElements || null
-    : null;
+  return elementType === 'Wall' ? parsedData?.openingElements || null : null;
 }
 
 /**
  * Working座標で1要素だけ既存solid generatorを実行する。
- * Slab / Wall / ShearWall / FrameDampingDevice は current full-render path と同じ
+ * Slab / Wall / FrameDampingDevice は current full-render path と同じ
  * polygon generator を element-ID 単位で再利用する。FrameDampingDevice の
  * configuration は parsed element に保持し、既存 generator contract をそのまま渡す。
  * generatorInfo は viewer 公開境界側のcontrollerから注入する。
@@ -151,7 +142,7 @@ export function generateWorkingSolidMeshes(options = {}) {
     return { supported: false, meshes: [], reason: 'parsed-data-missing', element: null };
   }
 
-  const element = findElementById(getFilteredElements(parsedData, config, elementType), elementId);
+  const element = findElementById(getFilteredElements(parsedData, config), elementId);
   if (!element) {
     return { supported: false, meshes: [], reason: 'element-not-found', element: null };
   }

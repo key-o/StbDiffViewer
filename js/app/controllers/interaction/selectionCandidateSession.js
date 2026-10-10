@@ -161,7 +161,7 @@ export function createSelectionCandidateSession(dependencies = {}) {
     }
 
     const currentCandidate = candidates[candidateIndex] || null;
-    const currentIntersects = intersects || raycast({ ...pointer }) || [];
+    const currentIntersects = intersects || raycast({ ...pointer, type: event?.type }) || [];
     const nextCandidates = collectCandidates(currentIntersects, { includeAxisStory: true }).slice(
       0,
       config.candidateLimit,

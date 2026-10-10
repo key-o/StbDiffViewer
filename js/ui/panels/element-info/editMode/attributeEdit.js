@@ -41,7 +41,6 @@ const CHANGE_SECTION_ELEMENT_TYPES = new Set([
   'Brace',
   'Slab',
   'Wall',
-  'ShearWall',
   'Footing',
   'StripFooting',
   'Pile',

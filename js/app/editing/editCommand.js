@@ -15,6 +15,7 @@ import { applyRenumberIdCommand } from './renumberIdCommand.js';
 import { applyAddElementCommand } from './addElementCommand.js';
 import { applyDeleteElementCommand } from './deleteElementCommand.js';
 import { applyCopyNodeMembershipCommand } from './nodeMembershipCommand.js';
+import { applyConcreteAccommodationExtensionCommand } from './concreteAccommodationExtensionCommand.js';
 
 const COMPOSITE_COMMAND_TYPE = 'composite';
 
@@ -53,6 +54,8 @@ function applyLeafCommand(document, nodeMap, command, direction) {
       return applyDeleteElementCommand(document, nodeMap, command, direction);
     case 'copyNodeMembership':
       return applyCopyNodeMembershipCommand(document, nodeMap, command, direction);
+    case 'upsertConcreteAccommodationExtension':
+      return applyConcreteAccommodationExtensionCommand(document, nodeMap, command, direction);
     default:
       throw new Error(`未対応の編集 Command です: ${command?.type ?? '(unknown)'}`);
   }

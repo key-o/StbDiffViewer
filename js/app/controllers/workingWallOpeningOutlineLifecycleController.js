@@ -1,5 +1,5 @@
 /**
- * @fileoverview Working Wall / ShearWall の非solid開口輪郭を element-ID 単位で同期する。
+ * @fileoverview Working Wall の非solid開口輪郭を element-ID 単位で同期する。
  *
  * Wall solid は Working parse の openingElements を使って局所再生成されるが、line/panel 表示の
  * 開口輪郭は通常 redraw の drawWallOpeningOutlines() が別途生成している。Working edit では
@@ -15,7 +15,6 @@ import * as THREE from 'three';
 
 import { eventBus, EditEvents } from '../../data/events/index.js';
 import { scheduleRender } from '../../utils/renderScheduler.js';
-import { getViewerWallElementType } from '../../common-stb/walls/wallClassification.js';
 import { WorkingNodeVectorView } from '../editing/workingSolidGenerator.js';
 import { drawWallOpeningOutlines } from '../viewModes/elementRedrawWalls.js';
 import { displayModeManager, elementGroups, parseStbFile } from '../../viewer/index.js';
@@ -41,7 +40,7 @@ const COMPARISON_METADATA_KEYS = Object.freeze([
 ]);
 
 function isWallViewerType(elementType) {
-  return elementType === 'Wall' || elementType === 'ShearWall';
+  return elementType === 'Wall';
 }
 
 function findRawWall(document, wallId) {
@@ -188,7 +187,15 @@ export function createWorkingWallOpeningOutlineLifecycleController(dependencies 
       : null;
 
     // delete/discard 等で対象 wall が無くなった場合でも stale outline は除去する。
-    if (!wall || !rawWall || getViewerWallElementType(rawWall) !== elementType) {
+    if (!wall || !rawWall) {
+      const removed = removeExistingOutlines(group, elementType, wallId);
+      return { supported: true, removed, added: 0 };
+    }
+
+    // Geometry sync がkind_wall表示ポリシーを適用した後のhost有無を表示正本とする。
+    // matched pairはB側kindも含めて判定済みなので、ここでA側kindだけを再判定しない。
+    const hostRenderable = findHostWallRenderable(group, elementType, wallId);
+    if (!hostRenderable) {
       const removed = removeExistingOutlines(group, elementType, wallId);
       return { supported: true, removed, added: 0 };
     }
@@ -200,7 +207,6 @@ export function createWorkingWallOpeningOutlineLifecycleController(dependencies 
 
     // Geometry sync はこの controller より先に対象 polygon を置換するため、ここで得る host は
     // Working geometry だが comparison metadata/material は最後の明示比較 snapshot を保持している。
-    const hostRenderable = findHostWallRenderable(group, elementType, wallId);
     const removed = removeExistingOutlines(group, elementType, wallId);
     const beforeObjects = new Set(collectEditableOutlines(group, elementType, wallId));
 

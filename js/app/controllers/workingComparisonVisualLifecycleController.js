@@ -13,6 +13,7 @@
  */
 
 import { eventBus, EditEvents } from '../../data/events/index.js';
+import { RenderableLifecycleEvents } from '../../constants/renderableLifecycleEvents.js';
 import { getState } from '../../data/state/globalState.js';
 import { scheduleRender } from '../../utils/renderScheduler.js';
 import {
@@ -124,12 +125,50 @@ export function createWorkingComparisonVisualLifecycleController(dependencies = 
 
   function handlePayload(payload = {}, expectedGeneration = generation) {
     if (expectedGeneration !== generation) return 0;
-    const changes = Array.isArray(payload.structuralChanges) ? payload.structuralChanges : [];
-    if (changes.length === 0) return 0;
+    const structuralChanges = Array.isArray(payload.structuralChanges)
+      ? payload.structuralChanges
+      : [];
+    const affectedElements = Array.isArray(payload.affectedElements)
+      ? payload.affectedElements
+      : [];
+    const targets = new Map();
 
+    for (const change of structuralChanges) {
+      if (change?.operation !== 'add' || !change.elementType || change.elementId === undefined) {
+        continue;
+      }
+      const key = `${String(change.elementType)}:${String(change.elementId)}`;
+      targets.set(key, {
+        operation: 'add',
+        elementType: String(change.elementType),
+        elementId: String(change.elementId),
+      });
+    }
+
+    // kind_wall変更で一度sceneから消えた既存Wallが再表示された場合も、
+    // 最後の明示比較snapshotへ戻してmatched/onlyA identityを保持する。
+    for (const element of affectedElements) {
+      if (element?.elementType !== 'Wall' || element.elementId === undefined) continue;
+      const key = `Wall:${String(element.elementId)}`;
+      if (!targets.has(key)) {
+        targets.set(key, {
+          operation: 'add',
+          elementType: 'Wall',
+          elementId: String(element.elementId),
+        });
+      }
+    }
+
+    if (targets.size === 0) return 0;
     let updated = 0;
-    for (const change of changes) updated += reclassifyStructuralAdd(change, payload);
-    if (updated > 0) deps.scheduleRender?.();
+    for (const target of targets.values()) updated += reclassifyStructuralAdd(target, payload);
+    if (updated > 0) {
+      // selectionServiceはこの通知で現在materialを復元元として取り直し、選択highlightを再適用する。
+      deps.eventBus?.emit?.(RenderableLifecycleEvents.MATERIALS_CHANGED, {
+        reason: 'working-comparison-snapshot-restored',
+      });
+      deps.scheduleRender?.();
+    }
     return updated;
   }
 

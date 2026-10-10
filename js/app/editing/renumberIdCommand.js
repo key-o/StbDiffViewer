@@ -15,6 +15,7 @@ import {
 import { resolveSectionReferenceLocations } from '../../modelLoader/editImpactResolver.js';
 import {
   findElementByTagAndId,
+  normalizeViewerElementType,
   resolveAffectedElementsForAnchor,
   resolveElementTagName,
 } from './attributeCommandUtils.js';
@@ -92,7 +93,8 @@ function assertSupportedCategory(category, tagName) {
 export function createRenumberIdCommand(document, elementType, elementId, nextId) {
   const beforeId = normalizeId(elementId, '変更前ID');
   const afterId = normalizeId(nextId, '変更後ID');
-  const tagName = resolveElementTagName(elementType);
+  const normalizedElementType = normalizeViewerElementType(elementType);
+  const tagName = resolveElementTagName(normalizedElementType);
   if (!tagName) throw new Error('ID変更対象の elementType が不正です。');
 
   const owner = findElementByTagAndId(document, tagName, beforeId);
@@ -114,7 +116,7 @@ export function createRenumberIdCommand(document, elementType, elementId, nextId
   return {
     type: 'renumberId',
     label: `${tagName} #${beforeId} → #${afterId}`,
-    target: { elementType: String(elementType), elementId: beforeId },
+    target: { elementType: normalizedElementType, elementId: beforeId },
     tagName,
     category,
     beforeId,
@@ -122,7 +124,7 @@ export function createRenumberIdCommand(document, elementType, elementId, nextId
     referenceCount: refs.length,
     affectedElements: resolveAffectedElementsForAnchor(document, tagName, beforeId),
     identityChange: {
-      elementType: String(elementType),
+      elementType: normalizedElementType,
       tagName,
       category,
       beforeId,

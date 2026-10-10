@@ -28,7 +28,6 @@ const CHANGE_SECTION_ELEMENT_TYPES = new Set([
   'Brace',
   'Slab',
   'Wall',
-  'ShearWall',
   'Footing',
   'StripFooting',
   'Pile',
@@ -89,7 +88,7 @@ function normalizeSelections(selections) {
 function isBatchEditableAttribute(attributeName) {
   const name = String(attributeName || '');
   if (!name) return false;
-  if (name === 'id' || name === 'guid' || name === 'kind_structure' || name === 'kind_wall') {
+  if (name === 'id' || name === 'guid' || name === 'kind_structure') {
     return false;
   }
   if (name === 'id_member' || name === 'kind_member') return false;

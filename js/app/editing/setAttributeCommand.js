@@ -6,7 +6,6 @@
  * 利用できる full-position change metadata を保持する。
  */
 
-import { getViewerWallElementType } from '../../common-stb/walls/wallClassification.js';
 import {
   applyNullableAttributeValue,
   normalizeNullableAttributeValue,
@@ -21,21 +20,6 @@ const NODE_COORDINATE_KEYS = Object.freeze({ X: 'x', Y: 'y', Z: 'z' });
 
 function positionsEqual(a, b) {
   return a?.x === b?.x && a?.y === b?.y && a?.z === b?.z;
-}
-
-function assertViewerIdentityTransitionSupported(target, attributeName, before, after) {
-  if (target.anchorTagName !== 'StbWall' || attributeName !== 'kind_wall' || before === after) {
-    return;
-  }
-
-  const beforeType = getViewerWallElementType({ kind_wall: before });
-  const afterType = getViewerWallElementType({ kind_wall: after });
-  if (beforeType !== afterType) {
-    throw new Error(
-      `StbWall.kind_wall の変更で Viewer identity が ${beforeType} → ${afterType} に変わります。` +
-        'Wall / ShearWall 間の scene group 移送は専用 reclassification Command が必要なため、現在は変更できません。',
-    );
-  }
 }
 
 function createNodeChange(target, attributeName, afterValue) {
@@ -82,7 +66,6 @@ export function createSetAttributeCommand(
     ? target.element.getAttribute(normalizedAttributeName)
     : null;
   const after = normalizeNullableAttributeValue(nextValue);
-  assertViewerIdentityTransitionSupported(target, normalizedAttributeName, before, after);
   const nodeChange = createNodeChange(target, normalizedAttributeName, after);
 
   return {

@@ -7,7 +7,7 @@ import { createLogger } from '../../../utils/logger.js';
 import { getState } from '../../../data/state/globalState.js';
 import editDocumentProvider from '../../../app/editing/editDocumentProvider.js';
 import { getImportanceManager } from '../../../app/importanceManager.js';
-import { eventBus, ImportanceEvents } from '../../../data/events/index.js';
+import { eventBus, EditEvents, ImportanceEvents } from '../../../data/events/index.js';
 import {
   setDisplayElementInfoFn,
   setCurrentEditingElement,
@@ -210,7 +210,7 @@ export async function displayElementInfo(idA, idB, elementType, modelSource = nu
       actualElementType = nodeB.tagName.replace('Stb', '');
     }
   } else {
-    const TAG_NAME_OVERRIDES = { Axis: 'StbParallelAxis', Node: 'StbNode', ShearWall: 'StbWall' };
+    const TAG_NAME_OVERRIDES = { Axis: 'StbParallelAxis', Node: 'StbNode' };
     const tagName = TAG_NAME_OVERRIDES[elementType] || `Stb${elementType}`;
 
     if (idA && docA) {
@@ -399,6 +399,10 @@ export function exportElementInfoAsJson() {
 setDisplayElementInfoFn(displayElementInfo);
 
 eventBus.on(ImportanceEvents.SETTINGS_CHANGED, () => {
+  refreshElementInfoPanel();
+});
+
+eventBus.on(EditEvents.WORKING_QUANTITIES_UPDATED, () => {
   refreshElementInfoPanel();
 });
 

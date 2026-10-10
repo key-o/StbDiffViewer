@@ -7,7 +7,6 @@
  */
 
 import { COMPARISON_CATEGORY } from '../../constants/comparisonCategories.js';
-import { getViewerWallElementType } from '../../common-stb/walls/wallClassification.js';
 import { findElementByTagAndId, resolveElementTagName } from './attributeCommandUtils.js';
 
 const MATCHED_CATEGORIES = Object.freeze([
@@ -18,7 +17,7 @@ const MATCHED_CATEGORIES = Object.freeze([
 
 function comparisonResultCandidates(comparisonResults, elementType) {
   if (!(comparisonResults instanceof Map)) return [];
-  const keys = elementType === 'ShearWall' ? ['ShearWall', 'Wall'] : [elementType];
+  const keys = [elementType === 'ShearWall' ? 'Wall' : elementType];
   const result = [];
   const seen = new Set();
   for (const key of keys) {
@@ -49,13 +48,6 @@ function sourceElementExists(sourceDocument, elementType, elementId) {
   const tagName = resolveElementTagName(elementType);
   const element = findElementByTagAndId(sourceDocument, tagName, elementId);
   if (!element) return false;
-  if (
-    tagName === 'StbWall' &&
-    (elementType === 'Wall' || elementType === 'ShearWall') &&
-    getViewerWallElementType(element) !== elementType
-  ) {
-    return false;
-  }
   return true;
 }
 

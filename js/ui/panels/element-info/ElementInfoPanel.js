@@ -475,7 +475,7 @@ export function showInfo(
 
   content += renderSectionInfo(nodeA, nodeB, showSingleColumn, modelSource, elementType);
 
-  if (elementType === 'Wall' || elementType === 'ShearWall' || elementType === 'Slab') {
+  if (elementType === 'Wall' || elementType === 'Slab') {
     content += renderOpeningInfo(nodeA, nodeB, showSingleColumn);
   }
 
@@ -486,13 +486,30 @@ export function showInfo(
   content += '</tbody></table>';
 
   const editingState = getState('models.editing');
+  const workingRevision = Number(editingState?.workingRevision || 0);
+  const workingQuantityRevision = getState('models.workingQuantityRevision');
+  const workingQuantitiesReady =
+    editingState?.active === true &&
+    workingRevision > 0 &&
+    getState('models.workingQuantitySessionId') === editingState.sessionId &&
+    workingQuantityRevision === workingRevision &&
+    !!getState('models.derivedQuantitiesWorkingA');
+  const workingQuantityFailed =
+    editingState?.active === true &&
+    workingRevision > 0 &&
+    getState('models.workingQuantitySessionId') === editingState.sessionId &&
+    workingQuantityRevision === workingRevision &&
+    !!getState('models.workingQuantityError');
   const suppressAReason =
-    editingState?.active &&
-    (editingState.dirty || editingState.untrackedDirty || Number(editingState.workingRevision) > 0)
-      ? '編集中のモデルA数量は増分再計算未対応のため、stale値を表示していません。'
+    editingState?.active === true && workingRevision > 0 && !workingQuantitiesReady
+      ? workingQuantityFailed
+        ? 'Working Documentの数量再計算に失敗しました。'
+        : 'Working Documentの数量を再計算しています。'
       : null;
   const derivedContent = renderQuantityInfoFromStores({
-    storeA: getState('models.derivedQuantitiesA'),
+    storeA: workingQuantitiesReady
+      ? getState('models.derivedQuantitiesWorkingA')
+      : getState('models.derivedQuantitiesA'),
     storeB: getState('models.derivedQuantitiesB'),
     nodeA,
     nodeB,

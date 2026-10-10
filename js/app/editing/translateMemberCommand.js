@@ -6,6 +6,7 @@
  * panel offset list が元データに存在しない場合も apply 時に生成し、Undo では未定義状態へ戻す。
  */
 
+import { normalizeWallViewerElementType } from '../../common-stb/walls/wallClassification.js';
 import {
   applyNullableAttributeValue,
   findElementByTagAndId,
@@ -46,13 +47,12 @@ const LINE_CONFIG = Object.freeze({
 const PANEL_CONFIG = Object.freeze({
   Slab: Object.freeze({ listTag: 'StbSlabOffsetList', itemTag: 'StbSlabOffset' }),
   Wall: Object.freeze({ listTag: 'StbWallOffsetList', itemTag: 'StbWallOffset' }),
-  ShearWall: Object.freeze({ listTag: 'StbWallOffsetList', itemTag: 'StbWallOffset' }),
 });
 
 function normalizeElementType(elementType) {
   const normalized = String(elementType || '').trim();
   if (!normalized) throw new Error('部材 MOVE には elementType が必要です。');
-  return normalized;
+  return normalizeWallViewerElementType(normalized);
 }
 
 function normalizeDelta(delta) {

@@ -13,6 +13,7 @@ import {
 import { resolveSectionReferenceLocations } from '../../modelLoader/editImpactResolver.js';
 import {
   findElementByTagAndId,
+  normalizeViewerElementType,
   resolveAffectedElementsForAnchor,
   resolveElementTagName,
 } from './attributeCommandUtils.js';
@@ -149,7 +150,8 @@ function collectTrackedReferences(document, tagName, elementId, category) {
 export function createDeleteElementCommand(document, elementType, elementId, options = {}) {
   const id = String(elementId ?? '').trim();
   if (!id) throw new Error('DeleteElementCommand には elementId が必要です。');
-  const tagName = options.tagName || resolveElementTagName(elementType);
+  const normalizedElementType = normalizeViewerElementType(elementType);
+  const tagName = options.tagName || resolveElementTagName(normalizedElementType);
   if (!tagName) throw new Error('DeleteElementCommand の elementType が不正です。');
 
   const element = findElementByTagAndId(document, tagName, id);
@@ -178,7 +180,7 @@ export function createDeleteElementCommand(document, elementType, elementId, opt
       ? null
       : {
           operation: 'delete',
-          elementType: String(elementType),
+          elementType: normalizedElementType,
           elementId: id,
           tagName,
         };
@@ -186,7 +188,7 @@ export function createDeleteElementCommand(document, elementType, elementId, opt
   return {
     type: 'deleteElement',
     label: options.label || `${tagName} #${id} を削除`,
-    target: { elementType: String(elementType), elementId: id },
+    target: { elementType: normalizedElementType, elementId: id },
     tagName,
     category,
     elementId: id,

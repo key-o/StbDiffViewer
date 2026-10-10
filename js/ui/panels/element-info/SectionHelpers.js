@@ -9,17 +9,30 @@ import { getState } from '../../../data/state/globalState.js';
 import editDocumentProvider from '../../../app/editing/editDocumentProvider.js';
 import { SECTION_CONFIG } from '../../../common-stb/import/config/sectionConfig.js';
 import { extractAllSections } from '../../../common-stb/import/extractor/sectionExtractor.js';
+import { resolveMemberConcreteStrength } from '../../../data/extractors/concreteStrengthResolver.js';
+import { buildBeamReinforcementEquivalenceData } from '../../../common-stb/comparison/beamReinforcementEquivalence.js';
 import { escapeHtml } from '../../../utils/htmlUtils.js';
 
 const SECTION_LOOKUP_ALIASES = {
   FrameDampingDevice: 'DampingDevice',
-  ShearWall: 'Wall',
 };
 
-// 梁/大梁のみ GSS（形状等価）対象。elementType → extractAllSections の断面マップキー。
+// elementType → extractAllSections の断面マップキー。
 const GEOMETRY_SECTION_MAP_KEY = {
+  Column: 'columnSections',
+  Post: 'postSections',
   Girder: 'girderSections',
   Beam: 'beamSections',
+  Brace: 'braceSections',
+  Pile: 'pileSections',
+  Footing: 'footingSections',
+  FoundationColumn: 'foundationColumnSections',
+  Slab: 'slabSections',
+  Wall: 'wallSections',
+  Parapet: 'parapetSections',
+  Undefined: 'undefinedSections',
+  IsolatingDevice: 'isolatingDeviceSections',
+  DampingDevice: 'dampingDeviceSections',
 };
 
 // ドキュメント単位の断面抽出キャッシュ（選択の都度の全断面抽出を回避）。
@@ -39,8 +52,8 @@ function getExtractedSections(doc) {
 }
 
 /**
- * 梁/大梁の断面 id からカーネル抽出済みの断面データ（shapeStations 等を含む）を取得する。
- * GSS（形状等価）判定・記述に用いる。対象外要素や未取得なら null。
+ * 断面 id から統一カーネル抽出済みの断面データ（dimensions / shapeStations 等を含む）を取得する。
+ * 梁・大梁のGSS判定に加え、概略属性比較の寸法正規化にも利用する。
  *
  * @param {XMLDocument|null} doc
  * @param {string|number} sectionId
@@ -68,6 +81,65 @@ function getLookupElementType(elementType) {
   }
 
   return SECTION_LOOKUP_ALIASES[elementType] || elementType;
+}
+
+function scanTagFromDocument(doc) {
+  return (tagName) => {
+    if (!doc || !tagName) return [];
+    const nodes = doc.getElementsByTagName?.(tagName);
+    return nodes ? Array.from(nodes) : [];
+  };
+}
+
+function getOrderedNodeIds(memberNode) {
+  const order = memberNode?.querySelector?.('StbNodeIdOrder')?.textContent?.trim();
+  if (!order) return [];
+  return order.split(/\s+/).filter(Boolean);
+}
+
+function getConcreteStoryNodeId(memberNode, elementType) {
+  if (!memberNode) return null;
+
+  switch (elementType) {
+    case 'Column':
+    case 'Post':
+      return memberNode.getAttribute('id_node_top');
+    case 'Girder':
+    case 'Beam':
+      return memberNode.getAttribute('id_node_start');
+    case 'Slab': {
+      const ids = getOrderedNodeIds(memberNode);
+      return ids[0] || null;
+    }
+    case 'Wall': {
+      const ids = getOrderedNodeIds(memberNode);
+      return ids.at(-1) || null;
+    }
+    case 'Footing':
+    case 'FoundationColumn':
+      return memberNode.getAttribute('id_node') || memberNode.getAttribute('id_node_start');
+    case 'Parapet':
+      return memberNode.getAttribute('id_node_start');
+    default:
+      return null;
+  }
+}
+
+function resolveConcreteStrengthForComparison(
+  sectionNode,
+  memberNode,
+  elementType,
+  sectionStrength,
+) {
+  if (!sectionNode?.ownerDocument || !memberNode) return sectionStrength || null;
+
+  const result = resolveMemberConcreteStrength({
+    scanTag: scanTagFromDocument(sectionNode.ownerDocument),
+    memberEl: memberNode,
+    sectionStrength: sectionStrength || null,
+    storyNodeId: getConcreteStoryNodeId(memberNode, elementType),
+  });
+  return result.value || sectionStrength || null;
 }
 
 /**
@@ -166,7 +238,7 @@ export function findSteelSectionInfo(shapeName, document = null) {
  * @param {Element} sectionNode - 断面XML要素
  * @returns {Object|null} 抽出された断面データ
  */
-export function extractSectionData(sectionNode) {
+export function extractSectionData(sectionNode, elementType = null, memberNode = null) {
   if (!sectionNode) return null;
 
   const data = {
@@ -180,31 +252,89 @@ export function extractSectionData(sectionNode) {
     data[attr.name] = attr.value;
   });
 
-  // 材質と強度情報を抽出
-  data.material = data.strength_name || data.material;
+  // 統一断面抽出カーネルが既に保持している正規化寸法・断面タイプを再利用する。
+  // RC梁の width/depth が子要素にあるケースもここで比較対象へ入る。
+  const kernelSectionData = getGeometrySectionData(
+    sectionNode.ownerDocument,
+    sectionNode.getAttribute('id'),
+    elementType,
+  );
+  if (kernelSectionData?.dimensions) {
+    data.dimensions = { ...kernelSectionData.dimensions };
+  }
+  if (kernelSectionData?.section_type) {
+    data.section_type = kernelSectionData.section_type;
+  }
 
-  // shapeName属性からの断面寸法取得
+  const hasSteelComponent = /_(?:S|SRC|CFT)$/.test(sectionNode.tagName);
+
+  // S/SRC/CFT 断面では shape / 鋼種が断面ルートではなく StbSecSteel* 子孫にある。
+  // RC配筋の strength_main（SD345等）を鋼材強度と誤認しないよう、鉄骨系断面に限定する。
+  if (hasSteelComponent) {
+    const descendantAttributeNames = ['shape', 'strength_main', 'strength_web', 'strength'];
+    for (const attrName of descendantAttributeNames) {
+      if (data[attrName]) continue;
+      const carrier = sectionNode.querySelector?.(`[${attrName}]`);
+      const value = carrier?.getAttribute?.(attrName);
+      if (value) data[attrName] = value;
+    }
+
+    // strength_web は ST-Bridge 仕様上、省略時は strength_main と同一として扱う。
+    if (data.strength_main && !data.strength_web) {
+      data.strength_web = data.strength_main;
+    }
+  }
+
+  // RC系のコンクリート強度は、部材→断面→階→StbCommon の仕様上の優先順位で解決する。
+  const isPureRcSection = /_RC$/.test(sectionNode.tagName);
+  const isConcreteCompositeSection = /_(?:SRC|CFT)$/.test(sectionNode.tagName);
+  if (isPureRcSection || isConcreteCompositeSection) {
+    const effectiveConcreteStrength = resolveConcreteStrengthForComparison(
+      sectionNode,
+      memberNode,
+      elementType,
+      data.strength_concrete || kernelSectionData?.strength_concrete || null,
+    );
+    if (effectiveConcreteStrength) {
+      data.strength_concrete = effectiveConcreteStrength;
+    }
+  }
+
+  // shape 属性から StbSecSteel の定義を引き、寸法と実断面タイプを補完する。
   if (data.shape) {
     const steelInfo = findSteelSectionInfo(data.shape, sectionNode.ownerDocument);
     if (steelInfo) {
-      Object.assign(data, steelInfo);
+      const { type: steelType, ...steelDimensions } = steelInfo;
+      Object.assign(data, steelDimensions);
+      if (sectionNode.tagName.endsWith('_S')) {
+        data.section_type = steelType;
+      }
     }
   }
 
-  // セクション種別に応じた正規化
-  // StbSecColumn-S, StbSecBeam-S, StbSecColumn-RC, StbSecBeam-RC などのタグ名に対応
-  if (data.type) {
-    // タグ名から断面タイプを抽出
-    if (data.type.includes('-S')) {
-      data.section_type = data.type; // 鋼材断面
-    } else if (
-      data.type.includes('-RC') ||
-      data.type.includes('-SRC') ||
-      data.type.includes('-CFT')
-    ) {
-      data.section_type = 'RECTANGLE'; // RC断面はデフォルトで矩形
+  // セクション種別に応じた正規化。
+  // 実断面タイプが取得できない場合のみ、親要素タグからフォールバックする。
+  if (!data.section_type && data.type) {
+    if (data.type.endsWith('_S')) {
+      data.section_type = data.type;
+    } else if (data.type.endsWith('_SRC')) {
+      data.section_type = 'SRC';
+    } else if (data.type.endsWith('_CFT')) {
+      data.section_type = 'CFT';
+    } else if (data.type.endsWith('_RC')) {
+      data.section_type = 'RECTANGLE';
     }
   }
+
+  // 概略属性比較の代表トークン。
+  // 純RCではコンクリート強度を用い、鉄骨系では鋼種を優先する。
+  data.material = isPureRcSection
+    ? data.strength_concrete || null
+    : data.strength_name || data.strength_main || data.strength || data.strength_concrete || null;
+
+  // RC梁配筋は Same / ThreeTypes / StartEnd / 2.1 Simple/Complex の記述差を
+  // 既存抽出器で正規化してから比較する。
+  data.reinforcement = buildBeamReinforcementEquivalenceData(sectionNode);
 
   return data;
 }
@@ -271,6 +401,10 @@ export function generateGeometryEquivalenceSection(geom, criterionLabel = null) 
  * @param {string|null} [criterionLabel] - 選択中の断面一致基準の表示名（F1: 表示を設定に追従）
  * @returns {string} テーブル行のHTML
  */
+function renderEquivalenceText(value) {
+  return escapeHtml(value ?? '').replace(/\n/g, '<br>');
+}
+
 export function generateEquivalenceSection(result, criterionLabel = null) {
   const statusColor = result.isEquivalent ? '#28a745' : '#dc3545';
   const statusText = result.isEquivalent ? '✓ 概略属性等価' : '✗ 概略属性非等価';
@@ -282,10 +416,10 @@ export function generateEquivalenceSection(result, criterionLabel = null) {
         <div style="display: flex; align-items: center; justify-content: space-between;">
           <div>
             <strong style="color: ${statusColor}; font-size: var(--font-size-lg);">${statusText}</strong>
-            <span style="margin-left: 10px; color: #666; font-size: var(--font-size-sm);">${result.summary} (${result.passRate}%)</span>
+            <span style="margin-left: 10px; color: #666; font-size: var(--font-size-sm);">${renderEquivalenceText(result.summary)} (${renderEquivalenceText(result.passRate)}%)</span>
           </div>
         </div>
-        <div style="margin-top: 4px; color: #555; font-size: var(--font-size-sm);">概略属性の判定基準: <strong>断面種別・寸法・材質・強度</strong></div>
+        <div style="margin-top: 4px; color: #555; font-size: var(--font-size-sm);">概略属性の判定基準: <strong>断面種別・寸法・材質・強度・配筋</strong></div>
         <div style="color: #777; font-size: var(--font-size-sm);">全構成属性の差分は下の比較表に表示します</div>
         ${renderSelectedCriterionLine(criterionLabel)}
       </td>
@@ -302,10 +436,10 @@ export function generateEquivalenceSection(result, criterionLabel = null) {
       <tr class="equivalence-check-row" style="background-color: ${rowBg};">
         <td style="padding-left: 2em; font-weight: var(--font-weight-bold);">
           <span style="color: ${iconColor}; margin-right: 5px;">${icon}</span>
-          ${check.category}
+          ${renderEquivalenceText(check.category)}
         </td>
         <td colspan="2" style="font-size: var(--font-size-sm); color: #555;">
-          ${check.name}: ${check.details}
+          ${renderEquivalenceText(check.name)}: ${renderEquivalenceText(check.details)}
         </td>
       </tr>
     `;
@@ -316,17 +450,38 @@ export function generateEquivalenceSection(result, criterionLabel = null) {
         const subIcon = subCheck.passed ? '✓' : '✗';
         const subColor = subCheck.passed ? '#28a745' : '#dc3545';
 
-        html += `
-          <tr class="equivalence-subcheck-row">
-            <td style="padding-left: 4em; font-size: var(--font-size-sm); color: #666;">
-              <span style="color: ${subColor}; margin-right: 3px;">${subIcon}</span>
-              ${subCheck.name}
-            </td>
-            <td colspan="2" style="font-size: var(--font-size-sm); color: #666;">
-              ${subCheck.details}
-            </td>
-          </tr>
-        `;
+        const hasSeparateValues =
+          Object.prototype.hasOwnProperty.call(subCheck, 'valueA') ||
+          Object.prototype.hasOwnProperty.call(subCheck, 'valueB');
+
+        if (hasSeparateValues) {
+          html += `
+            <tr class="equivalence-subcheck-row">
+              <td style="padding-left: 4em; font-size: var(--font-size-sm); color: #666; vertical-align: top;">
+                <span style="color: ${subColor}; margin-right: 3px;">${subIcon}</span>
+                ${renderEquivalenceText(subCheck.name)}
+              </td>
+              <td style="font-size: var(--font-size-sm); color: #666; vertical-align: top; line-height: 1.5;">
+                ${renderEquivalenceText(subCheck.valueA ?? 'なし')}
+              </td>
+              <td style="font-size: var(--font-size-sm); color: #666; vertical-align: top; line-height: 1.5;">
+                ${renderEquivalenceText(subCheck.valueB ?? 'なし')}
+              </td>
+            </tr>
+          `;
+        } else {
+          html += `
+            <tr class="equivalence-subcheck-row">
+              <td style="padding-left: 4em; font-size: var(--font-size-sm); color: #666;">
+                <span style="color: ${subColor}; margin-right: 3px;">${subIcon}</span>
+                ${renderEquivalenceText(subCheck.name)}
+              </td>
+              <td colspan="2" style="font-size: var(--font-size-sm); color: #666;">
+                ${renderEquivalenceText(subCheck.details)}
+              </td>
+            </tr>
+          `;
+        }
       }
     }
   }
@@ -358,7 +513,7 @@ export function buildElementDataForLabels(elementType, elementNode, doc) {
   if (doc && sectionId) {
     const sectionNode = findSectionNode(doc, sectionId, elementType);
     if (sectionNode) {
-      data.sectionData = extractSectionData(sectionNode);
+      data.sectionData = extractSectionData(sectionNode, elementType, elementNode);
     }
   }
 

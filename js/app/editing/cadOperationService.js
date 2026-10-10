@@ -7,6 +7,7 @@
  * composite transaction を使用する。section edit は既存の専用 semantic Command を引き続き使用する。
  */
 
+import { normalizeWallViewerElementType } from '../../common-stb/walls/wallClassification.js';
 import { createCopyElementsService } from './copyElementsService.js';
 import editingSession from './editingSession.js';
 import { createMoveNodeCommand } from './moveNodeCommand.js';
@@ -45,7 +46,6 @@ const NODE_FIXED_MEMBER_TYPES = new Set([
   'Brace',
   'Slab',
   'Wall',
-  'ShearWall',
 ]);
 
 function normalizeSelections(selections) {
@@ -56,7 +56,7 @@ function normalizeSelections(selections) {
   const result = [];
   const seen = new Set();
   for (const selection of selections) {
-    const elementType = String(selection?.elementType ?? '').trim();
+    const elementType = normalizeWallViewerElementType(String(selection?.elementType ?? '').trim());
     const elementId = String(selection?.elementId ?? '').trim();
     if (!elementType || !elementId) {
       throw new Error('MOVE の semantic selection に elementType / elementId が必要です。');
@@ -299,10 +299,7 @@ export function createCadOperationService(session = editingSession, dependencies
           `${selection.elementType} は「関連節点を追従しない」MOVE の対象ではありません。`,
         );
       }
-      const memberKey =
-        selection.elementType === 'ShearWall'
-          ? `Wall:${selection.elementId}`
-          : `${selection.elementType}:${selection.elementId}`;
+      const memberKey = `${selection.elementType}:${selection.elementId}`;
       if (seenMembers.has(memberKey)) continue;
       seenMembers.add(memberKey);
       const command = createTranslateMemberCommand(

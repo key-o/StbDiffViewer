@@ -5,7 +5,7 @@
  * AddElementCommand の composite transaction として複製する。
  *
  * 初期契約:
- * - Node / Column / Post / Girder / Beam / Brace / Slab / Wall(ShearWall) を対象とする。
+ * - Node / Column / Post / Girder / Beam / Brace / Slab / Wall を対象とする。
  * - 選択部材が参照する Node は自動的に複製し、選択要素間で共有される Node は1回だけ複製する。
  * - member -> Node 参照は新 Node ID へ remap する。
  * - source Node の StbStory / Axis に対する明示 StbNodeIdList membership を新 Node へ複製する。
@@ -16,6 +16,7 @@
  * - PanelZone / ConnectionArrangement のような node-attached topology は未対応のため fail-closed とする。
  */
 
+import { normalizeWallViewerElementType } from '../../common-stb/walls/wallClassification.js';
 import { createAddElementCommand } from './addElementCommand.js';
 import { viewerElementTypeFromElement } from './attributeCommandUtils.js';
 import editingSession from './editingSession.js';
@@ -50,10 +51,6 @@ const COPYABLE_TYPES = Object.freeze({
     parentPath: Object.freeze(['StbMembers', 'StbSlabs']),
   }),
   Wall: Object.freeze({
-    tagName: 'StbWall',
-    parentPath: Object.freeze(['StbMembers', 'StbWalls']),
-  }),
-  ShearWall: Object.freeze({
     tagName: 'StbWall',
     parentPath: Object.freeze(['StbMembers', 'StbWalls']),
   }),
@@ -171,10 +168,11 @@ function normalizeSelections(selections) {
       throw new Error('Model B の要素は COPY できません。');
     }
 
-    const definition = COPYABLE_TYPES[String(selection.elementType)];
+    const elementType = normalizeWallViewerElementType(String(selection.elementType));
+    const definition = COPYABLE_TYPES[elementType];
     if (!definition) throw new Error(`COPY 未対応の要素種別です: ${selection.elementType}`);
     const normalized = {
-      elementType: String(selection.elementType),
+      elementType,
       elementId: String(selection.elementId),
       definition,
     };

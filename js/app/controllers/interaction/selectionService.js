@@ -74,10 +74,19 @@ export function createSelectionService(dependencies = {}) {
   }
 
   function cloneMaterialSnapshot(material) {
-    if (Array.isArray(material)) {
-      return material.map((item) => item?.clone?.() || item);
-    }
-    return material?.clone?.() || material || null;
+    const cloneOne = (item) => {
+      const cloned = item?.clone?.() || item || null;
+      if (cloned && cloned !== item && item && 'clippingPlanes' in cloned) {
+        // THREE.Material.clone() は clipping plane 自体も複製する。
+        // SectionBox は同じ6枚のPlaneをin-place更新するため、選択解除用snapshotも
+        // 元Materialと同じ配列参照を保持しないと、解除後に古いBox位置でclipされ続ける。
+        cloned.clippingPlanes = item.clippingPlanes;
+      }
+      return cloned;
+    };
+
+    if (Array.isArray(material)) return material.map(cloneOne);
+    return cloneOne(material);
   }
 
   function disposeMaterialSnapshot(material) {
