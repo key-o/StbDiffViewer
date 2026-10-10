@@ -6,6 +6,7 @@
 
 import { extractProfileFromSection } from '../commonDataCollector.js';
 import { createLogger } from '../../../../utils/logger.js';
+import { getSectionDataFromMap } from '../../../../data/accessors/sectionMapAccessor.js';
 import {
   collectElementDataForExport,
   extractCommonElementData,
@@ -110,7 +111,7 @@ function convertPileToExportData(element, nodeMap, sectionMap) {
     let constructionType = 'PREFAB_STEEL';
 
     if (sectionMap) {
-      const sectionData = sectionMap.get(element.id_section);
+      const sectionData = getSectionDataFromMap(sectionMap, element.id_section);
       if (sectionData) {
         diameter = extractDimensionFromSection(sectionData, ['D', 'diameter'], 600);
         wallThickness = extractDimensionFromSection(sectionData, ['t', 'wallThickness'], null);
@@ -287,18 +288,14 @@ function convertFoundationColumnToExportData(element, nodeMap, sectionMap, steel
     // FD断面の取得
     let profileFD = null;
     if (element.id_section_FD && lengthFD > 0) {
-      const numericFDId = parseInt(element.id_section_FD, 10);
-      const sectionFDId = isNaN(numericFDId) ? element.id_section_FD : numericFDId;
-      const sectionFD = sectionMap.get(sectionFDId);
+      const sectionFD = getSectionDataFromMap(sectionMap, element.id_section_FD);
       profileFD = sectionFD ? extractProfileFromSection(sectionFD, steelSections) : null;
     }
 
     // WR断面の取得
     let profileWR = null;
     if (element.id_section_WR && lengthWR > 0) {
-      const numericWRId = parseInt(element.id_section_WR, 10);
-      const sectionWRId = isNaN(numericWRId) ? element.id_section_WR : numericWRId;
-      const sectionWR = sectionMap.get(sectionWRId);
+      const sectionWR = getSectionDataFromMap(sectionMap, element.id_section_WR);
       profileWR = sectionWR ? extractProfileFromSection(sectionWR, steelSections) : null;
     }
 

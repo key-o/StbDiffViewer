@@ -7,6 +7,7 @@
 import { createLogger } from '../utils/logger.js';
 import {
   canExportStbToDxf,
+  canExportAllStoriesToDxf,
   exportAllStoriesToDxf,
   exportAlongAllAxesToDxf,
   exportAlongAllAxesBothDirections,
@@ -70,7 +71,13 @@ export function initBatchExportButtons() {
  * 連続出力ボタンの有効/無効を更新
  */
 export function updateBatchExportButtons() {
-  const { canExport } = canExportStbToDxf();
+  const { canExport: canExportLegacy } = canExportStbToDxf();
+  const selectedTypes = getSelectedStbExportTypes();
+  const {
+    canExport: canExportStories,
+    reason: storyExportReason,
+    route: storyExportRoute,
+  } = canExportAllStoriesToDxf(selectedTypes);
   const stories = getAvailableStories();
   const axes = getAvailableAxes();
 
@@ -82,16 +89,21 @@ export function updateBatchExportButtons() {
   // 全階出力ボタン
   if (exportAllStoriesBtn) {
     const hasStories = stories && stories.length > 0;
-    exportAllStoriesBtn.disabled = !canExport || !hasStories;
-    exportAllStoriesBtn.title = hasStories
-      ? `${stories.length}階分のDXFを出力`
-      : '階データがありません';
+    exportAllStoriesBtn.disabled = !canExportStories || !hasStories;
+    exportAllStoriesBtn.title =
+      canExportStories && hasStories
+        ? storyExportRoute === 'render-plan'
+          ? `${stories.length}階分のDXFを出力（DrawingRenderPlan）`
+          : storyExportReason
+            ? `${stories.length}階分のDXFを出力（legacy互換経路: ${storyExportReason}）`
+            : `${stories.length}階分のDXFを出力（legacy互換経路）`
+        : storyExportReason || '階データがありません';
   }
 
   // X通り芯出力ボタン
   if (exportAllXAxesBtn) {
     const hasXAxes = axes && axes.xAxes && axes.xAxes.length > 0;
-    exportAllXAxesBtn.disabled = !canExport || !hasXAxes;
+    exportAllXAxesBtn.disabled = !canExportLegacy || !hasXAxes;
     exportAllXAxesBtn.title = hasXAxes
       ? `${axes.xAxes.length}通り分のDXFを出力`
       : 'X通り芯データがありません';
@@ -100,7 +112,7 @@ export function updateBatchExportButtons() {
   // Y通り芯出力ボタン
   if (exportAllYAxesBtn) {
     const hasYAxes = axes && axes.yAxes && axes.yAxes.length > 0;
-    exportAllYAxesBtn.disabled = !canExport || !hasYAxes;
+    exportAllYAxesBtn.disabled = !canExportLegacy || !hasYAxes;
     exportAllYAxesBtn.title = hasYAxes
       ? `${axes.yAxes.length}通り分のDXFを出力`
       : 'Y通り芯データがありません';
@@ -110,7 +122,7 @@ export function updateBatchExportButtons() {
   if (exportAllAxesBtn) {
     const hasAnyAxes =
       axes && ((axes.xAxes && axes.xAxes.length > 0) || (axes.yAxes && axes.yAxes.length > 0));
-    exportAllAxesBtn.disabled = !canExport || !hasAnyAxes;
+    exportAllAxesBtn.disabled = !canExportLegacy || !hasAnyAxes;
     exportAllAxesBtn.title = hasAnyAxes ? `全通り芯のDXFを出力` : '通り芯データがありません';
   }
 }
@@ -168,7 +180,9 @@ async function handleExportAllStories() {
     showError(`エクスポートに失敗しました: ${error.message}`);
     updateBatchExportProgress(null);
   } finally {
-    setBatchExportButtonsDisabled(false);
+    // 全階(RenderPlan)と通り芯(legacy)では有効条件が異なるため、
+    // 一律enableせず現在のroute/階/軸状態から再判定する。
+    updateBatchExportButtons();
   }
 }
 
@@ -207,7 +221,9 @@ async function handleExportAllAxes(direction) {
     showError(`エクスポートに失敗しました: ${error.message}`);
     updateBatchExportProgress(null);
   } finally {
-    setBatchExportButtonsDisabled(false);
+    // 全階(RenderPlan)と通り芯(legacy)では有効条件が異なるため、
+    // 一律enableせず現在のroute/階/軸状態から再判定する。
+    updateBatchExportButtons();
   }
 }
 
@@ -245,7 +261,9 @@ async function handleExportAllAxesBoth() {
     showError(`エクスポートに失敗しました: ${error.message}`);
     updateBatchExportProgress(null);
   } finally {
-    setBatchExportButtonsDisabled(false);
+    // 全階(RenderPlan)と通り芯(legacy)では有効条件が異なるため、
+    // 一律enableせず現在のroute/階/軸状態から再判定する。
+    updateBatchExportButtons();
   }
 }
 

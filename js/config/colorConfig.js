@@ -71,7 +71,6 @@ export const DEFAULT_ELEMENT_COLORS = {
   Beam: COLORS.GREEN, // マテリアルグリーン（小梁用）
   Brace: COLORS.ORANGE, // マテリアルオレンジ（ブレース用）
   Slab: COLORS.GREY, // マテリアルグレー（スラブ用）
-  ShearWall: COLORS.RED_DARK, // 耐震壁
   Wall: COLORS.DEEP_ORANGE, // マテリアルディープオレンジ（壁用）
   Parapet: COLORS.AMBER, // マテリアルアンバー（パラペット用）
   Joint: COLORS.PURPLE, // マテリアルパープル（接合用）

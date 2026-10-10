@@ -22,10 +22,9 @@ import {
   createSectionKeyResolvers,
   getCachedExtractedSections,
 } from '../../modelLoader/elementComparison.js';
-import { filterWallsByViewerElementType } from '../../common-stb/walls/wallClassification.js';
 
 export function isWallElementType(elementType) {
-  return elementType === 'Wall' || elementType === 'ShearWall';
+  return elementType === 'Wall';
 }
 
 /**
@@ -157,13 +156,11 @@ export function createLineKeyExtractor({
     );
 }
 
-export function applyElementFilter(config, elements) {
+export function applyElementFilter(_config, elements) {
   if (!Array.isArray(elements)) {
     return [];
   }
-  if (config?.wallViewerElementType) {
-    return filterWallsByViewerElementType(config.wallViewerElementType, elements);
-  }
+  // 比較入力は全StbWall。kind_wall表示フィルタは対応ペア成立後の描画境界で適用する。
   return elements;
 }
 

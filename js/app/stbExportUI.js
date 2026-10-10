@@ -153,6 +153,7 @@ export function updateStbExportTypeList(availableTypes) {
         selectedStbExportTypes.delete(type);
       }
       updateStbExportStats();
+      updateBatchExportButtons();
     });
 
     const colorBox = document.createElement('span');
@@ -230,6 +231,7 @@ export function initStbExportUI() {
         selectedStbExportTypes.add(checkbox.dataset.elementType);
       });
       updateStbExportStats();
+      updateBatchExportButtons();
     });
   }
 
@@ -242,6 +244,7 @@ export function initStbExportUI() {
         selectedStbExportTypes.delete(checkbox.dataset.elementType);
       });
       updateStbExportStats();
+      updateBatchExportButtons();
     });
   }
 

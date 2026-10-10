@@ -202,6 +202,7 @@ class QuantitySummaryPanel {
     eventBus.on(ModelEvents.CLEARED, refreshIfVisible);
     eventBus.on(EditEvents.MODE_TOGGLED, refreshIfVisible);
     eventBus.on(EditEvents.WORKING_DOCUMENT_CHANGED, refreshIfVisible);
+    eventBus.on(EditEvents.WORKING_QUANTITIES_UPDATED, refreshIfVisible);
   }
 
   handleControlChange(key, value) {
@@ -243,12 +244,28 @@ class QuantitySummaryPanel {
   }
 
   factsForSide(side) {
+    if (side === 'A' && getState('models.editing.active')) {
+      const editing = getState('models.editing') || {};
+      const revision = Number(editing.workingRevision || 0);
+      if (revision === 0) return getState('models.quantityFactsA');
+      if (
+        getState('models.workingQuantitySessionId') !== editing.sessionId ||
+        getState('models.workingQuantityRevision') !== revision
+      ) {
+        return null;
+      }
+      return getState('models.quantityFactsWorkingA');
+    }
     return getState(`models.quantityFacts${side}`);
   }
 
   canExportQuantities() {
     const editingA = Boolean(getState('models.editing.active'));
-    if (editingA && (this.state.modelSide === 'A' || this.state.modelSide === 'AB')) {
+    if (
+      editingA &&
+      (this.state.modelSide === 'A' || this.state.modelSide === 'AB') &&
+      !Array.isArray(this.factsForSide('A'))
+    ) {
       return false;
     }
 
@@ -401,12 +418,18 @@ class QuantitySummaryPanel {
     );
 
     const editingA = Boolean(getState('models.editing.active'));
-    if (editingA && (this.state.modelSide === 'A' || this.state.modelSide === 'AB')) {
+    if (
+      editingA &&
+      (this.state.modelSide === 'A' || this.state.modelSide === 'AB') &&
+      !Array.isArray(this.factsForSide('A'))
+    ) {
       this.renderUnavailable(
         this.state.modelSide === 'AB'
-          ? 'A/B比較: モデルAは編集中のため比較を停止しています。'
-          : 'モデルAは編集中です。派生数量の増分再計算が未対応のため表示を停止しています。',
-        '編集を確定・破棄して再読込した後に数量を確認してください。',
+          ? 'A/B比較: Working Documentの数量を更新しています。'
+          : 'Working Documentの数量を更新しています。',
+        getState('models.workingQuantityError')
+          ? '数量の再計算に失敗しました。編集内容を確認して、再度変更してください。'
+          : '最新の編集revisionの計算が完了すると数量を表示します。',
       );
       return;
     }

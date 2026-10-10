@@ -18,8 +18,6 @@ import { STB_TAG_NAMES } from '../constants/elementTypes.js';
  * @property {string} elementsKey - stbData内の要素キー
  * @property {string} sectionsKey - stbData内の断面キー
  * @property {boolean} [supportsLineMode=true] - 線表示モードをサポートするか
- * @property {string} [wallViewerElementType] - 壁要素の表示種別（'Wall'|'ShearWall'）。
- *   指定時は描画側（elementRedrawCore）が wallClassification で絞り込む
  */
 
 /**
@@ -201,19 +199,6 @@ export const ELEMENT_REDRAW_CONFIGS = new Map([
     },
   ],
   [
-    'ShearWall',
-    {
-      elementType: 'ShearWall',
-      stbTagName: STB_TAG_NAMES.WALL,
-      nodeStartAttr: 'node_ids',
-      nodeEndAttr: null,
-      elementsKey: 'wallElements',
-      sectionsKey: 'wallSections',
-      supportsLineMode: true,
-      wallViewerElementType: 'ShearWall',
-    },
-  ],
-  [
     'Wall',
     {
       elementType: 'Wall',
@@ -223,7 +208,6 @@ export const ELEMENT_REDRAW_CONFIGS = new Map([
       elementsKey: 'wallElements',
       sectionsKey: 'wallSections',
       supportsLineMode: true,
-      wallViewerElementType: 'Wall',
     },
   ],
 ]);

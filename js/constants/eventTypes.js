@@ -268,6 +268,8 @@ export const EditEvents = {
   ATTRIBUTE_CHANGED: 'edit:attributeChanged',
   /** Working Document の内容が編集操作で更新された */
   WORKING_DOCUMENT_CHANGED: 'edit:workingDocumentChanged',
+  /** Working Documentの派生数量が対象revisionで更新された */
+  WORKING_QUANTITIES_UPDATED: 'edit:workingQuantitiesUpdated',
   /** 編集起因の再比較が完了した（ペイロード: { changedElementTypes: string[] }） */
   RECOMPARISON_COMPLETED: 'edit:recomparisonCompleted',
   /** 編集がキャンセルされた */

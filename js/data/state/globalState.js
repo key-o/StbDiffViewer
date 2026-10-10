@@ -52,6 +52,9 @@ class ApplicationState {
         // 断面が異なる一致要素(ATTRIBUTE_MISMATCH)でモデルB側の形状を
         // 半透明で重ねて表示するか（形状差の可視化用トグル、既定OFF）
         showMatchedModelBOverlay: false,
+        // 配置位置が異なる一致要素(WITHIN_TOLERANCE / positionState=withinTolerance)で
+        // モデルB側の実配置形状を半透明で重ねて表示するか（既定OFF）
+        showPositionMismatchModelBOverlay: false,
       },
 
       // 機能関数

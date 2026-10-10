@@ -25,6 +25,17 @@ export const CAMERA_CONTROLS = {
   DRAG_THRESHOLD_PX: 3, // ドラッグと判定する最小ピクセル数
 };
 
+/**
+ * 画面上の選択許容幅をワールド座標へ変換するための設定
+ */
+export const SELECTION_PICKING = {
+  HOVER_LINE_TOLERANCE_PX: 8,
+  CLICK_LINE_TOLERANCE_PX: 12,
+  MIN_LINE_THRESHOLD_MM: 5,
+  MAX_LINE_THRESHOLD_MM: 1000,
+  FALLBACK_TARGET_DISTANCE_MM: 5000,
+};
+
 // ============================================================================
 // ラベル表示設定
 // ============================================================================
@@ -59,7 +70,7 @@ export const LABEL_SETTINGS = {
 
 /**
  * ラベルオクルージョンチェック設定
- * ラベルの遮蔽判定と位置補間を制御します
+ * ラベルの遮蔽判定と前面描画を制御します
  */
 export const LABEL_OCCLUSION_SETTINGS = {
   // チェック頻度（間引き設定）
@@ -70,12 +81,9 @@ export const LABEL_OCCLUSION_SETTINGS = {
   // ヒステリシス設定（状態変化の安定化）
   HYSTERESIS_FRAMES: 5, // 状態変化に必要な連続フレーム数
 
-  // 位置補間設定
-  LERP_FACTOR: 0.15, // 補間係数（0.0-1.0、小さいほど滑らか）
-
-  // 押し出し設定
-  MAX_PUSH_DISTANCE: 500, // 最大押し出し距離 (mm)
-  PUSH_DISTANCE_RATIO: 0.1, // 距離に対する押し出し比率
+  // ラベル単位の遮蔽判定
+  SELF_OCCLUSION_EPSILON_MM: 30, // アンカー直前の接触は自身の部材面として許容
+  OVERLAY_RENDER_ORDER: 10000, // 表示対象タグは部材より前面に描画
 };
 
 // ============================================================================
@@ -112,6 +120,7 @@ export const AXIS_LINE_PATTERN = {
 export default {
   CAMERA_ORTHOGRAPHIC,
   CAMERA_CONTROLS,
+  SELECTION_PICKING,
   LABEL_SETTINGS,
   LABEL_OCCLUSION_SETTINGS,
   GRID_SETTINGS,

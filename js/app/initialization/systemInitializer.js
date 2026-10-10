@@ -36,6 +36,7 @@ import { initWorkingComparisonVisualLifecycle } from '../controllers/workingComp
 import { initWorkingFrameDampingDeviceLifecycle } from '../controllers/workingFrameDampingDeviceLifecycleController.js';
 import { initWorkingAddLabelLifecycle } from '../controllers/workingAddLabelLifecycleController.js';
 import { initWorkingWallOpeningOutlineLifecycle } from '../controllers/workingWallOpeningOutlineLifecycleController.js';
+import { initWorkingQuantityLifecycle } from '../controllers/workingQuantityLifecycleController.js';
 
 const log = createLogger('systemInitializer');
 
@@ -80,6 +81,9 @@ export function initializeIntegratedSystems() {
   // 編集→3D再描画コントローラーの初期化
   initEditGeometrySync();
 
+  // Working Documentの編集後に、Source Aと分離した数量storeを更新する。
+  initWorkingQuantityLifecycle();
+
   // FrameDampingDevice の非solid polygonは汎用2節点line経路に入れず、
   // StbNodeIdOrder / 専用offsetからID-localに同期する。add-label より先に購読して
   // structural add の microtask で renderable 挿入→label生成の順序を保証する。
@@ -93,7 +97,7 @@ export function initializeIntegratedSystems() {
   // comparison visual lifecycle より後に microtask 実行されるため、復元要素の modelSource も参照できる。
   initWorkingAddLabelLifecycle();
 
-  // 非solid Wall/ShearWall の開口輪郭も Working Document の最新 wall/opening から局所再生成する。
+  // 非solid Wall の開口輪郭も Working Document の最新 wall/opening から局所再生成する。
   // Geometry/comparison visual sync 後の scene を対象にするため、こちらも microtask 後段で実行する。
   initWorkingWallOpeningOutlineLifecycle();
 

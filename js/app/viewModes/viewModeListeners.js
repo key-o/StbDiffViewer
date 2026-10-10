@@ -28,6 +28,7 @@ import {
   isVisibleByStructuralFilter,
   setStructuralSystemVisible,
 } from './structuralSystemFilter.js';
+import { getWallKindVisibility, setWallKindVisible } from './wallKindFilter.js';
 
 // ロガー
 const log = createLogger('viewModeListeners');
@@ -177,7 +178,7 @@ export function setModelVisibility(model, visible, scheduleRender) {
 }
 
 /**
- * モデルの表示状態を取得
+ * モデル表示状態を取得
  * @param {string} model - "A" または "B"
  * @returns {boolean} 現在の表示状態
  */
@@ -285,22 +286,35 @@ export function setupViewModeListeners(scheduleRender) {
 
   // ==========================================================================
   // モデルB形状オーバーレイ切替リスナー
-  // 断面が異なる一致要素について、モデルB側の形状を半透明で重ねて表示する。
-  const overlayModelBCheckbox = document.getElementById('toggleMatchedModelBOverlay');
-  if (overlayModelBCheckbox) {
-    overlayModelBCheckbox.addEventListener('change', function () {
-      setState('viewModes.showMatchedModelBOverlay', this.checked);
-      log.info('モデルB形状オーバーレイ:', this.checked);
+  // 断面差と配置位置差を独立したトグルで制御する。
+  function bindModelBOverlayToggle(checkboxId, statePath, logLabel) {
+    const checkbox = document.getElementById(checkboxId);
+    if (!checkbox) return;
+
+    checkbox.addEventListener('change', function () {
+      setState(statePath, this.checked);
+      log.info(`${logLabel}:`, this.checked);
       // 全要素を再描画してオーバーレイメッシュの追加/削除を反映
       import('./displayModeController.js')
         .then(({ redrawAllElementsForViewMode }) => {
           redrawAllElementsForViewMode(scheduleRender);
         })
         .catch((err) => {
-          log.error('モデルBオーバーレイ再描画に失敗:', err);
+          log.error(`${logLabel}再描画に失敗:`, err);
         });
     });
   }
+
+  bindModelBOverlayToggle(
+    'toggleMatchedModelBOverlay',
+    'viewModes.showMatchedModelBOverlay',
+    '断面差モデルB形状オーバーレイ',
+  );
+  bindModelBOverlayToggle(
+    'togglePositionMismatchModelBOverlay',
+    'viewModes.showPositionMismatchModelBOverlay',
+    '配置位置差モデルB形状オーバーレイ',
+  );
 
   // ==========================================================================
   // 節点表示切替リスナー
@@ -400,6 +414,43 @@ export function setupViewModeListeners(scheduleRender) {
     });
   }
 
+  // canonical Wallカテゴリ表示とkind_wallサブフィルタ
+  const syncWallGroupVisibility = (visible) => {
+    const wallGroup = elementGroups.Wall;
+    const solidViewCheckbox = document.getElementById('toggleWall3DView');
+    if (wallGroup) wallGroup.visible = visible;
+    if (solidViewCheckbox) solidViewCheckbox.disabled = !visible;
+  };
+  const wallGroupCheckbox = document.getElementById('toggleWallGroupDisplay');
+  if (wallGroupCheckbox) {
+    wallGroupCheckbox.addEventListener('change', function () {
+      syncWallGroupVisibility(this.checked);
+      if (scheduleRender) scheduleRender();
+    });
+  }
+
+  [
+    ['toggleShearWallView', 'shear', '耐震壁'],
+    ['toggleWallView', 'normal', '一般壁'],
+  ].forEach(([id, kind, name]) => {
+    const checkbox = document.getElementById(id);
+    if (!checkbox) return;
+    setWallKindVisible(kind, checkbox.checked);
+    checkbox.addEventListener('change', function () {
+      setWallKindVisible(kind, this.checked);
+      // 子操作は親のcheckedだけを更新し、親のchangeイベントは発火しない。
+      // 親→子の一括同期中にも親checkbox自体は変更しない。
+      const visibility = getWallKindVisibility();
+      syncWallGroupVisibility(visibility.shear || visibility.normal);
+      redrawElementByType('Wall', scheduleRender);
+      updateStbExportStatus();
+      log.debug(`${name}表示フィルタ:`, this.checked);
+    });
+  });
+
+  const wallVisibility = getWallKindVisibility();
+  syncWallGroupVisibility(wallVisibility.shear || wallVisibility.normal);
+
   // その他の要素タイプの表示切替リスナー（立体表示チェックボックスと連動）
   const elementToggleIds = [
     { id: 'toggleBraceView', type: 'Brace', name: 'ブレース', solidViewId: 'toggleBrace3DView' },
@@ -423,15 +474,14 @@ export function setupViewModeListeners(scheduleRender) {
     },
     { id: 'togglePileView', type: 'Pile', name: '杭', solidViewId: 'togglePile3DView' },
     { id: 'toggleFootingView', type: 'Footing', name: '基礎' },
+    {
+      id: 'toggleStripFootingView',
+      type: 'StripFooting',
+      name: '布基礎',
+      solidViewId: 'toggleStripFooting3DView',
+    },
     { id: 'toggleFoundationColumnView', type: 'FoundationColumn', name: '基礎柱' },
     { id: 'toggleSlabView', type: 'Slab', name: 'スラブ', solidViewId: 'toggleSlab3DView' },
-    {
-      id: 'toggleShearWallView',
-      type: 'ShearWall',
-      name: '\u8010\u9707\u58c1',
-      solidViewId: 'toggleShearWall3DView',
-    },
-    { id: 'toggleWallView', type: 'Wall', name: '壁', solidViewId: 'toggleWall3DView' },
     {
       id: 'toggleParapetView',
       type: 'Parapet',

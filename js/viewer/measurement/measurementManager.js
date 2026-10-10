@@ -10,7 +10,7 @@
 
 import * as THREE from 'three';
 import { scene } from '../index.js';
-import { eventBus, MeasurementEvents } from '../../data/events/index.js';
+import { eventBus, MeasurementEvents, ModelEvents } from '../../data/events/index.js';
 import { ELEMENT_LABELS } from '../../config/elementLabels.js';
 import { scheduleRender } from '../../utils/renderScheduler.js';
 import {
@@ -41,6 +41,7 @@ export function initMeasurementManager() {
   if (!_sharedEventsBound) {
     eventBus.on(MeasurementEvents.DELETE_REQUESTED, ({ id } = {}) => deleteMeasurement(id));
     eventBus.on(MeasurementEvents.SEQUENCE_RESET, resetPendingMeasurementSequence);
+    eventBus.on(ModelEvents.CLEARED, clearMeasurementsForModelReset);
     _sharedEventsBound = true;
   }
 }
@@ -67,6 +68,17 @@ export function resetPendingMeasurementSequence() {
   if (hadPending) scheduleRender();
 }
 
+function clearMeasurementsForModelReset() {
+  _state = State.IDLE;
+  _firstPoint = null;
+  _firstNormal = null;
+  _tempObjects = [];
+  _measurements = [];
+  _nextId = 1;
+  clearAllMeasurementObjects();
+  eventBus.emit(MeasurementEvents.ALL_CLEARED);
+}
+
 /** 測定モードが有効かを返す */
 export function isMeasurementModeActive() {
   return _isActive;
@@ -86,30 +98,25 @@ export function enterMeasurementMode() {
 }
 
 /**
- * 測定モードを解除し全測定をクリアする
- * emit 順序: MODE_EXITED → ALL_CLEARED
- * （UI側で _isActive を先に false にしてから clear を処理させる）
+ * 測定モードを解除する。
+ * 完了済み寸法は保持し、未完了の1点目と一時表示だけを破棄する。
  */
 export function exitMeasurementMode() {
   if (!_isActive) return;
   _isActive = false;
-  _state = State.IDLE;
 
-  // 一時オブジェクトを明示的に dispose してからグループ全体をクリア
   if (_tempObjects.length > 0) {
     removeMeasurementObjects(_tempObjects);
     _tempObjects = [];
   }
   _firstPoint = null;
   _firstNormal = null;
-  _measurements = [];
-  _nextId = 1;
+  _state = State.IDLE;
 
-  clearAllMeasurementObjects();
-
-  // MODE_EXITED を先に emit して UI の isActive を false にしてから ALL_CLEARED を通知する
+  // _measurements / _nextId / 完了済み描画は維持する。
+  // 再度測定モードへ入っても既存寸法を継続して管理できる。
   eventBus.emit(MeasurementEvents.MODE_EXITED);
-  eventBus.emit(MeasurementEvents.ALL_CLEARED);
+  scheduleRender();
 }
 
 /**

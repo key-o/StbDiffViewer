@@ -61,7 +61,7 @@ function createGlossaryBodyHTML() {
             </tr>
             <tr>
               <td><strong>面基準</strong></td>
-              <td><code>StbSlab</code>（スラブ）／<code>StbWall</code>・<code>StbShearWall</code>（壁）</td>
+              <td><code>StbSlab</code>（スラブ）／<code>StbWall</code>（壁。耐震壁/一般壁は <code>kind_wall</code> で分類）</td>
               <td><code>StbNodeIdOrder</code>（頂点列）</td>
               <td><strong>全頂点が一致</strong></td>
             </tr>

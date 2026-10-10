@@ -5,6 +5,7 @@
  */
 
 import { createLogger } from '../../../../utils/logger.js';
+import { getSectionDataFromMap } from '../../../../data/accessors/sectionMapAccessor.js';
 import {
   collectElementDataForExport,
   applyOffsetsToVertices,
@@ -56,7 +57,7 @@ function convertSlabToExportData(element, nodeMap, sectionMap) {
 
     // 断面データから厚さを取得
     const thickness = extractDimensionFromSection(
-      sectionMap.get(element.id_section),
+      getSectionDataFromMap(sectionMap, element.id_section),
       ['depth', 't', 'thickness'],
       150,
     );
@@ -150,7 +151,7 @@ function convertWallToExportData(element, nodeMap, sectionMap, openingElements =
 
     // 断面データから厚さを取得
     const thickness = extractDimensionFromSection(
-      sectionMap.get(element.id_section),
+      getSectionDataFromMap(sectionMap, element.id_section),
       ['t', 'thickness'],
       200,
     );

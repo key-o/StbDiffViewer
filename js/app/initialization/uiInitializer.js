@@ -4,6 +4,13 @@
 
 import { createLogger } from '../../utils/logger.js';
 import { getState } from '../../data/state/globalState.js';
+import { getRebarProjectDetailing } from '../../config/rebarProjectDetailing.js';
+import {
+  beginConcreteAccommodationEvaluationCycle,
+  recordConcreteAccommodationEvaluation,
+  resolveConcreteAccommodationDecision,
+} from '../viewModes/concreteAccommodationDecisionStore.js';
+import { renderConcreteAccommodationCandidateSettings } from '../../ui/panels/concreteAccommodationCandidateSettings.js';
 import {
   toggleOriginAxesVisibility,
   togglePlacementLinesVisibility,
@@ -28,6 +35,7 @@ const log = createLogger('uiInitializer');
 export function initializeUIComponents(scheduleRender, elementGroups) {
   initializeThemeSystem();
   initializeSharedPanels();
+  renderConcreteAccommodationCandidateSettings();
   initializeTreePanels(scheduleRender, elementGroups);
   initializeComparisonControls();
   initializeSectionListPanels();
@@ -119,6 +127,7 @@ export function setupButtonEventListeners() {
 
 function setupRebarDisplayListeners() {
   const coverInput = document.getElementById('rebarCoverInput');
+  const accommodationPreviewToggle = document.getElementById('toggleConcreteAccommodationPreview');
   const selectionModeToggle = document.getElementById('toggleRebarSelectionMode');
 
   if (selectionModeToggle) {
@@ -132,7 +141,25 @@ function setupRebarDisplayListeners() {
   // ここではsnapshotをoptionsへ保持せず、モデル切替後に古いworld座標を再利用しない。
   const readOptions = () => {
     const value = coverInput ? Number.parseFloat(coverInput.value) : NaN;
-    return Number.isFinite(value) && value >= 0 ? { coverMm: value } : {};
+    const options = Number.isFinite(value) && value >= 0 ? { coverMm: value } : {};
+    if (accommodationPreviewToggle?.checked) {
+      const projectDetailing = getRebarProjectDetailing();
+      const existing =
+        projectDetailing.CONCRETE_ACCOMMODATION ||
+        projectDetailing.special?.CONCRETE_ACCOMMODATION ||
+        {};
+      options.projectDetailing = {
+        ...projectDetailing,
+        CONCRETE_ACCOMMODATION: {
+          ...existing,
+          enabled: true,
+        },
+      };
+      options.concreteAccommodationPreview = true;
+      options.concreteAccommodationDecisionResolver = resolveConcreteAccommodationDecision;
+      options.concreteAccommodationEvaluationSink = recordConcreteAccommodationEvaluation;
+    }
+    return options;
   };
 
   const toggles = [
@@ -187,6 +214,9 @@ function setupRebarDisplayListeners() {
   for (const toggle of toggles) {
     toggle.element.addEventListener('change', (event) => {
       const requested = event.target.checked;
+      if (toggle.key === 'beam' && accommodationPreviewToggle?.checked) {
+        beginConcreteAccommodationEvaluationCycle();
+      }
       setRebarMemberVisible(requested, readOptions(), toggle.key);
       log.info(`${toggle.label}を${requested ? '有効化' : '無効化'}しました`);
     });
@@ -194,6 +224,7 @@ function setupRebarDisplayListeners() {
 
   if (coverInput) {
     coverInput.addEventListener('change', () => {
+      if (accommodationPreviewToggle?.checked) beginConcreteAccommodationEvaluationCycle();
       for (const toggle of toggles) {
         if (!toggle.element.checked) continue;
         setRebarMemberVisible(true, readOptions(), toggle.key);
@@ -201,6 +232,27 @@ function setupRebarDisplayListeners() {
       log.info('かぶり厚さの変更を鉄筋表示へ反映しました');
     });
   }
+
+  if (accommodationPreviewToggle) {
+    accommodationPreviewToggle.addEventListener('change', () => {
+      beginConcreteAccommodationEvaluationCycle();
+      for (const toggle of toggles) {
+        if (!toggle.element.checked) continue;
+        setRebarMemberVisible(true, readOptions(), toggle.key);
+      }
+      log.info(
+        `ふかし候補プレビューを${accommodationPreviewToggle.checked ? '有効化' : '無効化'}しました`,
+      );
+    });
+  }
+
+  document.addEventListener('concrete-accommodation-candidates-changed', (event) => {
+    if (event.detail?.type !== 'decision') return;
+    const beamToggle = toggles.find((item) => item.key === 'beam');
+    if (!beamToggle?.element?.checked || !accommodationPreviewToggle?.checked) return;
+    beginConcreteAccommodationEvaluationCycle();
+    setRebarMemberVisible(true, readOptions(), 'beam');
+  });
 
   initializeRebarDisplaySync((memberKey) => {
     const toggle = toggles.find((item) => item.key === memberKey);

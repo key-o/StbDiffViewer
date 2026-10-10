@@ -196,6 +196,7 @@ function partialCheckLabel(row) {
     case 'L2':
       return 'L2全長のみ判定';
     case 'LB_PROJECTION':
+    case 'LA_3B4_PROJECTION':
       return '投影のみ判定';
     case 'HOOK_TAIL_90':
       return '90°余長のみ判定';

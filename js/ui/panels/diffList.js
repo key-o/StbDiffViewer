@@ -25,6 +25,7 @@ import { diffListDataCollectorMethods } from './diffList/dataCollector.js';
 import { diffListFilterMethods } from './diffList/filters.js';
 import { diffListRendererMethods } from './diffList/renderers.js';
 import { diffListInteractionMethods } from './diffList/interactions.js';
+import { DiffReviewStateStore, diffListReviewMethods } from './diffList/reviewState.js';
 
 const log = createLogger('ui:panels:diffList');
 
@@ -46,10 +47,12 @@ export class DiffListPanel extends UIComponent {
     this.currentFilter = {
       category: 'all', // 'all', 'onlyA', 'onlyB', 'versionOnly'
       elementType: 'all',
+      reviewStatus: 'all',
       showVersionDifferences: true, // バージョン固有差分を表示するか
     };
     this.elementTypes = new Set();
     this.versionInfo = { versionA: null, versionB: null, isCrossVersion: false };
+    this.reviewStateStore = new DiffReviewStateStore();
 
     this.setupEventListeners();
   }
@@ -149,6 +152,11 @@ export class DiffListPanel extends UIComponent {
       this.currentFilter.elementType = e.target.value;
       this.renderList();
     });
+
+    document.getElementById('diff-review-filter').addEventListener('change', (e) => {
+      this.currentFilter.reviewStatus = e.target.value;
+      this.renderList();
+    });
   }
 
   /**
@@ -200,6 +208,7 @@ Object.assign(
   diffListFilterMethods,
   diffListRendererMethods,
   diffListInteractionMethods,
+  diffListReviewMethods,
 );
 
 // シングルトンインスタンス

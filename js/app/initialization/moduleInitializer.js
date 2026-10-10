@@ -110,10 +110,12 @@ export async function initializeRequiredModules(elementGroups) {
       { getCurrentClippingState, applyStoryClip, applyAxisClip, clearAllClippingPlanes },
       { getCurrentStories, getCurrentAxesData },
       { generateLabelText },
+      { compileStoryDrawingRenderPlan },
     ] = await Promise.all([
       import('../../ui/viewer3d/clipping.js'),
       import('../../ui/state.js'),
       import('../../ui/viewer3d/unifiedLabelManager.js'),
+      import('../../viewer/drawing/storyDrawingBatch.js'),
     ]);
     const stateModule = globalStateModule ?? (await import('../../data/state/globalState.js'));
     const getStateForDxf = stateModule.getState;
@@ -127,6 +129,31 @@ export async function initializeRequiredModules(elementGroups) {
       clearAllClippingPlanes,
       getCurrentStories,
       getCurrentAxesData,
+      compileStoryDrawingRenderPlan,
+      getPlanDrawingSource: () => {
+        if (getStateForDxf('models.editing.active')) {
+          return {
+            reason: '編集セッション中の全階DXF出力は未対応です。編集を確定・終了してください。',
+          };
+        }
+        const documentA = getStateForDxf('models.documentA');
+        const documentB = getStateForDxf('models.documentB');
+        const hasA = documentA?.nodeType === 9;
+        const hasB = documentB?.nodeType === 9;
+        if (hasA && hasB) {
+          return {
+            reason:
+              'モデルA/Bが同時に読み込まれているため全階DXFの出力元を一意に決められません。legacy互換経路を使用します。',
+            allowLegacyFallback: true,
+          };
+        }
+        if (hasA) return { modelKey: 'A', document: documentA };
+        if (hasB) return { modelKey: 'B', document: documentB };
+        return {
+          reason: 'STB原本Documentが読み込まれていません。',
+          allowLegacyFallback: true,
+        };
+      },
 
       // Viewer関連のプロバイダーを注入（モデル・カメラ・ファイル名）
       getElementGroups: () => elementGroups,

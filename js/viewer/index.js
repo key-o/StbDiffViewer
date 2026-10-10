@@ -179,6 +179,9 @@ export {
   setViewerStateProvider,
 };
 
+// Clipping SSOT（app/controllers は viewer/index.js 経由で参照する）
+export { clippingStateManager } from './clipping/ClippingStateManager.js';
+
 // パフォーマンスユーティリティの再エクスポート
 export { getElementRegistry } from './utils/ElementRegistry.js';
 export {

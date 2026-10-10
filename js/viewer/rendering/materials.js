@@ -55,7 +55,6 @@ export const ELEMENT_MATERIAL_SIDE = {
 
   // 薄いジオメトリ - 両面レンダリング（裏面が見える可能性がある）
   Slab: THREE.DoubleSide,
-  ShearWall: THREE.DoubleSide,
   Wall: THREE.DoubleSide,
   Parapet: THREE.DoubleSide,
 

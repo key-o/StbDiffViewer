@@ -8,6 +8,7 @@
 
 import { getOrParseStructureData, extractProfileFromSection } from '../commonDataCollector.js';
 import { createLogger } from '../../../../utils/logger.js';
+import { getSectionDataFromMap } from '../../../../data/accessors/sectionMapAccessor.js';
 
 const log = createLogger('ifcDataCollector');
 
@@ -124,7 +125,7 @@ export function extractCommonElementData(element, nodeMap, sectionMap, config = 
     // (2) セクション情報抽出
     const sectionKey = config.sectionKey || 'id_section';
     if (sectionKey && element[sectionKey]) {
-      result.section = sectionMap.get(element[sectionKey]);
+      result.section = getSectionDataFromMap(sectionMap, element[sectionKey]);
     }
 
     // (3) プロファイル抽出（steelSectionsがある場合）

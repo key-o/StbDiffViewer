@@ -47,7 +47,7 @@ export class FloatingWindowManager {
         }
       }
     };
-    window.addEventListener('resize', this._onWindowResize);
+    globalThis.window?.addEventListener('resize', this._onWindowResize);
   }
 
   /**

@@ -49,6 +49,11 @@ import { setupDevelopmentTools } from './app/initialization/devToolsInitializer.
 import { initArButton } from './ui/ar/arButton.js';
 import { setRebarMemberVisible } from './app/viewModes/rebarMeshRetentionController.js';
 import { getModelContext } from './app/viewModes/modelContext.js';
+import {
+  beginConcreteAccommodationEvaluationCycle,
+  clearConcreteAccommodationDecisions,
+  recordConcreteAccommodationEvaluation,
+} from './app/viewModes/concreteAccommodationDecisionStore.js';
 
 // --- 初期化フラグ ---
 let rendererInitialized = false;
@@ -91,6 +96,14 @@ exposeManagers({
 window.__rebarDisplayApi = Object.freeze({
   setRebarMemberVisible,
   isModelContextReady: () => Boolean(getModelContext().modelADocument),
+});
+
+// E2E・診断用に、アプリ本体と同じモジュールインスタンスのふかし候補評価APIを公開する。
+// ソースURLをpage.evaluate()から再importすると、bundled UIとは別のsidecar状態になるためである。
+window.__concreteAccommodationDecisionApi = Object.freeze({
+  beginConcreteAccommodationEvaluationCycle,
+  clearConcreteAccommodationDecisions,
+  recordConcreteAccommodationEvaluation,
 });
 
 // --- DOMContentLoaded イベントリスナー ---

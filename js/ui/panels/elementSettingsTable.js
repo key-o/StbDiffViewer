@@ -9,17 +9,49 @@ import {
   STRUCTURAL_SYSTEM_LABELS,
 } from '../../constants/structuralSystems.js';
 import { appendRebarDiameterSettingsRows } from './rebarDiameterSettingsRows.js';
+import {
+  createPdfDrawingTagCell,
+  ensurePdfDrawingTagHeader,
+  setupPdfDrawingTagControls,
+} from './pdfDrawingDisplaySettings.js';
+
+const WALL_KIND_FILTER_SETTINGS = Object.freeze([
+  Object.freeze({
+    type: 'WallShearFilter',
+    label: '耐震壁 (kind_wall = WALL_SHEAR)',
+    jpName: '耐震壁',
+    displayId: 'toggleShearWallView',
+    defaultVisible: true,
+    displayOnly: true,
+    wallKindFilter: 'shear',
+  }),
+  Object.freeze({
+    type: 'WallNormalFilter',
+    label: '一般壁 (kind_wall ≠ WALL_SHEAR)',
+    jpName: '一般壁',
+    displayId: 'toggleWallView',
+    defaultVisible: true,
+    displayOnly: true,
+    wallKindFilter: 'normal',
+  }),
+]);
 
 const ELEMENT_GROUP_SETTINGS = [
   {
     id: 'WallGroup',
-    type: 'WallGroup',
+    type: 'Wall',
     label: '壁 (StbWall)',
     jpName: '壁',
-    childTypes: ['ShearWall', 'Wall'],
+    childTypes: WALL_KIND_FILTER_SETTINGS.map((setting) => setting.type),
     displayId: 'toggleWallGroupDisplay',
+    solidType: 'checkbox',
+    solidId: 'toggleWall3DView',
+    solidName: 'wall3DViewMode',
     rebarType: 'checkbox',
     rebarId: 'toggleWallRebarDisplay',
+    defaultVisible: true,
+    defaultSolid: true,
+    defaultLabel: false,
   },
 ];
 
@@ -146,30 +178,7 @@ const ELEMENT_SETTINGS = [
     defaultSolid: true,
     defaultLabel: false,
   },
-  {
-    type: 'ShearWall',
-    label: '耐震壁 (StbWall)',
-    jpName: '耐震壁',
-    solidType: 'checkbox',
-    displayId: 'toggleShearWallView',
-    solidId: 'toggleShearWall3DView',
-    solidName: 'shearWall3DViewMode',
-    defaultVisible: true,
-    defaultSolid: true,
-    defaultLabel: false,
-  },
-  {
-    type: 'Wall',
-    label: '雑壁 (StbWall)',
-    jpName: '雑壁',
-    solidType: 'checkbox',
-    displayId: 'toggleWallView',
-    solidId: 'toggleWall3DView',
-    solidName: 'wall3DViewMode',
-    defaultVisible: true,
-    defaultSolid: true,
-    defaultLabel: false,
-  },
+  ...WALL_KIND_FILTER_SETTINGS,
   {
     type: 'Parapet',
     label: 'パラペット (StbParapet)',
@@ -232,7 +241,7 @@ const ELEMENT_SETTINGS = [
     solidName: 'stripFooting3DViewMode',
     rebarType: 'checkbox',
     rebarId: 'toggleStripFootingRebarDisplay',
-    defaultVisible: false,
+    defaultVisible: true,
     defaultSolid: false,
     defaultLabel: false,
   },
@@ -303,8 +312,10 @@ function createDisplayCell(setting) {
   const td = document.createElement('td');
   const input = document.createElement('input');
   input.type = 'checkbox';
-  input.name = 'elements';
-  input.value = setting.type;
+  if (!setting.displayOnly) {
+    input.name = 'elements';
+    input.value = setting.type;
+  }
   if (setting.displayId) input.id = setting.displayId;
   input.title = setting.displayTitle || `${setting.jpName}を表示`;
   if (setting.defaultVisible) input.checked = true;
@@ -404,19 +415,12 @@ function createElementGroupRow(group) {
   nameTd.appendChild(document.createTextNode(` ${group.label}`));
   tr.appendChild(nameTd);
 
-  const displayTd = document.createElement('td');
-  const input = document.createElement('input');
-  input.type = 'checkbox';
-  input.id = group.displayId;
-  input.checked = true;
-  input.title = `${group.jpName}を表示`;
-  displayTd.appendChild(input);
-  tr.appendChild(displayTd);
-
-  tr.appendChild(createEmptyCell(''));
+  tr.appendChild(createDisplayCell(group));
+  tr.appendChild(createSolidCell(group));
   tr.appendChild(createRebarCell(group));
-  tr.appendChild(createEmptyCell(''));
-  tr.appendChild(createEmptyCell(''));
+  tr.appendChild(createLabelCell(group));
+  tr.appendChild(createPdfDrawingTagCell(group));
+  tr.appendChild(createColorCell(group));
 
   return tr;
 }
@@ -452,8 +456,8 @@ function createStructuralSystemRows(setting, systems) {
     displayTd.appendChild(input);
     subTr.appendChild(displayTd);
 
-    // 立体/鉄筋/ラベル/色は空セル
-    for (let i = 0; i < 4; i++) {
+    // 立体/鉄筋/ラベル/図面タグ/色は空セル
+    for (let i = 0; i < 5; i++) {
       subTr.appendChild(document.createElement('td'));
     }
 
@@ -492,10 +496,15 @@ function appendElementSettingRow(tbody, setting, options = {}) {
   tr.appendChild(nameTd);
 
   tr.appendChild(createDisplayCell(setting));
-  tr.appendChild(createSolidCell(setting));
-  tr.appendChild(createRebarCell(setting));
-  tr.appendChild(createLabelCell(setting));
-  tr.appendChild(createColorCell(setting));
+  if (setting.displayOnly) {
+    for (let i = 0; i < 5; i++) tr.appendChild(createEmptyCell(''));
+  } else {
+    tr.appendChild(createSolidCell(setting));
+    tr.appendChild(createRebarCell(setting));
+    tr.appendChild(createLabelCell(setting));
+    tr.appendChild(createPdfDrawingTagCell(setting));
+    tr.appendChild(createColorCell(setting));
+  }
 
   tbody.appendChild(tr);
 
@@ -539,6 +548,7 @@ export function renderElementSettingsRows() {
   if (!tbody) return;
 
   ensureRebarHeader(tbody);
+  ensurePdfDrawingTagHeader(tbody);
   retireLegacyRebarVisibilityControls();
 
   const renderedGroups = new Set();
@@ -562,6 +572,7 @@ export function renderElementSettingsRows() {
   setupStructuralSystemToggles();
   setupElementGroupToggles();
   setupElementGroupDisplaySync();
+  setupPdfDrawingTagControls();
 }
 
 /**
@@ -622,7 +633,7 @@ function setupElementGroupDisplaySync() {
 
     const updateParentState = () => {
       const checkedCount = childCheckboxes.filter((checkbox) => checkbox.checked).length;
-      parentCheckbox.checked = checkedCount === childCheckboxes.length;
+      parentCheckbox.checked = checkedCount > 0;
       parentCheckbox.indeterminate = checkedCount > 0 && checkedCount < childCheckboxes.length;
     };
 

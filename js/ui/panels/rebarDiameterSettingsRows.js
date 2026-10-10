@@ -33,7 +33,7 @@ function createGroupRow() {
   nameTd.appendChild(document.createTextNode(' 鉄筋径'));
   tr.appendChild(nameTd);
 
-  for (let i = 0; i < 5; i += 1) tr.appendChild(emptyCell(i < 4 ? '-' : ''));
+  for (let i = 0; i < 6; i += 1) tr.appendChild(emptyCell(i < 5 ? '-' : ''));
   return tr;
 }
 
@@ -48,7 +48,7 @@ function createDiameterRow(setting) {
   nameTd.className = 'element-sub-label';
   nameTd.textContent = setting.label;
   tr.appendChild(nameTd);
-  for (let i = 0; i < 4; i += 1) tr.appendChild(emptyCell('-'));
+  for (let i = 0; i < 5; i += 1) tr.appendChild(emptyCell('-'));
 
   const colorTd = document.createElement('td');
   const input = document.createElement('input');

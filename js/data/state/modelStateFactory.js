@@ -80,6 +80,12 @@ export function createInitialModelState() {
     // STB原データとは分離して保持する派生数量store（QuantityServiceが読込後に設定）
     derivedQuantitiesA: null,
     derivedQuantitiesB: null,
+    // Working Document専用数量。Source Document Aの派生数量を編集で汚染しない。
+    derivedQuantitiesWorkingA: null,
+    quantityFactsWorkingA: null,
+    workingQuantitySessionId: null,
+    workingQuantityRevision: null,
+    workingQuantityError: null,
     // DerivedQuantityStore を集計向けに正規化した派生キャッシュ（STB正本ではない）
     quantityFactsA: null,
     quantityFactsB: null,

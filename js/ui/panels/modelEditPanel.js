@@ -11,6 +11,15 @@ import { getSelectedObjects } from '../../app/controllers/interactionController.
 import { createSemanticSelectionIdentity } from '../../app/controllers/interaction/semanticSelection.js';
 import editingSession from '../../app/editing/editingSession.js';
 import { eventBus, EditEvents } from '../../data/events/index.js';
+import {
+  createRibbonCommand,
+  decorateAsRibbonCommand,
+  ribbonCommandHtml,
+  ribbonGroupHtml,
+  ribbonStackHtml,
+  ribbonTabsHtml,
+  wireRibbonTabs,
+} from '../common/ribbon.js';
 import { showError } from '../common/toast.js';
 import { isEditMode } from './element-info/editMode/editState.js';
 import {
@@ -29,28 +38,28 @@ let initialized = false;
 let createObserver = null;
 
 const CREATE_COMMANDS = [
-  ['Node', '節点', '•'],
-  ['Column', '柱', '▯'],
-  ['Post', '間柱', '┃'],
-  ['Girder', '大梁', '━'],
-  ['Beam', '小梁', '─'],
-  ['Brace', 'ブレース', '╱'],
-  ['Slab', '床', '▱'],
-  ['Wall', '壁', '▥'],
-  ['Pile', '杭', '↓'],
-  ['Footing', '基礎', '▰'],
-  ['FoundationColumn', '基礎柱', '⌗'],
-  ['Parapet', 'パラペット', '▤'],
-  ['Story', '階', '≡'],
-  ['Axis', '通り芯', '│'],
-  ['ArcAxis', '円弧軸', '⌒'],
-  ['RadialAxis', '放射軸', '✳'],
+  ['Node', '節点', 'node'],
+  ['Column', '柱', 'column'],
+  ['Post', '間柱', 'post'],
+  ['Girder', '大梁', 'girder'],
+  ['Beam', '小梁', 'beam'],
+  ['Brace', 'ブレース', 'brace'],
+  ['Slab', '床', 'slab'],
+  ['Wall', '壁', 'wall'],
+  ['Pile', '杭', 'pile'],
+  ['Footing', '基礎', 'footing'],
+  ['FoundationColumn', '基礎柱', 'foundationColumn'],
+  ['Parapet', 'パラペット', 'parapet'],
+  ['Story', '階', 'story'],
+  ['Axis', '通り芯', 'axis'],
+  ['ArcAxis', '円弧軸', 'arcAxis'],
+  ['RadialAxis', '放射軸', 'radialAxis'],
 ];
 
 const EXTENSION_COMMANDS = {
-  'add-joint-button': { label: '継手', icon: '⛓' },
-  'add-open-button': { label: '開口', icon: '□' },
-  'manage-joint-arrangement-button': { label: '継手配置', icon: '☷' },
+  'add-joint-button': { label: '継手', icon: 'joint' },
+  'add-open-button': { label: '開口', icon: 'opening' },
+  'manage-joint-arrangement-button': { label: '継手配置', icon: 'jointArrangement' },
 };
 
 function ensureRibbonStyles() {
@@ -62,97 +71,93 @@ function ensureRibbonStyles() {
   document.head.appendChild(link);
 }
 
-function createIconCommand({ id, icon, label, title = label, className = '' }) {
-  const button = document.createElement('button');
-  button.type = 'button';
-  if (id) button.id = id;
-  button.className = `model-edit-ribbon-command ${className}`.trim();
-  button.title = title;
-  button.setAttribute('aria-label', label);
-
-  const iconEl = document.createElement('span');
-  iconEl.className = 'model-edit-ribbon-command-icon';
-  iconEl.setAttribute('aria-hidden', 'true');
-  iconEl.textContent = icon;
-
-  const labelEl = document.createElement('span');
-  labelEl.className = 'model-edit-ribbon-command-label';
-  labelEl.textContent = label;
-
-  button.replaceChildren(iconEl, labelEl);
-  return button;
+function ribbonTabs() {
+  return [
+    {
+      id: 'home',
+      label: 'ホーム',
+      body:
+        ribbonGroupHtml(
+          '編集履歴',
+          ribbonCommandHtml({
+            id: 'model-edit-undo-button',
+            icon: 'undo',
+            label: '元に戻す',
+            disabled: true,
+          }) +
+            ribbonCommandHtml({
+              id: 'model-edit-redo-button',
+              icon: 'redo',
+              label: 'やり直し',
+              disabled: true,
+            }),
+        ) +
+        ribbonGroupHtml(
+          '配置基準',
+          ribbonStackHtml(
+            `<select id="model-edit-placement-type" class="model-edit-placement-select" aria-label="配置基準種別"></select>
+            <select id="model-edit-placement-target" class="model-edit-placement-select" aria-label="配置基準対象"></select>`,
+          ) +
+            ribbonCommandHtml({
+              id: 'model-edit-placement-from-selection',
+              icon: 'align',
+              label: '選択要素',
+              title: '現在選択している大梁・小梁・床を配置基準にする',
+            }),
+        ),
+    },
+    {
+      id: 'create',
+      label: '新規作成',
+      body: ribbonGroupHtml(
+        '新規作成',
+        `<div id="model-edit-explicit-create-actions" class="model-edit-ribbon-create-actions"></div>
+        <div id="model-edit-create-extension-actions" class="model-edit-ribbon-create-actions"></div>`,
+        { className: 'model-edit-ribbon-group-create' },
+      ),
+    },
+    {
+      id: 'modify',
+      label: '修正',
+      body: ribbonGroupHtml(
+        '修正',
+        `<div id="model-edit-cad-operations" class="model-edit-ribbon-cad-operations">
+          <div class="add-member-summary">要素を選択すると MOVE / ALIGN / COPY を利用できます。</div>
+        </div>`,
+        { className: 'model-edit-ribbon-group-cad' },
+      ),
+    },
+  ];
 }
 
 function createRibbon() {
   if (document.getElementById(RIBBON_ID)) return;
 
+  const { tabList, bodies } = ribbonTabsHtml('model-edit', ribbonTabs());
   const ribbon = document.createElement('div');
   ribbon.id = RIBBON_ID;
-  ribbon.className = 'model-edit-ribbon';
+  ribbon.className = 'model-edit-ribbon ribbon';
   ribbon.hidden = true;
   ribbon.setAttribute('aria-hidden', 'true');
   ribbon.setAttribute('role', 'region');
   ribbon.setAttribute('aria-label', 'モデル編集リボン');
   ribbon.innerHTML = `
-    <div class="model-edit-ribbon-tabbar">
-      <button type="button" class="model-edit-ribbon-tab active" aria-current="page">✎ 編集</button>
-      <div class="model-edit-ribbon-status" aria-live="polite">
+    <div class="ribbon-tabbar">
+      <strong class="model-edit-ribbon-title">✎ 編集モード</strong>
+      ${tabList}
+      <div class="ribbon-status model-edit-ribbon-status" aria-live="polite">
         <span id="model-edit-session-active" class="model-edit-session-badge">Inactive</span>
         <span id="model-edit-session-dirty">clean</span>
         <span>rev.<span id="model-edit-session-revision">0</span></span>
         <span id="model-edit-summary-slot"></span>
+        <button type="button" id="model-edit-ribbon-collapse" class="ribbon-iconbtn model-edit-ribbon-collapse"
+          aria-expanded="true" title="編集リボンを折りたたむ">⌃</button>
       </div>
-      <button type="button" id="model-edit-ribbon-collapse" class="model-edit-ribbon-collapse"
-        aria-expanded="true" title="編集リボンを折りたたむ">⌃</button>
     </div>
-
-    <div class="model-edit-ribbon-body">
-      <section class="model-edit-ribbon-group model-edit-ribbon-group-core" aria-label="編集履歴">
-        <div class="model-edit-ribbon-group-content model-edit-ribbon-core-actions">
-          <button type="button" id="model-edit-undo-button" class="model-edit-ribbon-command" disabled>
-            <span class="model-edit-ribbon-command-icon" aria-hidden="true">↶</span>
-            <span class="model-edit-ribbon-command-label">元に戻す</span>
-          </button>
-          <button type="button" id="model-edit-redo-button" class="model-edit-ribbon-command" disabled>
-            <span class="model-edit-ribbon-command-icon" aria-hidden="true">↷</span>
-            <span class="model-edit-ribbon-command-label">やり直し</span>
-          </button>
-        </div>
-        <div class="model-edit-ribbon-group-label">編集</div>
-      </section>
-
-      <section class="model-edit-ribbon-group model-edit-ribbon-group-create" aria-label="新規作成">
-        <div class="model-edit-ribbon-group-content model-edit-ribbon-create-wrap">
-          <div id="model-edit-explicit-create-actions" class="model-edit-ribbon-create-actions"></div>
-          <div id="model-edit-create-extension-actions" class="model-edit-ribbon-create-actions"></div>
-        </div>
-        <div class="model-edit-ribbon-group-label">新規作成</div>
-      </section>
-
-      <section class="model-edit-ribbon-group model-edit-ribbon-group-placement" aria-label="配置基準">
-        <div class="model-edit-ribbon-group-content model-edit-placement-controls">
-          <select id="model-edit-placement-type" class="model-edit-placement-select" aria-label="配置基準種別"></select>
-          <select id="model-edit-placement-target" class="model-edit-placement-select" aria-label="配置基準対象"></select>
-          <button type="button" id="model-edit-placement-from-selection" class="model-edit-ribbon-command model-edit-placement-pick"
-            title="現在選択している大梁・小梁・床を配置基準にする">
-            <span class="model-edit-ribbon-command-icon" aria-hidden="true">⌖</span>
-            <span class="model-edit-ribbon-command-label">選択要素</span>
-          </button>
-        </div>
-        <div class="model-edit-ribbon-group-label">配置基準</div>
-      </section>
-
-      <section class="model-edit-ribbon-group model-edit-ribbon-group-cad" aria-label="修正">
-        <div class="model-edit-ribbon-group-content">
-          <div id="model-edit-cad-operations" class="model-edit-ribbon-cad-operations">
-            <div class="add-member-summary">要素を選択すると MOVE / ALIGN / COPY を利用できます。</div>
-          </div>
-        </div>
-        <div class="model-edit-ribbon-group-label">修正</div>
-      </section>
-    </div>
+    ${bodies}
   `;
 
+  wireRibbonTabs(ribbon);
   document.body.appendChild(ribbon);
 }
 
@@ -267,14 +272,14 @@ function setupPlacementControls() {
   });
 }
 
-async function openCreateCommand(type, label, icon) {
+async function openCreateCommand(type, label) {
   try {
     const { openAddMemberForm } = await import('./element-info/AddMemberForm.js');
     openAddMemberForm({
       initialType: type,
       lockType: true,
       placementContext: type === 'Node' ? getPlacementContext() : null,
-      title: `${icon} ${label}を作成`,
+      title: `${label}を作成`,
     });
   } catch (error) {
     showError(
@@ -292,7 +297,7 @@ async function renderExplicitCreateCommands() {
     const definitions = getNewMemberDefinitions?.() || {};
     for (const [type, label, icon] of CREATE_COMMANDS) {
       if (!definitions[type]) continue;
-      const button = createIconCommand({
+      const button = createRibbonCommand({
         id: `model-edit-create-${type}`,
         icon,
         label,
@@ -300,7 +305,7 @@ async function renderExplicitCreateCommands() {
         className: 'model-edit-ribbon-create-command',
       });
       button.dataset.createType = type;
-      button.addEventListener('click', () => void openCreateCommand(type, label, icon));
+      button.addEventListener('click', () => void openCreateCommand(type, label));
       container.appendChild(button);
     }
   } catch (error) {
@@ -317,16 +322,14 @@ function decorateExtensionCommands() {
     const button = document.getElementById(id);
     if (!button || button.dataset.ribbonDecorated === 'true') continue;
     button.dataset.ribbonDecorated = 'true';
-    button.classList.add('model-edit-ribbon-command', 'model-edit-ribbon-create-command');
     button.title = button.title || config.label;
-    const iconEl = document.createElement('span');
-    iconEl.className = 'model-edit-ribbon-command-icon';
-    iconEl.setAttribute('aria-hidden', 'true');
-    iconEl.textContent = config.icon;
-    const labelEl = document.createElement('span');
-    labelEl.className = 'model-edit-ribbon-command-label';
-    labelEl.textContent = config.label;
-    button.replaceChildren(iconEl, labelEl);
+    // add-member-button の className を複製して作られる拡張ボタンは、アンカー用の非表示クラスも継承してしまう。
+    button.classList.remove('model-edit-ribbon-legacy-anchor');
+    decorateAsRibbonCommand(button, {
+      icon: config.icon,
+      label: config.label,
+      className: 'model-edit-ribbon-create-command',
+    });
   }
 }
 

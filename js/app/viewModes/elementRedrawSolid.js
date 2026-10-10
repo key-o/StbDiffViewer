@@ -27,6 +27,7 @@ import {
 import { COMPARISON_CATEGORY } from '../../constants/comparisonCategories.js';
 import { styleClonedAsModelBOverlay } from '../../constants/overlayStyle.js';
 import { getState } from '../../data/state/globalState.js';
+import { shouldOverlayMatchedModelB } from './modelBOverlayPolicy.js';
 import {
   buildSectionKeyResolver,
   createLineKeyExtractor,
@@ -37,6 +38,11 @@ import {
   isWallElementType,
 } from './elementRedrawHelpers.js';
 import { createLabelsForSolidElementsWithSource } from './elementRedrawLabels.js';
+import {
+  filterWallComparisonForDisplay,
+  filterWallsByDisplayKind,
+  isWallElementVisible,
+} from './wallKindFilter.js';
 
 // ロガー
 const log = createLogger('elementRedrawer');
@@ -62,12 +68,14 @@ export function createSolidModeMeshes(
   elementType,
   sectionsKey,
 ) {
+  const displayResult = filterWallComparisonForDisplay(elementType, comparisonResult);
   const generator = generatorInfo.class;
   const generatorMethod = generatorInfo.method;
   const openingElementsA = getOpeningElementsForType(elementType, stbDataA);
   const openingElementsB = getOpeningElementsForType(elementType, stbDataB);
-  // 断面が異なる一致要素でモデルB形状を半透明オーバーレイ表示するか
-  const overlayModelB = getState('viewModes.showMatchedModelBOverlay') === true;
+  // 断面差・配置位置差の一致要素でモデルB形状を半透明オーバーレイ表示するか
+  const overlaySectionMismatch = getState('viewModes.showMatchedModelBOverlay') === true;
+  const overlayPositionMismatch = getState('viewModes.showPositionMismatchModelBOverlay') === true;
 
   /**
    * 指定カテゴリのマッチ済みアイテムからメッシュを生成してグループに追加する
@@ -75,7 +83,7 @@ export function createSolidModeMeshes(
    * @param {string} attributeState - 'matched' または 'mismatch'
    */
   function addMatchedMeshes(category, attributeState) {
-    const items = comparisonResult[category] || [];
+    const items = displayResult[category] || [];
     if (items.length === 0) return;
     const elements = items.map((m) => m.dataA.element);
     const meshes = generator[generatorMethod](
@@ -105,24 +113,18 @@ export function createSolidModeMeshes(
       group.add(mesh);
     });
 
-    // 形状が異なる一致要素については、モデルB側の形状を半透明で重ねて表示する。
+    // 断面差または配置位置差の一致要素について、モデルB側の実形状を半透明で重ねる。
+    // 両トグルに該当するペアでも filter の結果は1要素なので、Bメッシュは重複生成しない。
     // B側は必ず stbDataB 系（nodes/sections/steelSections）を使うこと。
-    // stbDataA を使うと断面取り違えで誤形状になる。
-    if (overlayModelB && category === COMPARISON_CATEGORY.ATTRIBUTE_MISMATCH) {
-      addModelBOverlayMeshes(
-        items.filter((item) => isTypeAttributeMismatch(item)),
-        category,
-      );
-    }
-  }
-
-  function isTypeAttributeMismatch(item) {
-    return (
-      item?.attributeMismatchKind === 'type' ||
-      item?.attributeMismatchKind === 'both' ||
-      item?.diffStatus === 'attributeMismatchType' ||
-      item?.diffStatus === 'attributeMismatchBoth'
+    const overlayItems = items.filter((item) =>
+      shouldOverlayMatchedModelB(item, category, {
+        showSectionMismatch: overlaySectionMismatch,
+        showPositionMismatch: overlayPositionMismatch,
+      }),
     );
+    if (overlayItems.length > 0) {
+      addModelBOverlayMeshes(overlayItems, category);
+    }
   }
 
   /**
@@ -131,7 +133,9 @@ export function createSolidModeMeshes(
    * @param {string} category - COMPARISON_CATEGORY の値
    */
   function addModelBOverlayMeshes(items, category) {
-    const elementsB = items.map((m) => m.dataB?.element).filter(Boolean);
+    const elementsB = items
+      .map((m) => m.dataB?.element)
+      .filter((element) => element && (elementType !== 'Wall' || isWallElementVisible(element)));
     if (elementsB.length === 0) return;
     const meshesB = generator[generatorMethod](
       elementsB,
@@ -179,7 +183,7 @@ export function createSolidModeMeshes(
    * @param {Array|null} openingElements - 開口要素（Wall用）
    */
   function addOnlyModelMeshes(modelSource, stbData, openingElements) {
-    const onlyItems = comparisonResult[`only${modelSource}`];
+    const onlyItems = displayResult[`only${modelSource}`];
     if (!onlyItems || onlyItems.length === 0) return;
     const elements = onlyItems.map((d) => d.element);
     const meshes = generator[generatorMethod](
@@ -221,15 +225,16 @@ export function createSolidModeMeshes(
  * @private
  */
 export function createSolidModeLabels(comparisonResult, stbDataA, stbDataB, group, elementType) {
+  const displayResult = filterWallComparisonForDisplay(elementType, comparisonResult);
   labelDisplayManager.syncWithCheckbox(elementType);
   const createLabelsFlag = labelDisplayManager.isLabelVisible(elementType);
   log.debug(`[redraw${elementType}ForViewMode] solid mode - createLabels: ${createLabelsFlag}`);
 
   if (!createLabelsFlag) return;
 
-  const exactItems = comparisonResult[COMPARISON_CATEGORY.EXACT] || [];
-  const withinToleranceItems = comparisonResult[COMPARISON_CATEGORY.WITHIN_TOLERANCE] || [];
-  const mismatchItems = comparisonResult[COMPARISON_CATEGORY.ATTRIBUTE_MISMATCH] || [];
+  const exactItems = displayResult[COMPARISON_CATEGORY.EXACT] || [];
+  const withinToleranceItems = displayResult[COMPARISON_CATEGORY.WITHIN_TOLERANCE] || [];
+  const mismatchItems = displayResult[COMPARISON_CATEGORY.ATTRIBUTE_MISMATCH] || [];
 
   // EXACT要素のラベル
   const exactLabels = createLabelsForSolidElementsWithSource(
@@ -254,14 +259,14 @@ export function createSolidModeLabels(comparisonResult, stbDataA, stbDataB, grou
   );
   // モデルAのみの要素のラベル
   const onlyALabels = createLabelsForSolidElementsWithSource(
-    comparisonResult.onlyA.map((d) => d.element),
+    displayResult.onlyA.map((d) => d.element),
     stbDataA.nodes,
     elementType,
     'A',
   );
   // モデルBのみの要素のラベル
   const onlyBLabels = createLabelsForSolidElementsWithSource(
-    comparisonResult.onlyB.map((d) => d.element),
+    displayResult.onlyB.map((d) => d.element),
     stbDataB.nodes,
     elementType,
     'B',
@@ -301,7 +306,8 @@ export function createSolidModeMeshesForSingleModel(
 ) {
   const generator = generatorInfo.class;
   const generatorMethod = generatorInfo.method;
-  const filteredElements = getFilteredStbElements(stbData, config);
+  const elements = getFilteredStbElements(stbData, config);
+  const filteredElements = elementType === 'Wall' ? filterWallsByDisplayKind(elements) : elements;
 
   const meshes = generator[generatorMethod](
     filteredElements,

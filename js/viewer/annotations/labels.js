@@ -17,6 +17,7 @@ import { createLogger } from '../../utils/logger.js';
 import { buildCanvasFont, getBaseFontFamily } from '../../utils/typography.js';
 import { LABEL_SETTINGS, LABEL_OCCLUSION_SETTINGS } from '../../config/renderingConstants.js';
 import { elementGroups } from '../core/core.js';
+import { getHitElementFromBatch } from '../rendering/geometryBatcher.js';
 
 const log = createLogger('viewer/ui/labels');
 let cachedOcclusionTargets = [];
@@ -32,6 +33,68 @@ function getLabelOcclusionTargetsForFrame() {
     cachedOcclusionTargetsFrame = globalFrameCounter;
   }
   return cachedOcclusionTargets;
+}
+
+function getElementUserData(object, intersection = null) {
+  let current = object;
+  while (current) {
+    const data = current.userData || {};
+    if (current === object && intersection?.instanceId != null && Array.isArray(data.instances)) {
+      return data.instances[intersection.instanceId] || data;
+    }
+    if (current === object && intersection) {
+      const hitData = getHitElementFromBatch(intersection);
+      if (hitData) return hitData;
+    }
+    if (data.isLabel || data.elementType || data.stbNodeType) return data;
+    current = current.parent;
+  }
+  return {};
+}
+
+function collectElementIds(data) {
+  return new Set(
+    [data?.elementId, data?.elementIdA, data?.elementIdB, data?.originalId]
+      .filter((value) => value !== null && value !== undefined && String(value) !== '')
+      .map((value) => String(value)),
+  );
+}
+
+function isSameLogicalElement(object, label, intersection = null) {
+  const objectData = getElementUserData(object, intersection);
+  const labelData = label?.userData || {};
+  const objectType = objectData.elementType || objectData.stbNodeType;
+  const labelType = labelData.elementType || labelData.stbNodeType;
+  if (!objectType || !labelType || objectType !== labelType) return false;
+
+  const objectSource = objectData.modelSource;
+  const labelSource = labelData.modelSource;
+  if (
+    objectSource &&
+    labelSource &&
+    objectSource !== labelSource &&
+    objectSource !== 'matched' &&
+    labelSource !== 'matched'
+  ) {
+    return false;
+  }
+
+  const objectIds = collectElementIds(objectData);
+  const labelIds = collectElementIds(labelData);
+  if (objectIds.size === 0 || labelIds.size === 0) return false;
+  return [...objectIds].some((id) => labelIds.has(id));
+}
+
+function isOccludingHit(hit, label, anchorDistance, epsilonMm) {
+  if (!hit?.object) return false;
+  const hitData = getElementUserData(hit.object, hit);
+  if (hitData.isLabel) return false;
+
+  const elementType = hitData.elementType || hitData.stbNodeType;
+  if (elementType === 'Axis' || elementType === 'Story') return false;
+  if (isSameLogicalElement(hit.object, label, hit)) return false;
+
+  return hit.distance < anchorDistance - epsilonMm;
 }
 
 // オクルージョンチェック用のフレームカウンター
@@ -187,12 +250,13 @@ export function createLabelSprite(text, position, spriteGroup, elementType, meta
       map: texture,
       transparent: true,
       sizeAttenuation: true,
-      // ★★★ テスト用: 深度テストを一時的に無効化してみる ★★★
-      // depthTest: true, // 通常はこちら
-      depthTest: true, // <<< テストする場合はこちらを有効化 (他の要素との前後関係がおかしくなります)
+      // 表示対象と判定されたラベルは文字列全体を前面描画する。
+      // 遮蔽の有無は下記のアンカーRaycastでラベル単位に判定する。
+      depthTest: false,
       depthWrite: false,
     });
     const sprite = new THREE.Sprite(material);
+    sprite.renderOrder = LABEL_OCCLUSION_SETTINGS.OVERLAY_RENDER_ORDER;
 
     const baseScale = new THREE.Vector3(baseScaleX, baseScaleY, 1);
     sprite.userData.baseScale = baseScale;
@@ -210,9 +274,8 @@ export function createLabelSprite(text, position, spriteGroup, elementType, meta
       lastCheckFrame: 0,
       lastCameraPosition: new THREE.Vector3(),
       lastCameraQuaternion: new THREE.Quaternion(),
+      initialized: false,
       isOccluded: false,
-      targetPushDistance: 0,
-      currentPushDistance: 0,
       occludedFrameCount: 0,
       visibleFrameCount: 0,
     };
@@ -265,8 +328,8 @@ export function createLabelSprite(text, position, spriteGroup, elementType, meta
         }
       }
 
-      // --- Occlusion check with throttling and smoothing ---
-      // フレームカウンターの更新（時間ベース）
+      // --- Occlusion check with throttling and hysteresis ---
+      // タグの一部だけが深度バッファに負けないよう、遮蔽はアンカー位置でタグ単位に判定する。
       const now = performance.now();
       if (now - lastFrameTime > FRAME_TIME_MS) {
         globalFrameCounter++;
@@ -276,7 +339,6 @@ export function createLabelSprite(text, position, spriteGroup, elementType, meta
       const state = this.userData.occlusionState;
       const settings = LABEL_OCCLUSION_SETTINGS;
 
-      // カメラ移動/回転検出
       const cameraPos = cameraInstance.position.clone();
       const cameraQuat = cameraInstance.quaternion.clone();
       const cameraMoved =
@@ -284,10 +346,12 @@ export function createLabelSprite(text, position, spriteGroup, elementType, meta
       const cameraRotated =
         state.lastCameraQuaternion.angleTo(cameraQuat) > settings.CAMERA_ROTATE_THRESHOLD;
 
-      // チェックを実行すべきか判定（間引き）
       const framesSinceLastCheck = globalFrameCounter - state.lastCheckFrame;
       const shouldCheck =
-        cameraMoved || cameraRotated || framesSinceLastCheck >= settings.CHECK_INTERVAL_FRAMES;
+        !state.initialized ||
+        cameraMoved ||
+        cameraRotated ||
+        framesSinceLastCheck >= settings.CHECK_INTERVAL_FRAMES;
 
       if (shouldCheck) {
         state.lastCheckFrame = globalFrameCounter;
@@ -295,44 +359,42 @@ export function createLabelSprite(text, position, spriteGroup, elementType, meta
         state.lastCameraQuaternion.copy(cameraQuat);
 
         try {
-          let skipOcclusionRaycast = false;
-          if (elementType !== 'Story' && elementType !== 'Axis') {
+          let isCurrentlyOccluded = false;
+          let skipOcclusionRaycast = elementType === 'Story' || elementType === 'Axis';
+
+          if (!skipOcclusionRaycast) {
             const projectedCurrentPosition = currentPos.clone().project(cameraInstance);
             const occlusionMargin = 1.1;
-            if (
+            skipOcclusionRaycast =
               projectedCurrentPosition.x < -occlusionMargin ||
               projectedCurrentPosition.x > occlusionMargin ||
               projectedCurrentPosition.y < -occlusionMargin ||
               projectedCurrentPosition.y > occlusionMargin ||
               projectedCurrentPosition.z < -1 ||
-              projectedCurrentPosition.z > 1
-            ) {
-              state.visibleFrameCount++;
-              state.occludedFrameCount = 0;
-              state.targetPushDistance = 0;
-              skipOcclusionRaycast = true;
+              projectedCurrentPosition.z > 1;
+          }
+
+          if (!skipOcclusionRaycast) {
+            const dirToLabel = new THREE.Vector3().subVectors(currentPos, cameraPos);
+            const distance = dirToLabel.length();
+
+            if (distance > 0) {
+              const ray = new THREE.Raycaster(cameraPos, dirToLabel.normalize(), 0.01, distance);
+              ray.camera = cameraInstance;
+              const intersects = ray.intersectObjects(getLabelOcclusionTargetsForFrame(), true);
+              isCurrentlyOccluded = intersects.some((hit) =>
+                isOccludingHit(hit, this, distance, settings.SELF_OCCLUSION_EPSILON_MM),
+              );
             }
           }
 
-          const dirToLabel = new THREE.Vector3().subVectors(currentPos, cameraPos);
-          const distance = dirToLabel.length();
-
-          if (!skipOcclusionRaycast && distance > 0) {
-            const ray = new THREE.Raycaster(cameraPos, dirToLabel.normalize(), 0.01, distance);
-            ray.camera = cameraInstance;
-            const intersects = ray.intersectObjects(getLabelOcclusionTargetsForFrame(), true);
-
-            const firstBlocker = intersects.find((hit) => {
-              if (!hit || !hit.object) return false;
-              if (hit.object === this) return false;
-              const t = hit.object.userData && hit.object.userData.elementType;
-              if (t === 'Axis' || t === 'Story') return false;
-              return true;
-            });
-
-            const isCurrentlyOccluded = !!firstBlocker;
-
-            // ヒステリシス処理: 状態変化に連続フレーム数の閾値を設ける
+          if (!state.initialized) {
+            // 初回はちらつきを避けるため即時に遮蔽状態を確定する。
+            state.initialized = true;
+            state.isOccluded = isCurrentlyOccluded;
+            state.occludedFrameCount = 0;
+            state.visibleFrameCount = 0;
+          } else {
             if (isCurrentlyOccluded) {
               state.occludedFrameCount++;
               state.visibleFrameCount = 0;
@@ -341,35 +403,15 @@ export function createLabelSprite(text, position, spriteGroup, elementType, meta
               state.occludedFrameCount = 0;
             }
 
-            // 状態変更判定（ヒステリシス閾値を超えた場合のみ変更）
-            if (state.occludedFrameCount >= settings.HYSTERESIS_FRAMES && !state.isOccluded) {
+            if (state.occludedFrameCount >= settings.HYSTERESIS_FRAMES) {
               state.isOccluded = true;
-              const pushDist = Math.min(
-                settings.MAX_PUSH_DISTANCE,
-                distance * settings.PUSH_DISTANCE_RATIO,
-              );
-              state.targetPushDistance = pushDist;
-            } else if (state.visibleFrameCount >= settings.HYSTERESIS_FRAMES && state.isOccluded) {
+            } else if (state.visibleFrameCount >= settings.HYSTERESIS_FRAMES) {
               state.isOccluded = false;
-              state.targetPushDistance = 0;
             }
           }
         } catch (err) {
-          // Raycast失敗時は何もしない
+          // Raycast失敗時は直前の遮蔽状態を維持する
         }
-      }
-
-      // 補間による滑らかな位置変化（毎フレーム実行）
-      state.currentPushDistance = THREE.MathUtils.lerp(
-        state.currentPushDistance,
-        state.targetPushDistance,
-        settings.LERP_FACTOR,
-      );
-
-      // 押し出し適用（最小閾値を超えた場合のみ）
-      if (Math.abs(state.currentPushDistance) > 0.1) {
-        const push = cameraDirection.clone().multiplyScalar(-state.currentPushDistance);
-        currentPos.add(push);
       }
 
       const initialVisibility = this.userData.labelBaseVisible ?? this.visible; // UIによる表示状態
@@ -407,8 +449,10 @@ export function createLabelSprite(text, position, spriteGroup, elementType, meta
 
       // --- 最終設定 ---
       this.position.copy(currentPos);
-      // UIによる表示状態とビュー範囲外判定のみで表示を決定
+      // visible=false にすると onBeforeRender 自体が止まり復帰判定できないため、
+      // 遮蔽中は opacity=0 とし、UI/ビュー範囲の可視性とは分離する。
       this.visible = initialVisibility && shouldBeVisible;
+      this.material.opacity = state.isOccluded ? 0 : 1;
 
       // --- スケール調整 ---
       if (this.visible) {

@@ -13,11 +13,13 @@ const log = createLogger('DXFParser');
 /**
  * DXFファイルをパースして構造化データを返す
  * @param {string} dxfContent - DXFファイルの内容（テキスト）
+ * @param {{entityHandlers?: Function[]}} [options] - 参照読込等から渡す追加entity handler
  * @returns {Object} パースされたDXFデータ
  */
-export function parseDxf(dxfContent) {
+export function parseDxf(dxfContent, { entityHandlers = [] } = {}) {
   try {
     const parser = new DxfParser();
+    for (const handler of entityHandlers) parser.registerEntityHandler(handler);
     const dxf = parser.parseSync(dxfContent);
 
     if (!dxf) {

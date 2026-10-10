@@ -95,7 +95,7 @@ function _onModeEntered() {
 }
 
 function _onModeExited() {
-  // MODE_EXITED が ALL_CLEARED より先に来るため、ここで isActive を false にしてから list をクリア
+  // 完了済み寸法と測定一覧は保持し、操作中UIだけを閉じる。
   _isActive = false;
   const btn = document.getElementById('toggle-measurement-btn');
   if (btn) {

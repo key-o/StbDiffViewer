@@ -166,6 +166,9 @@ function resolveSmallBeamTopAnchorage({ barDiaMm, supportWidthMm, fc, grade } = 
       supportWidthMm: validSupport ? supportWidthMm : null,
       grade: normalizeGrade(grade),
       fc: Number.isFinite(fc) ? fc : null,
+      lengthKind: 'L2',
+      projectionKind: 'LB_B2',
+      projectionRule: 'max(Lb,B/2)',
       l2Factor: l2.factor,
       l2RequiredMm,
       lbFactor: lb.factor,
@@ -185,6 +188,9 @@ function resolveSmallBeamTopAnchorage({ barDiaMm, supportWidthMm, fc, grade } = 
     supportWidthMm,
     grade: l2.grade,
     fc,
+    lengthKind: 'L2',
+    projectionKind: 'LB_B2',
+    projectionRule: 'max(Lb,B/2)',
     l2Factor: l2.factor,
     l2RequiredMm,
     lbFactor: lb.factor,
@@ -193,6 +199,119 @@ function resolveSmallBeamTopAnchorage({ barDiaMm, supportWidthMm, fc, grade } = 
     projectionRequiredMm,
     tailFactor,
     tailRequiredMm,
+  };
+}
+
+/**
+ * 片持ち小梁上端筋を支持大梁へ定着する際の L2 / La / 3B/4 要求だけを解決する。
+ *
+ * 日建連 §9-3(3) / §3-2 に従い、全長は L2、投影長さは
+ * max(La, 支持梁幅Bの3/4) とする。La は片持ち梁上端筋を適用対象に含み、
+ * Lb は片持ち小梁上端筋を適用対象から除外するため、この resolver では参照しない。
+ * 実支持面・確保可能長さ・RebarPath は後段の geometry facts で解決する。
+ */
+function resolveSmallBeamCantileverTopAnchorage({ barDiaMm, supportWidthMm, fc, grade } = {}) {
+  const l2 = resolveLengthFactor({ kind: 'l2', fc, grade });
+  const la = resolveLengthFactor({ kind: 'la', fc, grade });
+  const tailFactor = resolveHookTailFactor(90);
+  const validBar = Number.isFinite(barDiaMm) && barDiaMm > 0;
+  const validSupport = Number.isFinite(supportWidthMm) && supportWidthMm > 0;
+  const factorsResolved = l2.ok && la.ok && Number.isFinite(tailFactor) && tailFactor > 0;
+
+  const l2RequiredMm = validBar && l2.ok ? l2.factor * barDiaMm : null;
+  const laByTableMm = validBar && la.ok ? la.factor * barDiaMm : null;
+  const minBySupportMm = validSupport ? (3 * supportWidthMm) / 4 : null;
+  const projectionRequiredMm =
+    Number.isFinite(laByTableMm) && Number.isFinite(minBySupportMm)
+      ? Math.max(laByTableMm, minBySupportMm)
+      : null;
+  const tailRequiredMm = validBar && Number.isFinite(tailFactor) ? tailFactor * barDiaMm : null;
+
+  const base = {
+    ok: validBar && validSupport && factorsResolved,
+    specialRequired: !(validBar && validSupport && factorsResolved),
+    standardId: defaults.standardId,
+    barDiaMm: validBar ? barDiaMm : null,
+    supportWidthMm: validSupport ? supportWidthMm : null,
+    grade: l2.ok ? l2.grade : normalizeGrade(grade),
+    fc: Number.isFinite(fc) ? fc : null,
+    lengthKind: 'L2',
+    projectionKind: 'LA_3B4',
+    projectionRule: 'max(La,3B/4)',
+    l2Factor: l2.factor,
+    l2RequiredMm,
+    laFactor: la.factor,
+    laByTableMm,
+    minBySupportMm,
+    projectionRequiredMm,
+    tailFactor: Number.isFinite(tailFactor) ? tailFactor : null,
+    tailRequiredMm,
+  };
+
+  return base;
+}
+
+/**
+ * 図9-4の先端小梁取合いに用いるC形筋・出隅上端筋の幾何非依存必要長さを解決する。
+ * C形筋は先端小梁あばら筋と同径・同間隔とし、図示水平脚は25d。
+ * 出隅で先端小梁上端筋を片持ち梁へ定着する追加必要長さは max(8d,150,B/2) として保持する。Bは片持ち梁幅。
+ */
+function resolveSmallBeamCantileverTipBeamCBar({ barDiaMm, pitchMm } = {}) {
+  const rule = defaults.lengths.cantileverTipBeam || null;
+  const dia = Number(barDiaMm);
+  const pitch = Number(pitchMm);
+  const factor = Number(rule?.cBarLegDiaFactor);
+  const validDia = Number.isFinite(dia) && dia > 0;
+  const validPitch = Number.isFinite(pitch) && pitch > 0;
+  const validFactor = Number.isFinite(factor) && factor > 0;
+  return {
+    ok: validDia && validPitch && validFactor,
+    specialRequired: !(validDia && validPitch && validFactor),
+    standardId: defaults.standardId,
+    sourceFigure: '9-4-1/9-4-2',
+    sameDiameterAsTipBeamStirrup: true,
+    samePitchAsTipBeamStirrup: true,
+    barDiaMm: validDia ? dia : null,
+    pitchMm: validPitch ? pitch : null,
+    legLengthDiaFactor: validFactor ? factor : null,
+    legLengthMm: validDia && validFactor ? dia * factor : null,
+  };
+}
+
+function resolveSmallBeamCantileverTipBeamCornerTop({ barDiaMm, cantileverBeamWidthMm } = {}) {
+  const rule = defaults.lengths.cantileverTipBeam || null;
+  const dia = Number(barDiaMm);
+  const width = Number(cantileverBeamWidthMm);
+  const factor = Number(rule?.cornerTopStraightDiaFactor);
+  const minimumMm = Number(rule?.cornerTopStraightMinMm);
+  const widthRatio = Number(rule?.cornerTopCantileverWidthRatio);
+  const valid =
+    Number.isFinite(dia) &&
+    dia > 0 &&
+    Number.isFinite(width) &&
+    width > 0 &&
+    Number.isFinite(factor) &&
+    factor > 0 &&
+    Number.isFinite(minimumMm) &&
+    minimumMm > 0 &&
+    Number.isFinite(widthRatio) &&
+    widthRatio > 0;
+  const byDiaMm = valid ? factor * dia : null;
+  const byWidthMm = valid ? widthRatio * width : null;
+  return {
+    ok: valid,
+    specialRequired: !valid,
+    standardId: defaults.standardId,
+    sourceFigure: '9-4-2',
+    lengthKind: 'MAX_8D_150_B2',
+    diaFactor: Number.isFinite(factor) ? factor : null,
+    absoluteMinMm: Number.isFinite(minimumMm) ? minimumMm : null,
+    cantileverWidthRatio: Number.isFinite(widthRatio) ? widthRatio : null,
+    barDiaMm: Number.isFinite(dia) && dia > 0 ? dia : null,
+    cantileverBeamWidthMm: Number.isFinite(width) && width > 0 ? width : null,
+    byDiaMm,
+    byWidthMm,
+    requiredMm: valid ? Math.max(byDiaMm, minimumMm, byWidthMm) : null,
   };
 }
 
@@ -378,6 +497,9 @@ export const REBAR_STANDARD_RULES = Object.freeze({
   resolveLengthFactor,
   resolveSmallBeamBottomAnchorage,
   resolveSmallBeamTopAnchorage,
+  resolveSmallBeamCantileverTopAnchorage,
+  resolveSmallBeamCantileverTipBeamCBar,
+  resolveSmallBeamCantileverTipBeamCornerTop,
   resolveHookTailFactor,
   resolveBendInsideDiameterFactor,
   resolveMainBarClearSpacingMm,

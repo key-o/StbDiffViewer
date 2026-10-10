@@ -27,6 +27,7 @@ import { getToleranceConfig } from '../../config/toleranceConfig.js';
 import comparisonKeyManager from '../comparisonKeyManager.js';
 import { normalizeComparisonResult } from '../../data/normalizeComparisonResult.js';
 import { createWallLookup, drawWallOpeningOutlines } from './elementRedrawWalls.js';
+import { filterWallComparisonForDisplay } from './wallKindFilter.js';
 import {
   applyElementFilter,
   buildSectionKeyResolver,
@@ -93,7 +94,10 @@ export function drawPolyModeElements(config, modelContext, group) {
       )
     : compareElements(elementsA, elementsB, nodeMapA, nodeMapB, keyExtractor, comparisonOptions);
 
-  const comparisonResult = normalizeComparisonResult(rawPolyResult);
+  const comparisonResult = filterWallComparisonForDisplay(
+    elementType,
+    normalizeComparisonResult(rawPolyResult),
+  );
 
   labelDisplayManager.syncWithCheckbox(elementType);
   const createLabels = labelDisplayManager.isLabelVisible(elementType);

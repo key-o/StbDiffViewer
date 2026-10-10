@@ -29,7 +29,6 @@ const SECTION_MAP_KEY_BY_ELEMENT_TYPE = {
   Beam: 'beamSections',
   Brace: 'braceSections',
   Slab: 'slabSections',
-  ShearWall: 'wallSections',
   Wall: 'wallSections',
 };
 
@@ -134,7 +133,7 @@ class SectionTreeView extends BaseTreeView {
     log.info('Section usage map:', sectionUsageMap);
 
     // 断面タイプごとにツリーノードを作成
-    const sectionTypes = ['Column', 'Girder', 'Beam', 'Brace', 'Slab', 'ShearWall', 'Wall'];
+    const sectionTypes = ['Column', 'Girder', 'Beam', 'Brace', 'Slab', 'Wall'];
 
     this.sectionStats = { total: 0, filtered: 0 };
 

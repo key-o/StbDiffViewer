@@ -98,6 +98,12 @@ export const NIKKENREN_2023_REBAR_STANDARD_DEFAULTS = Object.freeze({
     }),
     beamColumnProjectionDepthRatio: 0.75,
     beamColumnHookTailDiaFactor: 8,
+    cantileverTipBeam: Object.freeze({
+      cBarLegDiaFactor: 25,
+      cornerTopStraightDiaFactor: 8,
+      cornerTopStraightMinMm: 150,
+      cornerTopCantileverWidthRatio: 0.5,
+    }),
   },
 
   column: {
