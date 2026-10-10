@@ -108,7 +108,8 @@ export function extractWallElements(xmlDoc) {
     const name = wallEl.getAttribute('name');
     const kindStructure = wallEl.getAttribute('kind_structure');
     const kindLayout = wallEl.getAttribute('kind_layout');
-    const kindWall = wallEl.getAttribute('kind_wall');
+    // 省略(null)と明示空文字を区別して保持する。STB既定値は比較側で補完する。
+    const kindWall = wallEl.hasAttribute('kind_wall') ? wallEl.getAttribute('kind_wall') : null;
     const guid = wallEl.getAttribute('guid');
 
     const nodeIdOrderEl = wallEl.getElementsByTagName('StbNodeIdOrder')[0];

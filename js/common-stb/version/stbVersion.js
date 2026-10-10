@@ -5,7 +5,7 @@
  * UI・コンバーター・エクスポーター・CLIはすべて本モジュールを使用してください。
  *
  * 注意: `common-stb/import/`（STB読み込みカーネル）はアプリ非依存の
- * サブプロジェクトであり外部モジュールをimportできないため（CLAUDE.md 例外E4）、
+ * サブプロジェクトであり外部モジュールをimportできないため（docs/DEPENDENCY_RULES.md 例外E4）、
  * カーネル内の `stbVersionDetection.js` は本モジュールを参照しません。
  * 判定ロジックを変更する場合は両方の整合を保つこと。
  *

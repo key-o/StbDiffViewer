@@ -43,6 +43,15 @@ export const diffListPanelTemplateMethods = {
                 <option value="all">すべて</option>
               </select>
             </div>
+            <div class="filter-row">
+              <label for="diff-review-filter">レビュー:</label>
+              <select id="diff-review-filter">
+                <option value="all">すべて</option>
+                <option value="unreviewed">未確認</option>
+                <option value="confirmed">確認済み</option>
+                <option value="needsDiscussion">要協議</option>
+              </select>
+            </div>
           </div>
 
           <!-- サマリー表示 -->

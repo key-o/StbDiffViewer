@@ -85,6 +85,12 @@ export const diffListFilterMethods = {
       data = data.filter((item) => item.elementType === this.currentFilter.elementType);
     }
 
+    if (this.currentFilter.reviewStatus !== 'all') {
+      data = data.filter(
+        (item) => this.getDiffReviewState(item).status === this.currentFilter.reviewStatus,
+      );
+    }
+
     return data;
   },
 

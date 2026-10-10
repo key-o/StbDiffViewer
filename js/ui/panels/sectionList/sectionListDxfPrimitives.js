@@ -5,7 +5,11 @@
  * 鉄筋記号、可変幅/可変高の表枠、DXF紙面投影を提供する。
  */
 
-import { generateDxfContent, downloadDxf } from '../../../export/dxf/stb-to-dxf/index.js';
+import {
+  generateDxfContent,
+  downloadDxf,
+  DXF_OUTPUT_PROFILES,
+} from '../../../export/dxf/stb-to-dxf/index.js';
 import { createLogger } from '../../../utils/logger.js';
 import {
   BASELINE_RC_SCHEDULE_PROFILE,
@@ -126,8 +130,44 @@ export function createSectionListRowLayout(stories, cellH, rowHeights = null) {
   return { heights, tops, bottoms, tableBottom: cursor };
 }
 
-export function centeredTextX(centerX, text, height = LABEL_H) {
-  return centerX - String(text || '').length * height * 0.3;
+function getTextHalfWidthUnits(value) {
+  return Array.from(value).reduce((sum, char) => {
+    const code = char.codePointAt(0);
+    return sum + (code < 128 || (code >= 0xff61 && code <= 0xff9f) ? 1 : 2);
+  }, 0);
+}
+
+/** Jw_cadはTEXTの中央揃えを使わないため、半角幅=高さ/2で挿入点へ変換する。 */
+export function prepareSectionListDxfText(text, dxfProfile) {
+  if (dxfProfile !== DXF_OUTPUT_PROFILES.JWCAD_R12 || text.anchor !== 'center') return text;
+  return {
+    ...text,
+    position: {
+      x: text.position.x - (getTextHalfWidthUnits(text.text) * text.height * text.widthFactor) / 4,
+      y: text.position.y - text.height / 2,
+    },
+    anchor: 'left',
+    verticalAlign: 'baseline',
+  };
+}
+
+/** txt/extfont2の字幅に余裕を含め、長い文字列だけ幅を縮める。 */
+export function createCenteredSectionListText(centerX, y, text, cellWidth) {
+  // SHX/JISで表示できる横棒を欠損値にも使用する。
+  const value = String(text ?? '').replace(/\u2014/g, '\u2015');
+  const units = getTextHalfWidthUnits(value);
+  const estimatedWidth = units * LABEL_H * 1.05;
+  const availableWidth = Math.max(0, cellWidth - LABEL_H);
+  return {
+    position: { x: centerX, y },
+    text: value,
+    layer: LAYERS.LABEL,
+    height: LABEL_H,
+    anchor: 'center',
+    verticalAlign: 'middle',
+    widthFactor:
+      estimatedWidth > 0 && availableWidth > 0 ? Math.min(1, availableWidth / estimatedWidth) : 1,
+  };
 }
 
 export function createSectionListDxfEntityState() {
@@ -154,22 +194,45 @@ export function drawSectionListStoryRowScaffold({
   diagramBottomY,
   infoRowH,
   infoRows,
+  cellTopY = null,
+  slotHeaderRows = [],
 }) {
-  texts2D.push({
-    position: { x: centeredTextX(frame.floorColumnW / 2, storyLabel), y: storyCenterY },
-    text: storyLabel,
-    layer: LAYERS.LABEL,
-    height: LABEL_H,
-  });
-  texts2D.push({
-    position: {
-      x: centeredTextX(frame.floorColumnW + frame.rowLabelColumnW / 2, '断面'),
-      y: sectionCenterY,
-    },
-    text: '断面',
-    layer: LAYERS.LABEL,
-    height: LABEL_H,
-  });
+  texts2D.push(
+    createCenteredSectionListText(
+      frame.floorColumnW / 2,
+      storyCenterY,
+      storyLabel,
+      frame.floorColumnW,
+    ),
+  );
+  if (slotHeaderRows.length > 0 && Number.isFinite(cellTopY)) {
+    slotHeaderRows.forEach((label, index) => {
+      const y = cellTopY - infoRowH * (index + 0.5);
+      texts2D.push(
+        createCenteredSectionListText(
+          frame.floorColumnW + frame.rowLabelColumnW / 2,
+          y,
+          label,
+          frame.rowLabelColumnW,
+        ),
+      );
+      const boundaryY = cellTopY - infoRowH * (index + 1);
+      lines2D.push({
+        start: { x: frame.floorColumnW, y: boundaryY },
+        end: { x: frame.tableRight, y: boundaryY },
+        layer: LAYERS.BORDER,
+      });
+    });
+  }
+
+  texts2D.push(
+    createCenteredSectionListText(
+      frame.floorColumnW + frame.rowLabelColumnW / 2,
+      sectionCenterY,
+      '断面',
+      frame.rowLabelColumnW,
+    ),
+  );
 
   for (let boundaryIndex = 0; boundaryIndex < infoRows.length; boundaryIndex += 1) {
     const y = diagramBottomY - infoRowH * boundaryIndex;
@@ -182,15 +245,14 @@ export function drawSectionListStoryRowScaffold({
 
   infoRows.forEach((row, infoIndex) => {
     const y = diagramBottomY - infoRowH * (infoIndex + 0.5);
-    texts2D.push({
-      position: {
-        x: centeredTextX(frame.floorColumnW + frame.rowLabelColumnW / 2, row.label),
+    texts2D.push(
+      createCenteredSectionListText(
+        frame.floorColumnW + frame.rowLabelColumnW / 2,
         y,
-      },
-      text: row.label,
-      layer: LAYERS.LABEL,
-      height: LABEL_H,
-    });
+        row.label,
+        frame.rowLabelColumnW,
+      ),
+    );
   });
 }
 
@@ -287,44 +349,29 @@ export function drawTableFrame({
 
   const headerTopRowY = headerBandH + (headerH - headerBandH) / 2;
   const headerSecondRowY = headerBandH / 2;
-  texts2D.push({
-    position: {
-      x: centeredTextX(floorColumnW / 2, '階'),
-      y: headerBandH,
-    },
-    text: '階',
-    layer: LAYERS.LABEL,
-    height: LABEL_H,
-  });
-  texts2D.push({
-    position: {
-      x: centeredTextX(floorColumnW + rowLabelColumnW / 2, cornerLabel),
-      y: headerTopRowY,
-    },
-    text: cornerLabel,
-    layer: LAYERS.LABEL,
-    height: LABEL_H,
-  });
+  texts2D.push(createCenteredSectionListText(floorColumnW / 2, headerBandH, '階', floorColumnW));
+  texts2D.push(
+    createCenteredSectionListText(
+      floorColumnW + rowLabelColumnW / 2,
+      headerTopRowY,
+      cornerLabel,
+      rowLabelColumnW,
+    ),
+  );
   if (secondCornerLabel) {
-    texts2D.push({
-      position: {
-        x: centeredTextX(floorColumnW + rowLabelColumnW / 2, secondCornerLabel),
-        y: headerSecondRowY,
-      },
-      text: secondCornerLabel,
-      layer: LAYERS.LABEL,
-      height: LABEL_H,
-    });
+    texts2D.push(
+      createCenteredSectionListText(
+        floorColumnW + rowLabelColumnW / 2,
+        headerSecondRowY,
+        secondCornerLabel,
+        rowLabelColumnW,
+      ),
+    );
   }
 
   symbols.forEach((symbol, ci) => {
     const cx = layout.lefts[ci] + layout.widths[ci] / 2;
-    texts2D.push({
-      position: { x: centeredTextX(cx, symbol), y: headerTopRowY },
-      text: symbol,
-      layer: LAYERS.LABEL,
-      height: LABEL_H,
-    });
+    texts2D.push(createCenteredSectionListText(cx, headerTopRowY, symbol, layout.widths[ci]));
     updateBounds(bounds, cx, tableTop);
   });
 
@@ -384,6 +431,7 @@ export async function finalizeSectionListDxf({
   symbols,
   stbName,
   scheduleProfile = null,
+  dxfProfile = null,
 }) {
   if (!isFinite(bounds.min.x)) {
     bounds.min = { x: 0, y: -10000 };
@@ -413,8 +461,14 @@ export async function finalizeSectionListDxf({
     projected.bounds,
     layerNames,
     projected.lines2D,
-    projected.texts2D,
+    projected.texts2D.map((text) => prepareSectionListDxfText(text, dxfProfile)),
     projected.circles2D,
+    {
+      textStyle: {
+        fontFile: 'txt',
+        bigFontFile: dxfProfile === DXF_OUTPUT_PROFILES.JWCAD_R12 ? '' : 'extfont2.shx',
+      },
+    },
   );
-  await downloadDxf(dxfContent, filename);
+  await downloadDxf(dxfContent, filename, null, { profile: dxfProfile });
 }

@@ -9,7 +9,6 @@ import {
   BASELINE_RC_SCHEDULE_PROFILE,
   getColumnScheduleDiagramModelHeight,
   getColumnSchedulePositionModelWidth,
-  getScheduleInfoAreaModelHeight,
   getScheduleInfoRowModelHeight,
   resolveRcScheduleProfile,
 } from '../../../components/rcScheduleProfile.js';
@@ -22,10 +21,16 @@ import {
   collectSectionListAdaptiveMetrics,
   createCenteredSectionProjection,
   drawSectionListInfoValues,
-  drawSectionListSlotHeaders,
+  drawSectionListStorySlotValues,
   getSectionListSlotCenter,
   resolveSectionListAdaptiveLayout,
 } from './sectionListDxfLayoutUtils.js';
+import {
+  getColumnSectionListArrangementEntries,
+  getColumnSectionListPlainTextRows,
+  getColumnSectionListSectionName,
+} from './columnSectionListPresentation.js';
+
 import {
   LAYERS,
   addRebarSymbol,
@@ -43,44 +48,7 @@ const uiPresenter = new ConfiguredColumnSectionListRenderer({
   coverFaces: BASELINE_COLUMN_COVER_FACES,
 });
 
-function stripHtml(value) {
-  return String(value ?? '')
-    .replace(/<[^>]*>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .trim();
-}
-
-function formatDimensions(sectionData) {
-  return stripHtml(uiPresenter.formatDimensions(sectionData)).replace(/×/g, 'x');
-}
-
-const COLUMN_INFO_ROWS = [
-  {
-    label: 'Dx × Dy',
-    format: (sectionData) => formatDimensions(sectionData),
-  },
-  {
-    label: '主筋',
-    format: (sectionData, arrangement) =>
-      stripHtml(uiPresenter.formatMainBar(sectionData, arrangement)),
-  },
-  {
-    label: 'HOOP',
-    format: (sectionData, arrangement) =>
-      stripHtml(uiPresenter.formatHoop(sectionData, arrangement)),
-  },
-  {
-    // 添付基準DXFでは通常HOOPと同値。STBに独立値が無い場合は同値を表示する。
-    label: '接合部HOOP',
-    format: (sectionData, arrangement) =>
-      stripHtml(uiPresenter.formatHoop(sectionData, arrangement)),
-  },
-  {
-    label: '備考',
-    format: () => '',
-  },
-];
+const COLUMN_INFO_ROWS = getColumnSectionListPlainTextRows(uiPresenter);
 
 function drawColumnGeometry(lines2D, circles2D, geometry, cx, cy, scheduleProfile) {
   if (!geometry) return;
@@ -166,7 +134,9 @@ export async function exportConfiguredColumnSectionListToDxf(
   uiPresenter.onBeforeGridRender(gridData);
 
   const infoRowH = getScheduleInfoRowModelHeight(scheduleProfile);
-  const infoAreaH = getScheduleInfoAreaModelHeight(scheduleProfile);
+  const slotHeaderRows = ['断面名', '位置'];
+  const slotHeaderAreaH = infoRowH * slotHeaderRows.length;
+  const infoAreaH = infoRowH * COLUMN_INFO_ROWS.length + slotHeaderAreaH;
   const metrics = collectSectionListAdaptiveMetrics({
     stories,
     symbols,
@@ -202,38 +172,17 @@ export async function exportConfiguredColumnSectionListToDxf(
     rowHeights,
     stbName,
     cornerLabel: '符号',
-    secondCornerLabel: '断面名',
+    secondCornerLabel: '',
     scheduleProfile,
-  });
-
-  drawSectionListSlotHeaders({
-    texts2D,
-    frame,
-    symbols,
-    entriesBySymbol: metrics.headerEntriesBySymbol,
-    getLabels: (arrangements) => {
-      const totals = arrangements.reduce((result, arrangement) => {
-        result[arrangement.position] = (result[arrangement.position] || 0) + 1;
-        return result;
-      }, {});
-      const indexes = {};
-      return arrangements.map((arrangement) => {
-        indexes[arrangement.position] = (indexes[arrangement.position] || 0) + 1;
-        return uiPresenter.getPositionLabel(
-          arrangement.position,
-          indexes[arrangement.position],
-          totals[arrangement.position],
-        );
-      });
-    },
   });
 
   stories.forEach((story, rowIndex) => {
     const cellTopY = frame.rowTops[rowIndex];
     const cellBottomY = frame.rowBottoms[rowIndex];
     const diagramH = diagramHeightsByStory.get(story.id);
-    const diagramBottomY = cellTopY - diagramH;
-    const sectionCenterY = cellTopY - diagramH / 2;
+    const diagramContentTopY = cellTopY - slotHeaderAreaH;
+    const diagramBottomY = diagramContentTopY - diagramH;
+    const sectionCenterY = (diagramContentTopY + diagramBottomY) / 2;
     const storyCenterY = (cellTopY + cellBottomY) / 2;
 
     drawSectionListStoryRowScaffold({
@@ -246,6 +195,8 @@ export async function exportConfiguredColumnSectionListToDxf(
       diagramBottomY,
       infoRowH,
       infoRows: COLUMN_INFO_ROWS,
+      cellTopY,
+      slotHeaderRows,
     });
 
     symbols.forEach((symbol, columnIndex) => {
@@ -257,16 +208,33 @@ export async function exportConfiguredColumnSectionListToDxf(
         return;
       }
 
-      const arrangements = uiPresenter.getArrangements(sectionData);
+      const arrangementEntries = getColumnSectionListArrangementEntries(uiPresenter, sectionData);
       const sharedSlotCounts = uiPresenter.sectionSlotCounts.get(sectionData) || null;
+      drawSectionListStorySlotValues({
+        texts2D,
+        centerX: cellLeftX + cellWidth / 2,
+        cellWidth,
+        cellTopY,
+        rowHeight: infoRowH,
+        values: [getColumnSectionListSectionName(sectionData)],
+      });
 
-      arrangements.forEach((arrangement, arrangementIndex) => {
+      arrangementEntries.forEach(({ arrangement, positionLabel }, arrangementIndex) => {
         const posCx = getSectionListSlotCenter(
           cellLeftX,
           cellWidth,
-          arrangements.length,
+          arrangementEntries.length,
           arrangementIndex,
         );
+        drawSectionListStorySlotValues({
+          texts2D,
+          centerX: posCx,
+          cellWidth: cellWidth / arrangementEntries.length,
+          cellTopY,
+          rowHeight: infoRowH,
+          values: [positionLabel],
+          startIndex: 1,
+        });
         const svgData = uiPresenter.prepareSvgData(sectionData, arrangement);
         const geometry = buildColumnScheduleGeometry(svgData, {
           coverFaces,
@@ -278,9 +246,10 @@ export async function exportConfiguredColumnSectionListToDxf(
           texts2D,
           rows: COLUMN_INFO_ROWS,
           centerX: posCx,
+          cellWidth: cellWidth / arrangementEntries.length,
           diagramBottomY,
           infoRowH,
-          getValue: (row) => row.format(sectionData, arrangement) || '',
+          getValue: (row) => row.value(sectionData, arrangement) || '',
         });
       });
 
@@ -299,6 +268,7 @@ export async function exportConfiguredColumnSectionListToDxf(
     symbols,
     stbName,
     scheduleProfile,
+    dxfProfile: options.dxfProfile,
   });
 }
 

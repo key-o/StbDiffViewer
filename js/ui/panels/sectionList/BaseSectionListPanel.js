@@ -45,6 +45,7 @@ export class BaseSectionListPanel {
     this.log = config.log;
     this.renderSettings = {
       scaleDenominator: 40,
+      dxfProfile: 'autocad-r12',
     };
     this.currentData = null;
     this.currentDoc = null;
@@ -172,6 +173,13 @@ export class BaseSectionListPanel {
                 <option value="100">1/100</option>
               </select>
             </label>
+            <label title="AutoCADはR12 Unicode escape、Jw_cadはShift-JIS実バイトで保存します">
+              DXF互換
+              <select id="${idPrefix}-dxf-profile-select">
+                <option value="autocad-r12" selected>AutoCAD R12</option>
+                <option value="jwcad-r12">Jw_cad R12 (Shift-JIS)</option>
+              </select>
+            </label>
             ${this.getExtraSettingsHtml()}
           </div>
           <div class="section-list-info" id="${idPrefix}-info"></div>
@@ -217,6 +225,11 @@ export class BaseSectionListPanel {
         this.updateRenderSettingsFromControls();
         this.rerenderCurrentData();
       });
+    }
+
+    const dxfProfileSelect = document.getElementById(`${idPrefix}-dxf-profile-select`);
+    if (dxfProfileSelect) {
+      dxfProfileSelect.addEventListener('change', () => this.updateRenderSettingsFromControls());
     }
 
     this.setupExtraListeners();
@@ -381,6 +394,7 @@ export class BaseSectionListPanel {
     }
 
     try {
+      this.updateRenderSettingsFromControls();
       const source = this.currentSource || 'A';
       const fileKey = source === 'A' ? 'files.originalFileA' : 'files.originalFileB';
       const file = getState(fileKey);
@@ -403,11 +417,14 @@ export class BaseSectionListPanel {
    */
   updateRenderSettingsFromControls() {
     const scaleSelect = document.getElementById(`${this.config.idPrefix}-scale-select`);
+    const dxfProfileSelect = document.getElementById(`${this.config.idPrefix}-dxf-profile-select`);
     const scaleDenominator = Number(scaleSelect?.value || this.renderSettings.scaleDenominator);
 
     this.renderSettings.scaleDenominator = Number.isFinite(scaleDenominator)
       ? scaleDenominator
       : this.renderSettings.scaleDenominator;
+    this.renderSettings.dxfProfile =
+      dxfProfileSelect?.value === 'jwcad-r12' ? 'jwcad-r12' : 'autocad-r12';
     this.renderer.setScaleDenominator(this.renderSettings.scaleDenominator);
 
     this.applyExtraRenderSettings();

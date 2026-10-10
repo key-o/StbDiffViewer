@@ -33,6 +33,7 @@ export const diffListInteractionMethods = {
     this._containerClickHandler = (event) => {
       const item = event.target.closest('.diff-item');
       if (!item) return;
+      if (event.target.closest('.diff-review-controls')) return;
 
       const elementType = item.dataset.elementType;
       const elementId = item.dataset.elementId;
@@ -63,6 +64,12 @@ export const diffListInteractionMethods = {
     };
 
     container.addEventListener('click', this._containerClickHandler);
+
+    if (this._reviewChangeHandler) {
+      container.removeEventListener('change', this._reviewChangeHandler);
+    }
+    this._reviewChangeHandler = (event) => this.handleDiffReviewChange(event);
+    container.addEventListener('change', this._reviewChangeHandler);
   },
 
   /**

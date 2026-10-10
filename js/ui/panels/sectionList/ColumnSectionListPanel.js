@@ -109,6 +109,7 @@ export class ColumnSectionListPanel extends BaseSectionListPanel {
   async exportDxf(gridData, filename, stbName) {
     await exportColumnSectionListToDxf(gridData, filename, stbName, {
       coverFaces: this.renderSettings.coverFaces,
+      dxfProfile: this.renderSettings.dxfProfile,
     });
   }
 }

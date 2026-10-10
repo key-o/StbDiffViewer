@@ -215,6 +215,7 @@ export async function exportBeamSectionListToDxf(
           texts2D,
           rows: BEAM_INFO_ROWS,
           centerX: posCx,
+          cellWidth: cellWidth / entries.length,
           diagramBottomY,
           infoRowH,
           getValue: (row) => row.format(positionData),
@@ -236,5 +237,6 @@ export async function exportBeamSectionListToDxf(
     symbols,
     stbName,
     scheduleProfile,
+    dxfProfile: options.dxfProfile,
   });
 }

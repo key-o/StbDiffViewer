@@ -322,7 +322,6 @@ function renderElementTypeSync(elementType, comparisonResult, modelBounds, _glob
       break;
 
     case 'Slab':
-    case 'ShearWall':
     case 'Wall':
     case 'FrameDampingDevice':
       // solid繝｢繝ｼ繝峨・蝣ｴ蜷医・繧ｹ繧ｭ繝・・・・pplyInitialDisplayModes縺ｧ謠冗判縺輔ｌ繧具ｼ・

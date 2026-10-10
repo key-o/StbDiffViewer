@@ -34,14 +34,13 @@ import {
   buildStoryHeightMatchKey,
 } from '../../config/comparisonKeyConfig.js';
 import { getToleranceConfig } from '../../config/toleranceConfig.js';
-import { filterWallsByViewerElementType } from '../../common-stb/walls/wallClassification.js';
 import { getElementAttribute } from './comparisonElementUtils.js';
 import { createSectionKeyResolvers } from './sectionKeyResolvers.js';
 
 const logger = createLogger('modelLoader:comparison');
 
 // Axis の XML タグ名は StbParallelAxis（StbAxis ではない）
-const ELEMENT_TAG_OVERRIDES = { Axis: STB_TAG_NAMES.PARALLEL_AXIS, ShearWall: STB_TAG_NAMES.WALL };
+const ELEMENT_TAG_OVERRIDES = { Axis: STB_TAG_NAMES.PARALLEL_AXIS };
 
 // 単一タイプが複数のSTBタグを束ねる場合の追加タグ。
 // 通り芯（Axis）は平行に加えて円弧（StbArcAxis）・放射（StbRadialAxis）も比較対象にする。
@@ -64,17 +63,6 @@ function parseElementsForType(doc, elementType, primaryTag) {
     for (const tag of extraTags) {
       elements.push(...parseElements(doc, tag));
     }
-  }
-  return elements;
-}
-
-// 比較では壁を 'Wall' カテゴリに統合する（normalizeComparisonElementType）ため、
-// kind_wall によるフィルタは行わない。耐震壁（WALL_SHEAR）もここで比較対象に含める。
-// 表示側の種別絞り込みは elementRedrawConfig の wallViewerElementType を元に
-// elementRedrawCore の applyElementFilter が担当する。
-function filterElementsByViewerType(elementType, elements) {
-  if (elementType === 'ShearWall') {
-    return filterWallsByViewerElementType(elementType, elements);
   }
   return elements;
 }
@@ -127,14 +115,8 @@ export function compareSingleElementTypeInternal(elementType, isSelected, ctx) {
   try {
     // Parse elements from both models
     const xmlTagName = ELEMENT_TAG_OVERRIDES[elementType] || 'Stb' + elementType;
-    elementsA = filterElementsByViewerType(
-      elementType,
-      parseElementsForType(modelADocument, elementType, xmlTagName),
-    );
-    elementsB = filterElementsByViewerType(
-      elementType,
-      parseElementsForType(modelBDocument, elementType, xmlTagName),
-    );
+    elementsA = parseElementsForType(modelADocument, elementType, xmlTagName);
+    elementsB = parseElementsForType(modelBDocument, elementType, xmlTagName);
 
     // Perform comparison with importance options
     const rawComparisonResult = compareElementsByType(
@@ -424,7 +406,6 @@ function compareElementsByType(
         break;
 
       case 'Slab':
-      case 'ShearWall':
       case 'Wall':
       case 'FrameDampingDevice':
         comparisonResult = performComparison(

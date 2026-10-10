@@ -174,6 +174,11 @@ export function clearModelProcessingState() {
   setState('models.elementData', createEmptyElementData());
   setState('models.derivedQuantitiesA', null);
   setState('models.derivedQuantitiesB', null);
+  setState('models.derivedQuantitiesWorkingA', null);
+  setState('models.quantityFactsWorkingA', null);
+  setState('models.workingQuantitySessionId', null);
+  setState('models.workingQuantityRevision', null);
+  setState('models.workingQuantityError', null);
   setState('models.quantityFactsA', null);
   setState('models.quantityFactsB', null);
   setState('models.modelsLoaded', false);

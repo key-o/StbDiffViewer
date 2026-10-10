@@ -579,6 +579,11 @@ export async function compareModels(scheduleRender, { camera, controls } = {}) {
         : null;
       setState('models.derivedQuantitiesA', derivedQuantitiesA);
       setState('models.derivedQuantitiesB', derivedQuantitiesB);
+      setState('models.derivedQuantitiesWorkingA', null);
+      setState('models.quantityFactsWorkingA', null);
+      setState('models.workingQuantitySessionId', null);
+      setState('models.workingQuantityRevision', null);
+      setState('models.workingQuantityError', null);
 
       // Analytics用QuantityFactはDerivedQuantityStoreから派生する二次キャッシュ。
       // Fact構築失敗でElementInfoの個別数量まで失わないよう、A/Bごとに独立してfail-closedとする。
@@ -604,6 +609,11 @@ export async function compareModels(scheduleRender, { camera, controls } = {}) {
     } catch (error) {
       setState('models.derivedQuantitiesA', null);
       setState('models.derivedQuantitiesB', null);
+      setState('models.derivedQuantitiesWorkingA', null);
+      setState('models.quantityFactsWorkingA', null);
+      setState('models.workingQuantitySessionId', null);
+      setState('models.workingQuantityRevision', null);
+      setState('models.workingQuantityError', null);
       setState('models.quantityFactsA', null);
       setState('models.quantityFactsB', null);
       log.warn('派生数量の構築に失敗しました。モデル表示は継続します。', error);

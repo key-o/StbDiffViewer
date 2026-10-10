@@ -44,6 +44,7 @@ export class BeamSectionListPanel extends BaseSectionListPanel {
   async exportDxf(gridData, filename, stbName) {
     await exportBeamSectionListToDxf(gridData, filename, stbName, {
       coverThickness: this.renderSettings.coverThickness,
+      dxfProfile: this.renderSettings.dxfProfile,
     });
   }
 

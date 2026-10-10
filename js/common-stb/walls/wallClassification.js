@@ -1,58 +1,54 @@
 /**
  * @fileoverview STB wall classification helpers
+ *
+ * StbWall の Viewer identity は常に Wall とし、kind_wall は同一要素の耐力区分属性として比較・表示する。
  */
 
 import { readElementAttribute } from '../../data/accessors/elementAttributeAccessor.js';
 
-/**
- * @typedef {'ShearWall'|'Wall'} ViewerWallElementType
- */
+export const STB_WALL_KIND = Object.freeze({
+  NORMAL: 'WALL_NORMAL',
+  SHEAR: 'WALL_SHEAR',
+});
 
-/**
- * Safely reads an attribute from either an XML element or a plain object.
- * @param {Element|Object|null|undefined} element
- * @param {string} attributeName
- * @returns {string}
- */
+const LEGACY_WALL_ELEMENT_TYPES = new Set(['ShearWall', 'StbShearWall']);
+
 const readWallAttribute = (element, attributeName) =>
   readElementAttribute(element, attributeName, { missingValue: '' });
 
-/**
- * Returns the STB wall kind.
- * @param {Element|Object|null|undefined} element
- * @returns {string}
- */
 export function getStbWallKind(element) {
   return readWallAttribute(element, 'kind_wall').trim();
 }
 
-/**
- * Returns true when the wall is a shear wall in STB.
- * @param {Element|Object|null|undefined} element
- * @returns {boolean}
- */
+export function getEffectiveStbWallKind(element) {
+  return getStbWallKind(element) === STB_WALL_KIND.SHEAR
+    ? STB_WALL_KIND.SHEAR
+    : STB_WALL_KIND.NORMAL;
+}
+
 export function isStbShearWall(element) {
-  return getStbWallKind(element) === 'WALL_SHEAR';
+  return getEffectiveStbWallKind(element) === STB_WALL_KIND.SHEAR;
+}
+
+/** legacy外部入力のShearWallをcanonical Wallへ写像する。 */
+export function normalizeWallViewerElementType(elementType) {
+  const normalized = String(elementType || '').trim();
+  return LEGACY_WALL_ELEMENT_TYPES.has(normalized) ? 'Wall' : normalized;
+}
+
+/** @deprecated StbWallのViewer identityは常にWall。 */
+export function getViewerWallElementType() {
+  return 'Wall';
 }
 
 /**
- * Maps an STB wall to the viewer wall element type.
- * @param {Element|Object|null|undefined} element
- * @returns {ViewerWallElementType}
+ * STB仕様の省略値だけを補完する比較用の耐力区分。
+ * 明示された不正値は保持する。表示上の「非耐力壁」への分類と、属性の同値性は別契約。
+ * xmldomは欠落属性も空文字で返すため、hasAttributeで省略を区別する。
  */
-export function getViewerWallElementType(element) {
-  return isStbShearWall(element) ? 'ShearWall' : 'Wall';
-}
-
-/**
- * Filters StbWall collections for the requested viewer element type.
- * @param {ViewerWallElementType} elementType
- * @param {Array<Element|Object>} elements
- * @returns {Array<Element|Object>}
- */
-export function filterWallsByViewerElementType(elementType, elements) {
-  if (!Array.isArray(elements) || (elementType !== 'ShearWall' && elementType !== 'Wall')) {
-    return Array.isArray(elements) ? elements : [];
+export function getComparableStbWallKind(element) {
+  if (typeof element?.hasAttribute === 'function' && !element.hasAttribute('kind_wall')) {
+    return STB_WALL_KIND.NORMAL;
   }
-  return elements.filter((element) => getViewerWallElementType(element) === elementType);
+  return readElementAttribute(element, 'kind_wall') ?? STB_WALL_KIND.NORMAL;
 }

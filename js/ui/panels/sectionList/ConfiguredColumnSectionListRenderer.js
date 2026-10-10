@@ -9,6 +9,11 @@
 import { ColumnSectionListRenderer } from './ColumnSectionListRenderer.js';
 import { resolveRcScheduleProfile } from '../../../components/rcScheduleProfile.js';
 import { BASELINE_COLUMN_COVER_FACES } from '../../../components/rcColumnVisual/columnSectionCover.js';
+import {
+  getColumnSectionListArrangementEntries,
+  getColumnSectionListSectionName,
+  getColumnSectionListSpecRows,
+} from './columnSectionListPresentation.js';
 
 const GRID_NAME_ROW_HEIGHT = 22;
 const GRID_POSITION_ROW_HEIGHT = 22;
@@ -91,27 +96,11 @@ export class ConfiguredColumnSectionListRenderer extends ColumnSectionListRender
   }
 
   getGridSpecLabels() {
-    const labels = ['B×D / Fc', '主筋', '主筋材料', '1段目dt'];
-    if (this.options.showCoreBar) labels.push('芯鉄筋');
-    labels.push('帯筋');
-    return labels;
+    return getColumnSectionListSpecRows(this).map((row) => row.label);
   }
 
   getGridSpecValues(sectionData, arrangement) {
-    const dimText = this.formatDimensions(sectionData);
-    const concreteStrength = sectionData.concrete?.strength;
-    const concreteText = `${dimText} / ${concreteStrength ? this.escapeHtml(concreteStrength) : '—'}`;
-    const values = [
-      concreteText,
-      this.formatMainBar(sectionData, arrangement),
-      this.formatMainGrade(arrangement.mainBar),
-      this.formatDt(sectionData, arrangement) || '—',
-    ];
-    if (this.options.showCoreBar) {
-      values.push(arrangement.coreBar ? this.formatCoreBar(sectionData, arrangement) : '—');
-    }
-    values.push(this.formatHoop(sectionData, arrangement));
-    return values;
+    return getColumnSectionListSpecRows(this).map((row) => row.value(sectionData, arrangement));
   }
 
   renderGridRowLabels(diagramHeight) {
@@ -154,20 +143,10 @@ export class ConfiguredColumnSectionListRenderer extends ColumnSectionListRender
   }
 
   renderGridSection(sectionData, diagramHeight) {
-    const arrangements = this.getArrangements(sectionData);
-    const totals = arrangements.reduce((result, arrangement) => {
-      result[arrangement.position] = (result[arrangement.position] || 0) + 1;
-      return result;
-    }, {});
-    const indexes = {};
-    const arrangementHtml = arrangements
-      .map((arrangement) => {
-        indexes[arrangement.position] = (indexes[arrangement.position] || 0) + 1;
-        const positionLabel = this.getPositionLabel(
-          arrangement.position,
-          indexes[arrangement.position],
-          totals[arrangement.position],
-        );
+    const arrangementEntries = getColumnSectionListArrangementEntries(this, sectionData);
+    const arrangements = arrangementEntries.map((entry) => entry.arrangement);
+    const arrangementHtml = arrangementEntries
+      .map(({ arrangement, positionLabel }) => {
         const svgData = this.prepareSvgData(sectionData, arrangement);
         const svgString = this.svgRenderer.renderToString(svgData, {
           fixedScale: this.lastComputedScale?.scale,
@@ -192,7 +171,7 @@ export class ConfiguredColumnSectionListRenderer extends ColumnSectionListRender
 
     return [
       '<div class="section-cell-content column-section-cell column-grid-section-cell" style="display:flex;flex-direction:column;width:100%;height:auto;">',
-      `<div class="section-cell-name" style="height:${GRID_NAME_ROW_HEIGHT}px;box-sizing:border-box;margin-bottom:0;display:flex;align-items:center;justify-content:center;border-bottom:1px solid var(--border-color, #ccc);">${this.escapeHtml(sectionData.symbolNames || '')}</div>`,
+      `<div class="section-cell-name" style="height:${GRID_NAME_ROW_HEIGHT}px;box-sizing:border-box;margin-bottom:0;display:flex;align-items:center;justify-content:center;border-bottom:1px solid var(--border-color, #ccc);">${this.escapeHtml(getColumnSectionListSectionName(sectionData))}</div>`,
       `<div class="column-arrangements-container${arrangements.length > 1 ? ' is-multiple' : ''}" style="display:grid;grid-template-columns:repeat(${arrangements.length},minmax(0,1fr));justify-content:stretch;gap:0;width:100%;">${arrangementHtml}</div>`,
       '</div>',
     ].join('');

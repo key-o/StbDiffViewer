@@ -1,4 +1,4 @@
-import { LABEL_H, LAYERS, centeredTextX } from './sectionListDxfPrimitives.js';
+import { createCenteredSectionListText } from './sectionListDxfPrimitives.js';
 
 /**
  * 断面中心を基準に、上向きローカルY座標をDXFのモデル座標へ投影する。
@@ -131,12 +131,14 @@ export function drawSectionListSlotHeaders({
 
     labels.forEach((label, entryIndex) => {
       const cx = getSectionListSlotCenter(cellLeftX, cellWidth, entries.length, entryIndex);
-      texts2D.push({
-        position: { x: centeredTextX(cx, label), y: frame.headerSecondRowY },
-        text: label,
-        layer: LAYERS.LABEL,
-        height: LABEL_H,
-      });
+      texts2D.push(
+        createCenteredSectionListText(
+          cx,
+          frame.headerSecondRowY,
+          label,
+          cellWidth / Math.max(1, entries.length),
+        ),
+      );
     });
   });
 }
@@ -148,6 +150,7 @@ export function drawSectionListInfoValues({
   texts2D,
   rows,
   centerX,
+  cellWidth,
   diagramBottomY,
   infoRowH,
   getValue,
@@ -155,11 +158,24 @@ export function drawSectionListInfoValues({
   rows.forEach((row, infoIndex) => {
     const value = getValue(row, infoIndex) ?? '';
     const y = diagramBottomY - infoRowH * (infoIndex + 0.5);
-    texts2D.push({
-      position: { x: centeredTextX(centerX, value), y },
-      text: value,
-      layer: LAYERS.LABEL,
-      height: LABEL_H,
-    });
+    texts2D.push(createCenteredSectionListText(centerX, y, value, cellWidth));
+  });
+}
+
+/**
+ * 断面スロット上部の「断面名」「位置」などの値を行中心へ配置する。
+ */
+export function drawSectionListStorySlotValues({
+  texts2D,
+  centerX,
+  cellWidth,
+  cellTopY,
+  rowHeight,
+  values,
+  startIndex = 0,
+}) {
+  (values || []).forEach((value, index) => {
+    const y = cellTopY - rowHeight * (startIndex + index + 0.5);
+    texts2D.push(createCenteredSectionListText(centerX, y, value, cellWidth));
   });
 }

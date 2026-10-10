@@ -194,7 +194,6 @@ function renderElementType(elementType, comparisonResult, modelBounds, _globalDa
       break;
 
     case 'Slab':
-    case 'ShearWall':
     case 'Wall':
     case 'FrameDampingDevice':
     case 'Joint':

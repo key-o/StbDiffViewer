@@ -187,6 +187,7 @@ export const diffListRendererMethods = {
         <span class="diff-icon">${escapeHtml(icon)}</span>
         <span class="item-category">${escapeHtml(categoryLabel)}</span>
         <span class="item-id">${escapeHtml(item.id)}</span>
+        ${this.renderDiffReviewControls(item)}
         <span class="${actionClass}" title="${escapeHtml(title)}">${escapeHtml(actionLabel)}</span>
       </div>
     `;
@@ -380,6 +381,7 @@ export const diffListRendererMethods = {
         <span class="item-category version-badge">Ver</span>
         <span class="item-id">${escapeHtml(item.id)}</span>
         <span class="version-diff-count">${escapeHtml(diffCount)}件</span>
+        ${this.renderDiffReviewControls(item)}
         <span class="item-action" title="3Dビューで表示">👁</span>
       </div>
     `;

@@ -23,7 +23,6 @@ const SECTION_MAP_KEY_BY_ELEMENT_TYPE = {
   Beam: 'beamSections',
   Brace: 'braceSections',
   Slab: 'slabSections',
-  ShearWall: 'wallSections',
   Wall: 'wallSections',
   Parapet: 'parapetSections',
   Pile: 'pileSections',

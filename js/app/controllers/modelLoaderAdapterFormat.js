@@ -174,7 +174,7 @@ function convertElementForAdapter(
   }
 
   // 面要素（スラブ、壁）- 簡略化実装
-  if (['Slab', 'ShearWall', 'Wall', 'FrameDampingDevice'].includes(elementType)) {
+  if (['Slab', 'Wall', 'FrameDampingDevice'].includes(elementType)) {
     // 面要素は節点リストを持つ
     const nodeIds = extractNodeIdsForAdapter(elementData);
     const nodes = nodeIds

@@ -10,7 +10,6 @@
  */
 
 import { STB_TAG_NAMES } from '../constants/elementTypes.js';
-import { getViewerWallElementType } from '../common-stb/walls/wallClassification.js';
 
 /** 部材XMLタグ名 → ビューア要素タイプ */
 const MEMBER_TAG_TO_ELEMENT_TYPE = {
@@ -115,18 +114,15 @@ function escapeAttributeValue(id) {
 
 /**
  * 要素から祖先方向に部材要素を探す。
- * StbWall は XML tag だけでは Viewer 上の Wall / ShearWall を決められないため、
- * kind_wall を canonical classifier で解決して返す。
+ * StbWall は kind_wall にかかわらず canonical Wall として返す。
  * @param {Element} element - 起点要素
  * @returns {{element: Element, elementType: string}|null}
  */
 function findAncestorMember(element) {
   let current = element;
   while (current) {
-    const mappedType = MEMBER_TAG_TO_ELEMENT_TYPE[current.tagName];
-    if (mappedType) {
-      const elementType =
-        current.tagName === STB_TAG_NAMES.WALL ? getViewerWallElementType(current) : mappedType;
+    const elementType = MEMBER_TAG_TO_ELEMENT_TYPE[current.tagName];
+    if (elementType) {
       return { element: current, elementType };
     }
     current = current.parentElement;

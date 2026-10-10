@@ -182,9 +182,9 @@ export function parseStories(doc, options = {}) {
       // オプション: StbNodeIdList 内の節点IDを取得
       if (includeNodeIds) {
         const nodeIds = [];
-        const nodeList = s.getElementsByTagName('StbNodeIdList')[0];
+        const nodeList = parseElements(s, 'StbNodeIdList')[0];
         if (nodeList) {
-          const idElements = Array.from(nodeList.getElementsByTagName('StbNodeId'));
+          const idElements = parseElements(nodeList, 'StbNodeId');
           for (const idEl of idElements) {
             const nid = idEl.getAttribute('id');
             if (nid) nodeIds.push(nid);

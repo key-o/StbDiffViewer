@@ -8,7 +8,10 @@
  */
 
 import { BaseSectionListRenderer } from './BaseSectionListRenderer.js';
-import { RcColumnVisualRenderer } from '../../../components/rcColumnVisual/index.js';
+import {
+  RcColumnVisualRenderer,
+  columnScheduleInputFromSection,
+} from '../../../components/rcColumnVisual/index.js';
 
 /**
  * RC柱断面リストテーブルレンダラー
@@ -316,52 +319,7 @@ export class ColumnSectionListRenderer extends BaseSectionListRenderer {
    * @returns {Object} SVGレンダラー用データ
    */
   prepareSvgData(sectionData, arrangement = this.getArrangements(sectionData)[0]) {
-    const mainBar = arrangement.mainBar || null;
-    const cover = arrangement.cover ?? sectionData.cover;
-
-    if (sectionData.isCircular || sectionData.diameter > 0) {
-      return {
-        diameter: sectionData.diameter,
-        cover,
-        mainBar: mainBar
-          ? {
-              count: mainBar.countTotal ?? mainBar.count,
-              countTotal: mainBar.countTotal,
-              dia: mainBar.dia,
-              center: mainBar.center ?? mainBar.dt,
-            }
-          : null,
-        hoop: arrangement.hoop || null,
-        coreBar: arrangement.coreBar || null,
-      };
-    } else {
-      return {
-        width: sectionData.width,
-        height: sectionData.height,
-        cover,
-        mainBar: mainBar
-          ? {
-              countX: mainBar.countX,
-              countY: mainBar.countY,
-              countTotal: mainBar.countTotal,
-              dia: mainBar.dia,
-              diaSub: mainBar.diaSub,
-              mainDirection: mainBar.mainDirection,
-              layers: mainBar.layers,
-              firstLayerExtraGroups: mainBar.firstLayerExtraGroups,
-              secondLayer: mainBar.secondLayer,
-              centerStartX: mainBar.centerStartX,
-              centerEndX: mainBar.centerEndX,
-              centerStartY: mainBar.centerStartY,
-              centerEndY: mainBar.centerEndY,
-              dtX: mainBar.dtX,
-              dtY: mainBar.dtY,
-            }
-          : null,
-        hoop: arrangement.hoop || null,
-        coreBar: arrangement.coreBar || null,
-      };
-    }
+    return columnScheduleInputFromSection(sectionData, arrangement);
   }
 
   /**

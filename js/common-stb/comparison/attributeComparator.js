@@ -8,6 +8,7 @@
 import { NUMERIC_TOLERANCE } from '../../config/geometryConfig.js';
 import { getToleranceConfig } from '../../config/toleranceConfig.js';
 import { isIdentityAttribute } from './identityAttributes.js';
+import { getComparableStbWallKind } from '../walls/wallClassification.js';
 
 /**
  * 要素からプロパティ値を取得する（XML DOM/JSオブジェクト両対応）
@@ -16,6 +17,7 @@ import { isIdentityAttribute } from './identityAttributes.js';
  * @returns {*} 属性値
  */
 function getProperty(element, attrName) {
+  if (attrName === 'kind_wall') return getComparableStbWallKind(element);
   let val;
   if (element && typeof element.getAttribute === 'function') {
     // XML DOM要素
@@ -53,6 +55,12 @@ const STRUCTURAL_ATTRIBUTES = [
   'offset_top_X',
   'offset_top_Y',
   'offset_top_Z',
+  'offset_start_X',
+  'offset_start_Y',
+  'offset_start_Z',
+  'offset_end_X',
+  'offset_end_Y',
+  'offset_end_Z',
   'level_top',
   'level_bottom',
   'condition_bottom',
@@ -73,12 +81,22 @@ const STRUCTURAL_ATTRIBUTES = [
  * @type {Set<string>}
  */
 const ZERO_DEFAULT_ATTRIBUTES = new Set([
+  'rotate',
+  'offset_X',
+  'offset_Y',
+  'offset_Z',
   'offset_bottom_X',
   'offset_bottom_Y',
   'offset_bottom_Z',
   'offset_top_X',
   'offset_top_Y',
   'offset_top_Z',
+  'offset_start_X',
+  'offset_start_Y',
+  'offset_start_Z',
+  'offset_end_X',
+  'offset_end_Y',
+  'offset_end_Z',
 ]);
 
 /**

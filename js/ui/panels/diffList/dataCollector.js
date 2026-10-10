@@ -127,6 +127,8 @@ export const diffListDataCollectorMethods = {
       }
     }
 
+    this.prepareDiffReviewItems();
+
     // 要素タイプフィルタを更新
     this.updateElementTypeFilter();
 

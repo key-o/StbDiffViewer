@@ -14,6 +14,10 @@
  */
 
 import { normalizeProfileTypeToken } from '../common-stb/import/section/sectionTypeUtil.js';
+import {
+  areMaterialGradesEquivalent,
+  normalizeMaterialGradeForEquivalence,
+} from '../common-stb/comparison/materialGradeEquivalence.js';
 
 /**
  * 断面等価性評価の設定
@@ -23,25 +27,6 @@ const EQUIVALENCE_CONFIG = {
   tolerances: {
     dimension: 1.0, // 寸法: 1%
     strength: 5.0, // 強度: 5%
-    area: 2.0, // 断面積: 2%
-    moment: 3.0, // 断面二次モーメント: 3%
-  },
-
-  // 材質の互換性マッピング
-  materialCompatibility: {
-    SS400: ['SS400'],
-    SN400: ['SN400', 'SN400A', 'SN400B', 'SN400C'],
-    SN490: ['SN490', 'SN490A', 'SN490B', 'SN490C'],
-    SM490: ['SM490'],
-    SS540: ['SS540'],
-    // コンクリート
-    FC18: ['FC18'],
-    FC21: ['FC21'],
-    FC24: ['FC24'],
-    FC27: ['FC27'],
-    FC30: ['FC30'],
-    FC33: ['FC33'],
-    FC36: ['FC36'],
   },
 
   // 断面タイプの互換性マッピング
@@ -76,13 +61,24 @@ export function normalizeSectionData(sectionData, elementType) {
   }
 
   return {
-    type: normalizeProfileTypeToken(sectionData.type || sectionData.section_type),
-    material: (sectionData.material || sectionData.strength_name || '')
+    type: normalizeProfileTypeToken(sectionData.section_type || sectionData.type),
+    material: (
+      sectionData.material ||
+      sectionData.strength_name ||
+      sectionData.strength_main ||
+      sectionData.strength ||
+      sectionData.strength_concrete ||
+      ''
+    )
       ?.toString()
       .trim()
       .toUpperCase(),
+    webMaterial: (sectionData.strength_web || sectionData.strength_main || '')
+      .toString()
+      .trim()
+      .toUpperCase(),
     dimensions: extractDimensions(sectionData, elementType),
-    properties: extractProperties(sectionData),
+    reinforcement: sectionData.reinforcement || null,
   };
 }
 
@@ -99,7 +95,7 @@ export function evaluateSectionEquivalence(sectionA, sectionB, elementType) {
     return {
       isEquivalent: false,
       checks: [],
-      summary: 'Missing section data',
+      summary: '断面データが不足しています',
       passRate: '0.0',
     };
   }
@@ -112,7 +108,7 @@ export function evaluateSectionEquivalence(sectionA, sectionB, elementType) {
     return {
       isEquivalent: false,
       checks: [],
-      summary: 'Failed to normalize section data',
+      summary: '断面データの正規化に失敗しました',
       passRate: '0.0',
     };
   }
@@ -121,9 +117,9 @@ export function evaluateSectionEquivalence(sectionA, sectionB, elementType) {
   const checks = [
     checkSectionType(normA, normB),
     checkDimensions(normA, normB),
-    checkMaterial(normA, normB),
-    checkStrength(normA, normB),
-    checkProperties(normA, normB),
+    checkSteelComponents(checkMaterial, normA, normB),
+    checkSteelComponents(checkStrength, normA, normB),
+    checkReinforcement(normA, normB),
   ];
 
   // 結果集計
@@ -134,7 +130,7 @@ export function evaluateSectionEquivalence(sectionA, sectionB, elementType) {
   return {
     isEquivalent,
     checks,
-    summary: `${passedChecks} / ${totalChecks} checks passed`,
+    summary: `${passedChecks} / ${totalChecks} 項目一致`,
     passRate: ((passedChecks / totalChecks) * 100).toFixed(1),
   };
 }
@@ -152,20 +148,20 @@ function checkSectionType(normA, normB) {
 
   if (!typeA || !typeB) {
     return {
-      category: 'Section Type',
-      name: 'Type Data',
+      category: '断面種別',
+      name: '種別データ',
       passed: false,
-      details: 'Missing section type data',
+      details: '断面種別データが不足しています',
     };
   }
 
   // 完全一致
   if (typeA === typeB) {
     return {
-      category: 'Section Type',
-      name: 'Type Match',
+      category: '断面種別',
+      name: '種別一致',
       passed: true,
-      details: `Both: ${typeA}`,
+      details: `両方: ${typeA}`,
     };
   }
 
@@ -174,10 +170,10 @@ function checkSectionType(normA, normB) {
   const isCompatible = compatibleTypes.includes(typeB);
 
   return {
-    category: 'Section Type',
-    name: 'Type Compatibility',
+    category: '断面種別',
+    name: '種別互換性',
     passed: isCompatible,
-    details: isCompatible ? `Compatible: ${typeA} ≈ ${typeB}` : `Incompatible: ${typeA} ≠ ${typeB}`,
+    details: isCompatible ? `互換: ${typeA} ≈ ${typeB}` : `非互換: ${typeA} ≠ ${typeB}`,
   };
 }
 
@@ -194,10 +190,10 @@ function checkDimensions(normA, normB) {
 
   if (!dimA || !dimB || Object.keys(dimA).length === 0 || Object.keys(dimB).length === 0) {
     return {
-      category: 'Dimensions',
-      name: 'Dimension Data',
+      category: '寸法',
+      name: '寸法データ',
       passed: true, // データがない場合はスキップ
-      details: 'No dimension data available',
+      details: '比較可能な寸法データがありません',
       subChecks: [],
     };
   }
@@ -210,10 +206,10 @@ function checkDimensions(normA, normB) {
 
   if (commonKeys.length === 0) {
     return {
-      category: 'Dimensions',
-      name: 'Dimension Data',
+      category: '寸法',
+      name: '寸法データ',
       passed: true,
-      details: 'No common dimensions to compare',
+      details: '共通の寸法項目がありません',
       subChecks: [],
     };
   }
@@ -238,13 +234,44 @@ function checkDimensions(normA, normB) {
   const allPassed = subChecks.every((c) => c.passed);
 
   return {
-    category: 'Dimensions',
-    name: 'Dimension Comparison',
+    category: '寸法',
+    name: '寸法比較',
     passed: allPassed,
     subChecks,
     details: allPassed
-      ? `All ${subChecks.length} dimensions within ${tolerance}% tolerance`
-      : `Some dimensions exceed ${tolerance}% tolerance`,
+      ? `全${subChecks.length}項目が許容差${tolerance}%以内です`
+      : `許容差${tolerance}%を超える寸法があります`,
+  };
+}
+
+/**
+ * 鋼材の主材とウェブを、同じ材質・強度の判定基準で個別に評価する。
+ *
+ * @param {Function} check - 単一材の材質または強度チェック
+ * @param {Object} normA - 正規化された断面Aのデータ
+ * @param {Object} normB - 正規化された断面Bのデータ
+ * @returns {Object} チェック結果
+ */
+function checkSteelComponents(check, normA, normB) {
+  const main = check(normA, normB);
+  if (!normA.webMaterial && !normB.webMaterial) return main;
+
+  // strength_web の省略時継承で主材と同じ値になっているだけなら、
+  // 従来の単一材表示を維持し、独立した web 指定がある場合だけ2成分比較へ展開する。
+  const hasIndependentWeb =
+    normA.webMaterial !== normA.material || normB.webMaterial !== normB.material;
+  if (!hasIndependentWeb) return main;
+
+  const web = check({ material: normA.webMaterial }, { material: normB.webMaterial });
+  return {
+    ...main,
+    name: `${main.category}比較`,
+    passed: main.passed && web.passed,
+    details: `主材: ${main.details}\nウェブ: ${web.details}`,
+    subChecks: [
+      { ...main, name: `主材 ${main.name}` },
+      { ...web, name: `ウェブ ${web.name}` },
+    ],
   };
 }
 
@@ -261,32 +288,33 @@ function checkMaterial(normA, normB) {
 
   if (!matA || !matB) {
     return {
-      category: 'Material',
-      name: 'Material Data',
+      category: '材質',
+      name: '材質データ',
       passed: true, // データがない場合はスキップ
-      details: 'Material data not available',
+      details: '比較可能な材質データがありません',
     };
   }
 
-  // 完全一致
   if (matA === matB) {
     return {
-      category: 'Material',
-      name: 'Material Match',
+      category: '材質',
+      name: '材質一致',
       passed: true,
-      details: `Both: ${matA}`,
+      details: `両方: ${matA}`,
     };
   }
 
-  // 互換性チェック
-  const compatibleMaterials = EQUIVALENCE_CONFIG.materialCompatibility[matA] || [];
-  const isCompatible = compatibleMaterials.includes(matB);
+  const isCompatible = areMaterialGradesEquivalent(matA, matB);
+  const normalizedA = normalizeMaterialGradeForEquivalence(matA);
+  const normalizedB = normalizeMaterialGradeForEquivalence(matB);
 
   return {
-    category: 'Material',
-    name: 'Material Compatibility',
+    category: '材質',
+    name: '材質互換性',
     passed: isCompatible,
-    details: isCompatible ? `Compatible: ${matA} ≈ ${matB}` : `Incompatible: ${matA} ≠ ${matB}`,
+    details: isCompatible
+      ? `互換: ${matA} ≈ ${matB}（同一グレード群: ${normalizedA}）`
+      : `非互換: ${matA} ≠ ${matB}（比較キー: ${normalizedA} / ${normalizedB}）`,
   };
 }
 
@@ -304,10 +332,10 @@ function checkStrength(normA, normB) {
 
   if (!strengthA || !strengthB) {
     return {
-      category: 'Strength',
-      name: 'Strength Data',
+      category: '強度',
+      name: '強度データ',
       passed: true, // データがない場合はスキップ
-      details: 'Strength data not available',
+      details: '比較可能な強度データがありません',
     };
   }
 
@@ -317,66 +345,179 @@ function checkStrength(normA, normB) {
   const passed = diffPercent <= tolerance;
 
   return {
-    category: 'Strength',
-    name: 'Yield Strength',
+    category: '強度',
+    name: '降伏強度',
     passed,
     details: `${strengthA} vs ${strengthB} N/mm² (${diffPercent.toFixed(1)}%)`,
   };
 }
 
-/**
- * 断面性能のチェック
- *
- * @param {Object} normA - 正規化された断面Aのデータ
- * @param {Object} normB - 正規化された断面Bのデータ
- * @returns {Object} チェック結果
- */
-function checkProperties(normA, normB) {
-  const propA = normA.properties;
-  const propB = normB.properties;
+function needsSourcePositionDisplay(rebar) {
+  const sourceDescriptions = rebar?.sourceDescriptions || {};
 
-  if (!propA || !propB || Object.keys(propA).length === 0 || Object.keys(propB).length === 0) {
+  if (rebar?.pattern === 'SAME') {
+    const descriptions = Object.values(sourceDescriptions);
+    return descriptions.length > 1 && descriptions.some((value) => value !== descriptions[0]);
+  }
+
+  if (rebar?.pattern === 'END_CENTER') {
+    return Boolean(
+      sourceDescriptions.START &&
+      sourceDescriptions.END &&
+      sourceDescriptions.START !== sourceDescriptions.END,
+    );
+  }
+
+  return false;
+}
+
+function orderedSourceDisplayKeys(rebarA, rebarB) {
+  const allKeys = Array.from(
+    new Set([
+      ...Object.keys(rebarA?.sourceDescriptions || {}),
+      ...Object.keys(rebarB?.sourceDescriptions || {}),
+    ]),
+  );
+  const physicalKeys = allKeys.filter((key) => key !== 'SAME');
+  const keys = physicalKeys.length > 0 ? physicalKeys : allKeys;
+  const preferredOrder = ['START', 'CENTER', 'END'];
+
+  return [
+    ...preferredOrder.filter((key) => keys.includes(key)),
+    ...keys.filter((key) => !preferredOrder.includes(key)),
+  ];
+}
+
+function resolveSourceDisplayEntry(rebar, key) {
+  const sourceSpec = rebar?.sourcePositions?.[key];
+  const sourceDescription = rebar?.sourceDescriptions?.[key];
+  if (sourceSpec || sourceDescription) {
     return {
-      category: 'Properties',
-      name: 'Property Data',
-      passed: true, // データがない場合はスキップ
-      details: 'Property data not available',
+      spec: sourceSpec,
+      description: sourceDescription || 'なし',
+    };
+  }
+
+  if (key !== 'SAME' && rebar?.sourcePositions?.SAME) {
+    return {
+      spec: rebar.sourcePositions.SAME,
+      description: rebar.sourceDescriptions?.SAME || 'なし',
+    };
+  }
+
+  if ((key === 'START' || key === 'END') && rebar?.pattern === 'END_CENTER') {
+    return {
+      spec: rebar.positions?.END,
+      description: rebar.descriptions?.END || 'なし',
+    };
+  }
+
+  return {
+    spec: rebar?.positions?.[key],
+    description: rebar?.descriptions?.[key] || 'なし',
+  };
+}
+
+function compareReinforcementPositions(rebarA, rebarB) {
+  const subChecks = [];
+  const useSourcePositions =
+    needsSourcePositionDisplay(rebarA) || needsSourcePositionDisplay(rebarB);
+  const allKeys = useSourcePositions
+    ? orderedSourceDisplayKeys(rebarA, rebarB)
+    : Array.from(
+        new Set([...Object.keys(rebarA?.positions || {}), ...Object.keys(rebarB?.positions || {})]),
+      );
+
+  subChecks.push({
+    name: '配筋パターン',
+    passed: rebarA.pattern === rebarB.pattern,
+    details: `${rebarA.pattern} vs ${rebarB.pattern}`,
+    valueA: rebarA.pattern,
+    valueB: rebarB.pattern,
+  });
+
+  for (const key of allKeys) {
+    const entryA = useSourcePositions
+      ? resolveSourceDisplayEntry(rebarA, key)
+      : {
+          spec: rebarA.positions?.[key],
+          description: rebarA.descriptions?.[key] || 'なし',
+        };
+    const entryB = useSourcePositions
+      ? resolveSourceDisplayEntry(rebarB, key)
+      : {
+          spec: rebarB.positions?.[key],
+          description: rebarB.descriptions?.[key] || 'なし',
+        };
+    const passed = JSON.stringify(entryA.spec ?? null) === JSON.stringify(entryB.spec ?? null);
+    const labelMap = {
+      SAME: '全断面',
+      END: useSourcePositions ? '終端' : '端部',
+      CENTER: '中央',
+      START: '始端',
+    };
+    subChecks.push({
+      name: labelMap[key] || key,
+      passed,
+      details: `モデルA: ${entryA.description}\nモデルB: ${entryB.description}`,
+      valueA: entryA.description,
+      valueB: entryB.description,
+    });
+  }
+
+  return subChecks;
+}
+
+/**
+ * RC梁配筋の意味等価チェック。
+ * Same / ThreeTypes / StartEnd / 2.1 Simple/Complex 等のXML表現差は、
+ * sectionData.reinforcement の正規形で吸収済み。
+ */
+function checkReinforcement(normA, normB) {
+  const rebarA = normA.reinforcement;
+  const rebarB = normB.reinforcement;
+
+  if (!rebarA && !rebarB) {
+    return {
+      category: '配筋',
+      name: '配筋データ',
+      passed: true,
+      details: 'この断面種別は現在の配筋等価比較の対象外です',
       subChecks: [],
     };
   }
 
-  const subChecks = [];
-
-  // 断面積チェック
-  if (propA.area && propB.area) {
-    const areaA = parseFloat(propA.area);
-    const areaB = parseFloat(propB.area);
-
-    if (!isNaN(areaA) && !isNaN(areaB)) {
-      const tolerance = EQUIVALENCE_CONFIG.tolerances.area;
-      const diff = Math.abs(areaA - areaB);
-      const diffPercent = areaA !== 0 ? (diff / areaA) * 100 : 0;
-      const passed = diffPercent <= tolerance;
-
-      subChecks.push({
-        name: 'Area',
-        passed,
-        details: `${areaA.toFixed(1)} vs ${areaB.toFixed(1)} mm² (${diffPercent.toFixed(1)}%)`,
-      });
-    }
+  if (!rebarA || !rebarB) {
+    return {
+      category: '配筋',
+      name: '配筋データ',
+      passed: false,
+      details: '片方のモデルだけ配筋比較データを取得できました',
+      subChecks: [],
+    };
   }
 
-  const allPassed = subChecks.length === 0 || subChecks.every((c) => c.passed);
+  if (!rebarA.hasData && !rebarB.hasData) {
+    return {
+      category: '配筋',
+      name: '配筋データ',
+      passed: true,
+      details: '両方とも比較可能な配筋データがありません',
+      subChecks: [],
+    };
+  }
+
+  const subChecks = compareReinforcementPositions(rebarA, rebarB);
+  const passed = rebarA.signature === rebarB.signature;
 
   return {
-    category: 'Properties',
-    name: 'Section Properties',
-    passed: allPassed,
+    category: '配筋',
+    name: '配筋等価比較',
+    passed,
+    details: passed
+      ? 'XML上の持ち方の差を正規化した結果、配筋仕様は等価です'
+      : '正規化後の配筋仕様に差があります',
     subChecks,
-    details:
-      subChecks.length > 0
-        ? `${subChecks.filter((c) => c.passed).length} / ${subChecks.length} properties OK`
-        : 'No properties to check',
   };
 }
 
@@ -394,7 +535,7 @@ function extractDimensions(sectionData, _elementType) {
   const dims = sectionData.dimensions || sectionData;
 
   // 断面タイプに応じた寸法抽出
-  const type = normalizeProfileTypeToken(sectionData.type || sectionData.section_type);
+  const type = normalizeProfileTypeToken(sectionData.section_type || sectionData.type);
   const result = {};
 
   switch (type) {
@@ -453,30 +594,6 @@ function extractDimensions(sectionData, _elementType) {
 }
 
 /**
- * 断面性能を抽出
- *
- * @param {Object} sectionData - 断面データ
- * @returns {Object} 抽出された断面性能データ
- */
-function extractProperties(sectionData) {
-  if (!sectionData) return {};
-
-  const result = {};
-
-  if (sectionData.area || sectionData.A_section) {
-    result.area = sectionData.area || sectionData.A_section;
-  }
-  if (sectionData.Iy || sectionData.moment_y) {
-    result.momentY = sectionData.Iy || sectionData.moment_y;
-  }
-  if (sectionData.Iz || sectionData.moment_z) {
-    result.momentZ = sectionData.Iz || sectionData.moment_z;
-  }
-
-  return result;
-}
-
-/**
  * 材質から降伏強度を推定
  *
  * @param {string} material - 材質名
@@ -485,7 +602,7 @@ function extractProperties(sectionData) {
 function estimateStrength(material) {
   if (!material) return null;
 
-  const mat = material.toUpperCase();
+  const mat = normalizeMaterialGradeForEquivalence(material);
 
   const strengthMap = {
     // 鋼材
