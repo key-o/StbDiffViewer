@@ -401,3 +401,18 @@ input[type="range"]::-moz-range-thumb:hover {
   margin-left: 0.25rem;
   vertical-align: middle;
 }
+
+
+/* 表示要素設定内のSTB/PDF図面タグ切替は狭い列でも判読できる寸法に固定する。 */
+.pdf-drawing-tag-mode {
+  min-width: 5rem;
+  padding: 0.15rem 0.25rem;
+}
+
+.pdf-drawing-tag-master {
+  width: auto;
+  min-width: 4.5rem;
+  margin-left: 0.25rem;
+  padding: 0.1rem 0.2rem;
+  display: inline-block;
+}

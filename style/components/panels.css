@@ -543,6 +543,7 @@ body.has-docked-element-info {
    ======================================== */
 
 .workspace-view {
+  position: relative;
   flex: 1 1 0;
   min-width: 0;
   height: 100%;
@@ -597,11 +598,31 @@ body.has-docked-element-info {
 .workspace-toolbar {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: var(--spacing-sm) var(--spacing-md);
+  align-items: stretch;
+  gap: var(--spacing-sm);
   padding: var(--spacing-sm) var(--spacing-md);
   border-bottom: var(--border-width) solid var(--border-color);
   background: var(--bg-panel);
+}
+
+.workspace-toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-xs) var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border: var(--border-width) solid var(--border-color-light);
+  border-radius: var(--border-radius-lg);
+  background: var(--sidebar-btn-bg);
+  box-shadow: var(--shadow-sm);
+}
+
+.workspace-toolbar-caption {
+  flex: 0 0 100%;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  user-select: none;
 }
 
 .workspace-toolbar label {
@@ -621,12 +642,106 @@ body.has-docked-element-info {
   font-size: var(--font-size-sm);
 }
 
+.workspace-toolbar select.form-control {
+  min-width: 96px;
+}
+
+.workspace-toolbar input[type='number'].form-control {
+  width: 72px;
+  min-width: 0;
+}
+
 .workspace-toolbar .workspace-file-control {
   width: min(250px, 28vw);
 }
 
 .workspace-toolbar input[type='range'] {
   width: 120px;
+}
+
+/* ファイル選択はサイドバーの「選択」ボタン（custom-file-btn）と同じ見た目にする */
+.workspace-toolbar input[type='file']::file-selector-button {
+  margin-right: var(--spacing-sm);
+  padding: 2px var(--spacing-sm);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--border-radius);
+  background: var(--bg-elevated);
+  color: var(--text-heading);
+  font: inherit;
+  cursor: pointer;
+}
+
+.workspace-toolbar input[type='file']::file-selector-button:hover {
+  border-color: var(--color-primary);
+  background: var(--bg-hover);
+}
+
+/* 副次ボタン: 塗りつぶしの灰色ではなく、サイドバーの白地ボタンに揃える */
+.workspace-view .btn-secondary {
+  color: var(--sidebar-btn-text);
+  background-color: var(--sidebar-btn-bg);
+  border-color: var(--border-color);
+}
+
+.workspace-view .btn-secondary:hover:not(:disabled) {
+  background-color: var(--sidebar-btn-hover-bg);
+  border-color: var(--color-primary-light);
+}
+
+.workspace-view .btn-secondary[aria-pressed='true'] {
+  background-color: color-mix(in srgb, var(--color-primary) 12%, var(--sidebar-btn-bg));
+  border-color: var(--color-primary);
+  color: var(--text-heading);
+}
+
+.workspace-view .btn:disabled {
+  color: var(--text-muted);
+  background-color: var(--bg-secondary);
+  border-color: var(--border-color-light);
+  opacity: 1;
+  cursor: not-allowed;
+}
+
+.workspace-view-close {
+  min-width: 32px;
+  font-size: var(--font-size-base);
+  line-height: 1;
+}
+
+.workspace-toolbar .pdf-overlay-pdf-tools {
+  display: block;
+  margin: 0;
+}
+
+.workspace-tip {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  cursor: help;
+}
+
+.workspace-toolbar .pdf-overlay-pdf-tools > summary,
+.workspace-sidebar .pdf-overlay-pdf-subfeature > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.pdf-overlay-pdf-tools-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-sm) var(--spacing-md);
+  margin-top: var(--spacing-sm);
+}
+
+.pdf-overlay-pdf-subfeature {
+  margin-bottom: var(--spacing-md);
+}
+
+.pdf-overlay-pdf-subfeature-body {
+  margin-top: var(--spacing-sm);
 }
 
 .workspace-toolbar button,
@@ -652,29 +767,62 @@ body.has-docked-element-info {
   background: var(--bg-panel);
 }
 
+/* 見出しは左サイドバーの .sidebar-group-title と同じ小さな灰色見出しに揃える */
 .workspace-sidebar h3 {
-  margin: var(--spacing-sm) 0;
-  color: var(--text-heading);
-  font-size: var(--font-size-base);
+  margin: var(--spacing-md) 0 var(--spacing-sm) 2px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
 }
 
+.workspace-sidebar h3:first-child {
+  margin-top: var(--spacing-xs);
+}
+
+/* fieldset は .accordion-section と同じカード表現 */
 .workspace-sidebar fieldset {
-  margin: var(--spacing-sm) 0;
-  padding: var(--spacing-sm);
-  border: var(--border-width) solid var(--border-color);
-  border-radius: var(--border-radius);
-  background: var(--bg-elevated);
+  margin: 0 0 var(--spacing-sm);
+  padding: var(--spacing-sm) 12px;
+  min-width: 0;
+  border: var(--border-width) solid var(--border-color-light);
+  border-radius: var(--border-radius-lg);
+  background: var(--sidebar-btn-bg);
+  box-shadow: var(--shadow-sm);
+}
+
+.workspace-sidebar fieldset > label {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin: var(--spacing-xs) 0;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.workspace-sidebar fieldset > label:has(> .form-control) {
+  flex-wrap: wrap;
+}
+
+.workspace-sidebar fieldset > label > .form-control {
+  flex: 1 1 100%;
+}
+
+.workspace-sidebar .help-text {
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-base);
 }
 
 .workspace-sidebar legend {
   padding: 0 var(--spacing-xs);
-  color: var(--text-secondary);
+  color: var(--text-heading);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
 }
 
 .workspace-sidebar .form-control {
   box-sizing: border-box;
+  padding: var(--btn-padding-y-sm) var(--btn-padding-x-sm);
+  font-size: var(--font-size-sm);
 }
 
 .workspace-sidebar textarea.form-control {
@@ -698,6 +846,17 @@ body.has-docked-element-info {
   color: var(--text-primary);
   font-size: var(--font-size-sm);
   overflow-wrap: anywhere;
+}
+
+/* 前提条件の案内は、本体のtoast/情報表示に合わせた左アクセント付きの情報帯にする */
+#pdf-overlay-feature-prerequisites {
+  border-width: 0 0 var(--border-width);
+  border-left: 3px solid var(--color-info);
+  border-radius: 0;
+  border-bottom-color: var(--border-color);
+  background: color-mix(in srgb, var(--color-info) 8%, var(--bg-panel));
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
 }
 
 .workspace-main {
@@ -737,6 +896,308 @@ body.workspace-view-active #legendPanel {
 
 .pdf-overlay-custom-scale input {
   width: 72px !important;
+}
+
+.pdf-overlay-tag-family-scale-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.pdf-overlay-tag-family-scale-row .form-control {
+  width: 84px;
+}
+
+.tag-family-editor {
+  position: absolute;
+  inset: var(--spacing-md);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--border-radius-lg);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-lg);
+}
+
+.tag-family-editor[hidden] {
+  display: none;
+}
+
+.tag-family-editor-header,
+.tag-family-editor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: var(--border-width) solid var(--border-color);
+}
+
+.tag-family-editor-footer {
+  border-top: var(--border-width) solid var(--border-color);
+  border-bottom: 0;
+}
+
+.tag-family-editor-header > div {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-sm);
+}
+
+#pdf-overlay-tag-family-editor-subtitle {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.tag-family-editor-body {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(320px, 1fr) minmax(240px, 300px);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.tag-family-editor-column,
+.tag-family-editor-preview-column {
+  min-width: 0;
+  min-height: 0;
+  padding: var(--spacing-sm);
+  box-sizing: border-box;
+  overflow: auto;
+}
+
+.tag-family-editor-left {
+  border-right: var(--border-width) solid var(--border-color);
+}
+
+.tag-family-editor-right {
+  border-left: var(--border-width) solid var(--border-color);
+}
+
+.tag-family-editor-column h4 {
+  margin: var(--spacing-sm) 0;
+}
+
+.tag-family-editor-list {
+  display: grid;
+  gap: var(--spacing-xs);
+  margin: var(--spacing-xs) 0 var(--spacing-md);
+  padding: 0;
+  list-style: none;
+}
+
+.tag-family-editor-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-xs);
+  min-width: 0;
+}
+
+.tag-family-editor-list li > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--font-size-xs);
+}
+
+.tag-family-editor-item {
+  width: 100%;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-family-editor-preview-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+  margin-bottom: var(--spacing-xs);
+}
+
+.tag-family-editor-preview-toolbar > span {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.tag-family-editor-snap-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.tag-family-editor-canvas-wrap {
+  display: flex;
+  min-height: 360px;
+  height: calc(100% - 86px);
+  align-items: center;
+  justify-content: center;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--border-radius);
+  background: var(--bg-canvas);
+  overflow: auto;
+}
+
+.tag-family-editor-preview {
+  width: min(100%, 720px);
+  height: auto;
+  min-height: 320px;
+  background: var(--bg-elevated);
+  touch-action: none;
+  user-select: none;
+}
+
+.tag-family-editor-preview.is-line-tool {
+  cursor: crosshair;
+}
+
+.tag-family-editor-preview-item {
+  pointer-events: all;
+}
+
+.tag-family-editor-preview-item[data-tag-family-draggable='true'],
+.tag-family-editor-preview-item[data-tag-family-line-draggable='true'] {
+  cursor: grab;
+}
+
+.tag-family-editor-preview-item[data-tag-family-draggable='true'].is-dragging,
+.tag-family-editor-preview.is-line-dragging
+  .tag-family-editor-preview-item[data-tag-family-line-draggable='true'].is-selected {
+  cursor: grabbing;
+}
+
+.tag-family-editor-preview.is-line-tool .tag-family-editor-preview-item {
+  cursor: crosshair;
+}
+
+.tag-family-editor-preview-item.is-selected {
+  filter: drop-shadow(0 0 2px var(--text-primary));
+}
+
+.tag-family-editor-line-endpoint-handle {
+  fill: var(--bg-elevated);
+  stroke: var(--color-primary);
+  stroke-width: 2;
+  cursor: move;
+  pointer-events: all;
+}
+
+.tag-family-editor-preview.is-line-tool .tag-family-editor-line-endpoint-handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tag-family-editor-preview.is-endpoint-dragging .tag-family-editor-line-endpoint-handle {
+  cursor: grabbing;
+}
+
+.tag-family-editor-preview-draft-line {
+  stroke: var(--text-primary);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  pointer-events: none;
+}
+
+.tag-family-editor-snap-point {
+  fill: var(--bg-elevated);
+  stroke: var(--color-primary);
+  stroke-width: 1.5;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tag-family-editor-preview.is-line-tool .tag-family-editor-snap-point,
+.tag-family-editor-preview.is-endpoint-dragging .tag-family-editor-snap-point {
+  opacity: 0.82;
+}
+
+.tag-family-editor-snap-point[data-snap-kind='intersection'] {
+  stroke: var(--color-selection-highlight, #ffc107);
+}
+
+.tag-family-editor-snap-point[data-snap-kind='midpoint'] {
+  stroke: var(--color-accent);
+}
+
+.tag-family-editor-snap-point[data-snap-kind='shape-corner'] {
+  stroke: var(--color-success);
+}
+
+.tag-family-editor-snap-point[data-snap-kind='shape-center'] {
+  stroke: var(--color-info);
+}
+
+.tag-family-editor-snap-point[data-snap-kind='shape-anchor'] {
+  stroke: var(--color-warning);
+}
+
+.tag-family-editor-preview .tag-family-editor-active-snap-point {
+  fill: color-mix(in srgb, var(--color-primary) 25%, var(--bg-elevated));
+  stroke-width: 2.5;
+  opacity: 1;
+}
+
+.tag-family-editor-preview .tag-family-editor-active-snap-point[data-snap-kind='horizontal'],
+.tag-family-editor-preview .tag-family-editor-active-snap-point[data-snap-kind='vertical'] {
+  stroke: var(--color-selection-highlight, #ffc107);
+}
+
+.tag-family-editor-preview-background {
+  fill: var(--bg-elevated);
+}
+
+.tag-family-editor-grid {
+  stroke: var(--border-color);
+  stroke-width: 0.5;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.tag-family-editor-properties,
+.tag-family-editor-parameter-properties {
+  display: grid;
+  gap: var(--spacing-sm);
+}
+
+.tag-family-editor-properties label,
+.tag-family-editor-parameter-properties label {
+  display: grid;
+  gap: 2px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.tag-family-editor-footer .workspace-result {
+  flex: 1 1 auto;
+}
+
+@container (max-width: 1050px) {
+  .tag-family-editor-body {
+    grid-template-columns: minmax(190px, 240px) minmax(280px, 1fr);
+  }
+
+  .tag-family-editor-right {
+    grid-column: 1 / -1;
+    max-height: 220px;
+    border-top: var(--border-width) solid var(--border-color);
+    border-left: 0;
+  }
+}
+
+.pdf-overlay-file-status {
+  display: inline-block;
+  max-width: min(360px, 32vw);
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pdf-overlay-zoom-readout {
@@ -793,6 +1254,7 @@ body.workspace-view-active #legendPanel {
   padding: var(--spacing-lg);
   box-sizing: border-box;
   overscroll-behavior: contain;
+  overflow-anchor: none;
 }
 
 .pdf-overlay-scroll.panning,
@@ -1041,4 +1503,65 @@ body.workspace-view-active #legendPanel {
     border-right: 0;
     border-bottom: var(--border-width) solid var(--border-color);
   }
+}
+
+
+/* PDF/STB図面: タグ編集モードのタグだけをドラッグ対象として明示する。 */
+.pdf-overlay-svg-layer .stb-drawing-tag[data-tag-editable='true'] {
+  cursor: move;
+  touch-action: none;
+}
+
+
+/* PDF/STB図面: 部材選択は3D表示と同じ選択ハイライト色（--color-selection-highlight）で示す。
+   フォーカス枠（黒枠）は出さず、キーボード操作時も同じハイライトで示す。 */
+.pdf-overlay-svg-layer .stb-drawing-member {
+  outline: none;
+}
+
+.pdf-overlay-svg-layer .stb-drawing-member.is-selected > .stb-drawing-member-outline,
+.pdf-overlay-svg-layer .stb-drawing-member:focus-visible > .stb-drawing-member-outline {
+  stroke: var(--color-selection-highlight, #ffc107);
+}
+
+/* Tab巡回中の選択候補プレビュー。3Dの候補色（シアン）に合わせ、選択ハイライトより優先して示す。 */
+.pdf-overlay-svg-layer .stb-drawing-member.is-candidate > .stb-drawing-member-outline {
+  stroke: var(--color-selection-candidate, #26c6da);
+}
+
+/* #425: DXF参照図形はSTB部材とは別選択系統だが、選択色は共通にする。 */
+.pdf-overlay-svg-layer .reference-drawing-primitive {
+  outline: none;
+}
+
+.pdf-overlay-svg-layer .reference-drawing-primitive.is-selected path,
+.pdf-overlay-svg-layer .reference-drawing-primitive.is-selected circle,
+.pdf-overlay-svg-layer .reference-drawing-primitive:focus-visible path,
+.pdf-overlay-svg-layer .reference-drawing-primitive:focus-visible circle {
+  stroke: var(--color-selection-highlight, #ffc107);
+  stroke-width: 3.5;
+  filter: drop-shadow(0 0 3px var(--color-selection-highlight, #ffc107));
+}
+
+.pdf-overlay-svg-layer .reference-drawing-primitive.is-selected text,
+.pdf-overlay-svg-layer .reference-drawing-primitive:focus-visible text {
+  fill: var(--color-selection-highlight, #ffc107);
+}
+
+.pdf-overlay-dxf-reference-list details {
+  margin-block: 0.4rem;
+}
+
+.pdf-overlay-dxf-reference-controls,
+.pdf-overlay-dxf-layer-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+  align-items: center;
+  margin-block: 0.35rem;
+}
+
+.pdf-overlay-dxf-layer-list {
+  max-height: 10rem;
+  overflow: auto;
 }

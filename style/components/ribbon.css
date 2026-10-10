@@ -1,0 +1,242 @@
+/* アイコン主体リボンの共通スタイル（簡易CAD・モデル編集で共有）。markup は js/ui/common/ribbon.js */
+
+.ribbon {
+  flex: 0 0 auto;
+  background: var(--bg-panel);
+  border-bottom: var(--border-width) solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-primary);
+}
+
+.ribbon-tabbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--spacing-sm);
+  min-height: 30px;
+  padding: 0 var(--spacing-sm);
+  background: color-mix(in srgb, var(--bg-panel) 90%, var(--color-primary));
+  border-bottom: var(--border-width) solid var(--border-color);
+}
+
+.ribbon-tabbar .workspace-view-title {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding-right: var(--spacing-sm);
+}
+
+.ribbon-tablist {
+  display: flex;
+  align-items: stretch;
+  gap: var(--spacing-xs);
+}
+
+.ribbon-tab {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  min-width: 66px;
+  padding: 0 var(--spacing-md);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold, 600);
+  cursor: pointer;
+}
+
+.ribbon-tab[aria-selected='true'] {
+  border-bottom-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.ribbon-status {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  min-width: 0;
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.ribbon-status label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  margin: 0;
+}
+
+.ribbon-status .form-control,
+.ribbon-body .form-control {
+  width: auto;
+  min-width: 0;
+  padding: 1px var(--btn-padding-x-sm);
+  font-size: var(--font-size-sm);
+}
+
+.ribbon-status select.form-control {
+  min-width: 56px;
+  max-width: 180px;
+}
+
+.ribbon-iconbtn {
+  display: grid;
+  place-items: center;
+  align-self: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: var(--border-width) solid transparent;
+  border-radius: var(--border-radius);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.ribbon-iconbtn:hover {
+  background: var(--bg-hover);
+}
+
+.ribbon-iconbtn[aria-pressed='true'] {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 14%, var(--bg-panel));
+  color: var(--color-primary);
+}
+
+.ribbon-iconbtn .ribbon-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.ribbon-body {
+  display: flex;
+  align-items: stretch;
+  min-height: 76px;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  overflow-x: auto;
+}
+
+.ribbon-body[hidden] {
+  display: none;
+}
+
+.ribbon-group {
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--spacing-sm);
+  border-right: var(--border-width) solid var(--border-color-light);
+}
+
+.ribbon-group:last-child {
+  border-right: 0;
+}
+
+.ribbon-group-content {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.ribbon-group-label {
+  padding-top: 2px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.ribbon-icon {
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* アイコン + 短ラベルの縦積みコマンド */
+.ribbon-cmd {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  box-sizing: border-box;
+  width: 56px;
+  margin: 0;
+  padding: 4px 2px 2px;
+  border: var(--border-width) solid transparent;
+  border-radius: var(--border-radius);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ribbon-cmd:hover:not(:disabled) {
+  border-color: var(--border-color);
+  background: var(--bg-hover);
+}
+
+.ribbon-cmd:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.ribbon-cmd-label {
+  font-size: 10px;
+  line-height: 1.15;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* ファイル選択はlabel全体で受け、inputそのものは見せない */
+.ribbon-file-input {
+  display: none;
+}
+
+/* 小型コントロールの縦積み */
+.ribbon-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  justify-content: center;
+  padding: 2px var(--spacing-xs);
+}
+
+.ribbon-stack label {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+.ribbon-stack input[type='number'].form-control {
+  width: 64px;
+}
+
+.ribbon-stack input[type='range'] {
+  width: 96px;
+}
+
+.ribbon-stack .pdf-overlay-file-status {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* トグル状態のコマンド（aria-pressed）と、開いているウィンドウのコマンド（floatingWindowManager が aria-expanded を同期する） */
+.ribbon-cmd[aria-expanded='true'],
+.ribbon-cmd[aria-pressed='true'] {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 14%, var(--bg-panel));
+  color: var(--color-primary);
+}

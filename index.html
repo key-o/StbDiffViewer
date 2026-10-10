@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-xpt49HZNL8gCyHi9dDVE7bmc/fJ9EpzPo5RpqqYs1r0=' https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' 'sha256-xpt49HZNL8gCyHi9dDVE7bmc/fJ9EpzPo5RpqqYs1r0=' https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
     />
     <title>STB Diff Viewer</title>
     <link rel="icon" href="./favicon.ico" />
@@ -18,6 +18,8 @@
     <link rel="stylesheet" href="./style/components/tree.css" />
     <link rel="stylesheet" href="./style/components/forms.css" />
     <link rel="stylesheet" href="./style/components/panels.css" />
+    <link rel="stylesheet" href="./style/components/ribbon.css" />
+    <link rel="stylesheet" href="./style/components/cad-ribbon.css" />
     <link rel="stylesheet" href="./style/components/color-modes.css" />
     <link rel="stylesheet" href="./style/components/diff.css" />
     <link rel="stylesheet" href="./style/components/clipping.css" />
@@ -316,7 +318,7 @@
           aria-controls="pdf-overlay-panel"
           aria-expanded="false"
         >
-          📑 STB / PDF図面
+          📑 簡易CAD
         </button>
       </div>
 
@@ -734,6 +736,13 @@
             </label>
           </div>
 
+          <div class="matched-overlay-control">
+            <label for="togglePositionMismatchModelBOverlay">
+              <input type="checkbox" id="togglePositionMismatchModelBOverlay" />
+              配置位置が異なる一致要素でモデルB形状を半透明で重ねて表示
+            </label>
+          </div>
+
           <hr class="section-divider" />
 
           <div class="axis-dimension-control">
@@ -802,6 +811,17 @@
           <div class="color-setting-help">
             STBに主筋中心位置が無い場合の鉄筋生成用フォールバック値です。
           </div>
+          <label
+            for="toggleConcreteAccommodationPreview"
+            title="R12-AO等のproduction-ready配筋から必要コンクリート領域を算定し、承認前のふかし候補を半透明solidで表示します"
+          >
+            <input type="checkbox" id="toggleConcreteAccommodationPreview" />
+            ふかし候補をプレビュー
+          </label>
+          <div class="color-setting-help">
+            プレビュー中だけCONCRETE_ACCOMMODATION候補評価を有効化します。STB本体は変更せず、開口干渉や再検証NGの候補は表示しません。
+          </div>
+          <div id="concrete-accommodation-candidate-settings-host"></div>
         </section>
 
         <div id="rebar-detailing-choice-settings-host"></div>

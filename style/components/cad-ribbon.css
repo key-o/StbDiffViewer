@@ -1,0 +1,31 @@
+/* 簡易CAD固有: ワークスペース本体と詳細フローティングウィンドウ */
+
+/* ワークスペース本体: コンテナ判定(container-type)は fixed の包含ブロックになり、
+   フローティングウィンドウを閉じ込めるため、ウィンドウを含まない shell 側へ置く。 */
+.workspace-view {
+  container-type: normal;
+  z-index: auto;
+}
+
+.workspace-view .workspace-shell {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  container-type: inline-size;
+}
+
+/* 詳細機能: 項目ごとのフローティングウィンドウ（既存の fieldset 等の体裁は .workspace-sidebar を流用） */
+.cad-float-window {
+  width: 380px;
+  min-width: 320px;
+  max-width: min(560px, 92vw);
+}
+
+.cad-float-window .float-window-content.workspace-sidebar {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+}
