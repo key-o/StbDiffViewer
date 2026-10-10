@@ -17,6 +17,8 @@ let providers = {
   applyAxisClip: null,
   clearAllClippingPlanes: null,
   getLoadedFilename: null,
+  getPlanDrawingSource: null,
+  compileStoryDrawingRenderPlan: null,
 };
 
 /**
@@ -86,6 +88,17 @@ export function clearAllClippingPlanesInternal() {
 
 export function getLoadedFilenameInternal() {
   return providers.getLoadedFilename?.() || 'stb_export';
+}
+
+export function getPlanDrawingSourceInternal() {
+  return providers.getPlanDrawingSource?.() || null;
+}
+
+export async function compileStoryDrawingRenderPlanInternal(options) {
+  if (typeof providers.compileStoryDrawingRenderPlan !== 'function') {
+    throw new Error('全階用DrawingRenderPlan compilerが初期化されていません。');
+  }
+  return providers.compileStoryDrawingRenderPlan(options);
 }
 
 export {

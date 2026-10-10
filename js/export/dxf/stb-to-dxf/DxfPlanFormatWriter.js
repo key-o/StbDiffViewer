@@ -11,6 +11,7 @@ import {
   generateBlocks,
   generateLine,
   generateCircle,
+  generateArc,
   generateText,
   downloadDxf,
 } from './DxfFormatWriter.js';
@@ -19,8 +20,21 @@ function formatCode(code) {
   return String(code).padStart(3, ' ');
 }
 
+function encodeR12String(value) {
+  const source = String(value);
+  let encoded = '';
+  for (let index = 0; index < source.length; index++) {
+    const codeUnit = source.charCodeAt(index);
+    encoded +=
+      codeUnit <= 0x7f
+        ? source[index]
+        : `\\U+${codeUnit.toString(16).toUpperCase().padStart(4, '0')}`;
+  }
+  return encoded;
+}
+
 function dxfPair(code, value) {
-  return `${formatCode(code)}\n${value}`;
+  return `${formatCode(code)}\n${typeof value === 'string' ? encodeR12String(value) : value}`;
 }
 
 function addPairs(arr, ...pairs) {
@@ -40,10 +54,11 @@ export function generatePolyline(polyline) {
 
   const layer = polyline.layer || '0';
   const lines = [];
+  addPairs(lines, [0, 'POLYLINE'], [8, layer]);
+  if (polyline.lineType && polyline.lineType !== 'CONTINUOUS')
+    addPairs(lines, [6, polyline.lineType]);
   addPairs(
     lines,
-    [0, 'POLYLINE'],
-    [8, layer],
     [66, 1],
     [10, '0.0'],
     [20, '0.0'],
@@ -51,7 +66,7 @@ export function generatePolyline(polyline) {
     [70, polyline.closed === false ? 0 : 1],
   );
 
-  for (const point of points) {
+  for (const [index, point] of points.entries()) {
     addPairs(
       lines,
       [0, 'VERTEX'],
@@ -61,6 +76,8 @@ export function generatePolyline(polyline) {
       [30, '0.0'],
       [70, 0],
     );
+    const bulge = Number(polyline.bulges?.[index] || 0);
+    if (Number.isFinite(bulge) && Math.abs(bulge) > 1e-12) addPairs(lines, [42, bulge.toFixed(12)]);
   }
 
   addPairs(lines, [0, 'SEQEND'], [8, layer]);
@@ -75,7 +92,13 @@ export function generatePolyline(polyline) {
  * @param {Array} circles2D
  * @returns {string}
  */
-export function generatePlanEntities(lines2D = [], polylines2D = [], texts2D = [], circles2D = []) {
+export function generatePlanEntities(
+  lines2D = [],
+  polylines2D = [],
+  texts2D = [],
+  circles2D = [],
+  arcs2D = [],
+) {
   const entities = [];
   addPairs(entities, [0, 'SECTION'], [2, 'ENTITIES']);
 
@@ -85,6 +108,7 @@ export function generatePlanEntities(lines2D = [], polylines2D = [], texts2D = [
     if (entity) entities.push(entity);
   }
   for (const circle of circles2D) entities.push(generateCircle(circle));
+  for (const arc of arcs2D) entities.push(generateArc(arc));
   for (const text of texts2D) entities.push(generateText(text));
 
   addPairs(entities, [0, 'ENDSEC']);
@@ -108,12 +132,15 @@ export function generatePlanDxfContent(
   polylines2D = [],
   texts2D = [],
   circles2D = [],
+  lineTypes = [],
+  arcs2D = [],
+  options = {},
 ) {
   return [
     generateHeader(bounds),
-    generateTables(layers, texts2D.length > 0, bounds),
+    generateTables(layers, texts2D.length > 0, bounds, lineTypes, options.textStyle),
     generateBlocks(),
-    generatePlanEntities(lines2D, polylines2D, texts2D, circles2D),
+    generatePlanEntities(lines2D, polylines2D, texts2D, circles2D, arcs2D),
     dxfPair(0, 'EOF'),
   ].join('\n');
 }

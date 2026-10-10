@@ -81,77 +81,105 @@ export function intersectOpeningAtLocalZ(opening, localZ, tolerance = DEFAULT_TO
 }
 
 /**
- * 表示中Wall Meshの開口をOpenレイヤ用閉ポリラインへ変換する。
- * @param {THREE.Group|Object|null} wallGroup
+ * 1つのWall Meshの開口をOpenレイヤ用閉ポリラインへ変換する。
+ * scene visibilityはここでは参照しない。DrawingModel生成等のsnapshot経路でも利用できるpure境界。
+ *
+ * @param {THREE.Mesh|Object|null} mesh
  * @param {Object|null} clippingState
  * @param {Object} [options]
  * @param {number} [options.planCutOffset=1500]
  * @param {number} [options.tolerance=0.1]
- * @returns {Array<{points:Array<THREE.Vector3>,layer:string,closed:boolean,openingId:string,wallId:string}>}
+ * @returns {Array<{points:Array<THREE.Vector3>,layer:string,closed:boolean,openingId:string,wallId:string,opening:Object,cutZ:number}>}
+ */
+export function collectWallOpeningPolylinesFromMesh(mesh, clippingState, options = {}) {
+  if (!mesh?.isMesh || clippingState?.type !== 'story') return [];
+  const wallData = mesh.userData?.wallData;
+  if (!wallData?.openings?.length || !wallData.firstReferencePoint) return [];
+
+  const planCutOffset = options.planCutOffset ?? 1500;
+  const tolerance = options.tolerance ?? DEFAULT_TOLERANCE;
+  mesh.updateWorldMatrix(true, false);
+  const box = new THREE.Box3().setFromObject(mesh);
+  const cutZ = resolveStoryPlanCutZ('Wall', box, clippingState, planCutOffset, tolerance);
+  if (cutZ == null) return [];
+
+  const origin = wallData.firstReferencePoint;
+  const direction = new THREE.Vector3(
+    Number(wallData.direction?.x) || 0,
+    Number(wallData.direction?.y) || 0,
+    0,
+  );
+  if (direction.lengthSq() <= tolerance * tolerance) return [];
+  direction.normalize();
+
+  const normal = new THREE.Vector3(
+    Number(wallData.normal?.x) || -direction.y,
+    Number(wallData.normal?.y) || direction.x,
+    0,
+  );
+  if (normal.lengthSq() <= tolerance * tolerance) return [];
+  normal.normalize();
+
+  const thickness = Number(wallData.thickness) || 0;
+  if (thickness <= tolerance) return [];
+  const halfT = thickness / 2;
+  const localZ = cutZ - Number(origin.z || 0);
+  const wallId = String(mesh.userData?.elementId ?? mesh.userData?.stbElementId ?? '');
+  const polylines = [];
+
+  for (const opening of wallData.openings) {
+    const openingId = String(opening?.id ?? '');
+    if (!openingId) continue;
+    const span = intersectOpeningAtLocalZ(opening, localZ, tolerance);
+    if (!span || span.maxX - span.minX <= tolerance) continue;
+
+    const pointAt = (localX, normalOffset) =>
+      new THREE.Vector3(Number(origin.x || 0), Number(origin.y || 0), cutZ)
+        .addScaledVector(direction, localX)
+        .addScaledVector(normal, normalOffset);
+
+    polylines.push({
+      points: [
+        pointAt(span.minX, -halfT),
+        pointAt(span.maxX, -halfT),
+        pointAt(span.maxX, halfT),
+        pointAt(span.minX, halfT),
+      ],
+      layer: 'Open',
+      closed: true,
+      openingId,
+      wallId,
+      opening,
+      cutZ,
+    });
+  }
+
+  return polylines;
+}
+
+/**
+ * 表示中Wall Meshの開口をOpenレイヤ用閉ポリラインへ変換する。
+ * legacy scene-based DXF経路だけがvisibilityを適用する。
+ *
+ * @param {THREE.Group|Object|null} wallGroup
+ * @param {Object|null} clippingState
+ * @param {Object} [options]
+ * @returns {Array<{points:Array<THREE.Vector3>,layer:string,closed:boolean,openingId:string,wallId:string,opening:Object}>}
  */
 export function collectWallOpeningPolylines(wallGroup, clippingState, options = {}) {
   if (!wallGroup?.traverse || clippingState?.type !== 'story') return [];
 
-  const planCutOffset = options.planCutOffset ?? 1500;
-  const tolerance = options.tolerance ?? DEFAULT_TOLERANCE;
   const polylines = [];
   const seen = new Set();
-
   wallGroup.traverse((mesh) => {
     if (!mesh?.isMesh || !mesh.visible) return;
-    const wallData = mesh.userData?.wallData;
-    if (!wallData?.openings?.length || !wallData.firstReferencePoint) return;
-
-    mesh.updateWorldMatrix(true, false);
-    const box = new THREE.Box3().setFromObject(mesh);
-    const cutZ = resolveStoryPlanCutZ('Wall', box, clippingState, planCutOffset, tolerance);
-    if (cutZ == null) return;
-
-    const origin = wallData.firstReferencePoint;
-    const direction = new THREE.Vector3(
-      Number(wallData.direction?.x) || 0,
-      Number(wallData.direction?.y) || 0,
-      0,
-    ).normalize();
-    const normal = new THREE.Vector3(
-      Number(wallData.normal?.x) || -direction.y,
-      Number(wallData.normal?.y) || direction.x,
-      0,
-    ).normalize();
-    const thickness = Number(wallData.thickness) || 0;
-    const halfT = thickness / 2;
-    const localZ = cutZ - Number(origin.z || 0);
-
-    for (const opening of wallData.openings) {
-      const openingId = String(opening?.id ?? '');
-      const wallId = String(mesh.userData?.elementId ?? mesh.userData?.stbElementId ?? '');
-      const key = `${wallId}:${openingId}`;
+    for (const opening of collectWallOpeningPolylinesFromMesh(mesh, clippingState, options)) {
+      const key = `${opening.wallId}:${opening.openingId}`;
       if (seen.has(key)) continue;
-
-      const span = intersectOpeningAtLocalZ(opening, localZ, tolerance);
-      if (!span || span.maxX - span.minX <= tolerance) continue;
-
-      const pointAt = (localX, normalOffset) =>
-        new THREE.Vector3(Number(origin.x || 0), Number(origin.y || 0), cutZ)
-          .addScaledVector(direction, localX)
-          .addScaledVector(normal, normalOffset);
-
-      polylines.push({
-        points: [
-          pointAt(span.minX, -halfT),
-          pointAt(span.maxX, -halfT),
-          pointAt(span.maxX, halfT),
-          pointAt(span.minX, halfT),
-        ],
-        layer: 'Open',
-        closed: true,
-        openingId,
-        wallId,
-      });
       seen.add(key);
+      polylines.push(opening);
     }
   });
-
   return polylines;
 }
 

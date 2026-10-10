@@ -11,8 +11,18 @@ import { extractWallOuterSectionLoops } from './DxfWallPlanCollector.js';
 
 const DEFAULT_TOLERANCE = 0.1;
 
+function stableGridIndex(value, tolerance) {
+  const scaled = value / tolerance;
+  // The same geometric endpoint can land infinitesimally on either side of a
+  // half-cell boundary after matrix/triangle arithmetic (for example -406.5
+  // versus -406.50000000000006). Bias exact ties away from zero by a tiny
+  // scale-aware epsilon so those numerically equivalent endpoints share a key.
+  const epsilon = Number.EPSILON * Math.max(1, Math.abs(scaled)) * 16;
+  return Math.round(scaled + Math.sign(scaled || 1) * epsilon);
+}
+
 function pointKey(point, tolerance) {
-  return `${Math.round(point.x / tolerance)}:${Math.round(point.y / tolerance)}:${Math.round(point.z / tolerance)}`;
+  return `${stableGridIndex(point.x, tolerance)}:${stableGridIndex(point.y, tolerance)}:${stableGridIndex(point.z, tolerance)}`;
 }
 
 function samePoint(a, b, tolerance) {

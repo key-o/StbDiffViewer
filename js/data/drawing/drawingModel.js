@@ -25,6 +25,18 @@ export function elementRefKey(ref) {
   return JSON.stringify([valid.modelKey, valid.elementType, valid.elementId]);
 }
 
+/**
+ * DrawingModel plan viewの永続・比較用snapshot。
+ * storySourceRefはrevision rebind用のruntime metadataなので保存contextへ混入させない。
+ */
+export function planViewContextSnapshot(view) {
+  if (!view || view.type !== 'plan' || view.storyId == null || !String(view.storyId).trim())
+    throw new TypeError('平面図と対象階を明示してください。');
+  const context = { ...view };
+  delete context.storySourceRef;
+  return Object.freeze({ ...context, storyId: String(view.storyId) });
+}
+
 export function normalizePlanView(view) {
   if (!view || view.type !== 'plan' || typeof view.storyId !== 'string' || !view.storyId.trim())
     throw new TypeError('平面図と対象階を明示してください。');
@@ -37,9 +49,26 @@ export function normalizePlanView(view) {
     verticalCutOffset < 0
   )
     throw new RangeError('階レベル・階範囲・鉛直部材切断高さが不正です。');
+  let storySourceRef = null;
+  if (view.storySourceRef != null) {
+    const ref = view.storySourceRef;
+    if (
+      ref?.elementType !== 'Story' ||
+      ref.elementId == null ||
+      !String(ref.elementId).trim() ||
+      String(ref.elementId) !== view.storyId
+    )
+      throw new TypeError('平面図のstorySourceRefが対象階と一致しません。');
+    storySourceRef = Object.freeze({
+      elementType: 'Story',
+      elementId: String(ref.elementId),
+      guid: ref.guid == null ? null : String(ref.guid),
+    });
+  }
   return Object.freeze({
     type: 'plan',
     storyId: view.storyId,
+    ...(storySourceRef ? { storySourceRef } : {}),
     baseZ,
     lowerZ,
     upperZ,
@@ -68,6 +97,8 @@ export function createEmptyDrawing(source, view) {
     view: normalizePlanView(view),
     primitives: [],
     annotations: [],
+    dimensionReferences: [],
+    dimensionIntents: [],
     elements: [],
     diagnostics: [],
     bounds: null,

@@ -37,13 +37,61 @@ function formatCode(code) {
 }
 
 /**
+ * AutoCAD R12 (AC1009)用に文字列をASCII/CIF互換表現へ変換する。
+ *
+ * AutoCAD 2004以前のDXFはUTF-8文字列をサポートしないため、
+ * 非ASCII文字は \\U+XXXX 制御シーケンスへ変換する。
+ * @param {string} value
+ * @returns {string}
+ */
+function encodeR12String(value) {
+  const source = String(value);
+  let encoded = '';
+
+  for (let index = 0; index < source.length; index++) {
+    const codeUnit = source.charCodeAt(index);
+    if (codeUnit <= 0x7f) {
+      encoded += source[index];
+    } else {
+      encoded += `\\U+${codeUnit.toString(16).toUpperCase().padStart(4, '0')}`;
+    }
+  }
+
+  return encoded;
+}
+
+/**
+ * R12 ASCII文字列中の \\U+XXXX を元のUnicode文字列へ戻す。
+ * Jw_cad向けShift-JIS書き出し時のみ利用する。
+ * @param {string} content
+ * @returns {string}
+ */
+export function decodeR12UnicodeEscapes(content) {
+  return String(content).replace(/\\U\+([0-9A-Fa-f]{4})/g, (_match, hex) =>
+    String.fromCharCode(Number.parseInt(hex, 16)),
+  );
+}
+
+export const DXF_OUTPUT_PROFILES = Object.freeze({
+  AUTOCAD_R12: 'autocad-r12',
+  JWCAD_R12: 'jwcad-r12',
+});
+
+export function normalizeDxfOutputProfile(profile) {
+  return profile === DXF_OUTPUT_PROFILES.JWCAD_R12
+    ? DXF_OUTPUT_PROFILES.JWCAD_R12
+    : DXF_OUTPUT_PROFILES.AUTOCAD_R12;
+}
+
+/**
  * DXFのグループコードと値のペアを生成
  * @param {number|string} code - グループコード
  * @param {string|number} value - 値
  * @returns {string} フォーマット済みペア
  */
 function dxfPair(code, value) {
-  return `${formatCode(code)}\n${value}`;
+  const encodedValue = typeof value === 'string' ? encodeR12String(value) : value;
+  return `${formatCode(code)}\n${encodedValue}`;
 }
 
 /**
@@ -102,6 +150,10 @@ export function generateHeader(bounds) {
     // 線種スケール
     [9, '$LTSCALE'],
     [40, '1.0'],
+    // R12/AC1009には$INSUNITSを無理に追加せず、group code 999コメントで
+    // SDV出力が内部mmであることをread-back adapterへ明示する。
+    [999, 'SDV_UNITS=mm'],
+    [999, 'SDV_GENERATOR=StbDiffViewer'],
     // セクション終了
     [0, 'ENDSEC'],
   );
@@ -190,15 +242,33 @@ function generateVportTable(bounds) {
  * LTYPEテーブルを生成
  * @returns {string} LTYPEテーブル文字列
  */
-function generateLtypeTable() {
-  const lines = [];
+function generateLtypeTable(lineTypes = []) {
+  const definitions = [];
+  const names = new Set(['CONTINUOUS']);
+  for (const lineType of lineTypes || []) {
+    const name = String(lineType?.name || '').trim();
+    if (!name || !/^[A-Za-z0-9_.-]+$/.test(name)) throw new TypeError('DXF線種名が不正です。');
+    if (names.has(name)) throw new Error(`DXF線種名が重複しています: ${name}`);
+    if (
+      !Array.isArray(lineType.pattern) ||
+      lineType.pattern.length === 0 ||
+      !lineType.pattern.every((value) => Number.isFinite(value) && value !== 0)
+    )
+      throw new TypeError(`DXF線種patternが不正です: ${name}`);
+    names.add(name);
+    definitions.push({
+      name,
+      description: String(lineType.description || name),
+      pattern: [...lineType.pattern],
+    });
+  }
 
+  const lines = [];
   addPairs(
     lines,
     [0, 'TABLE'],
     [2, 'LTYPE'],
-    [70, 1],
-    // CONTINUOUS線種
+    [70, definitions.length + 1],
     [0, 'LTYPE'],
     [2, 'CONTINUOUS'],
     [70, 0],
@@ -206,9 +276,27 @@ function generateLtypeTable() {
     [72, 65],
     [73, 0],
     [40, '0.0'],
-    [0, 'ENDTAB'],
   );
 
+  for (const definition of definitions) {
+    addPairs(
+      lines,
+      [0, 'LTYPE'],
+      [2, definition.name],
+      [70, 0],
+      [3, definition.description],
+      [72, 65],
+      [73, definition.pattern.length],
+      [40, definition.pattern.reduce((sum, value) => sum + Math.abs(value), 0).toFixed(6)],
+    );
+    for (const segment of definition.pattern) {
+      // AC1009 (AutoCAD R12) の単純線種では、各ダッシュ要素は group code 49 のみで表す。
+      // group code 74 はAutoCAD 2026でR12 LTYPE tableの不正入力として拒否されるため出力しない。
+      addPairs(lines, [49, segment.toFixed(6)]);
+    }
+  }
+
+  addPairs(lines, [0, 'ENDTAB']);
   return lines.join('\n');
 }
 
@@ -236,7 +324,7 @@ function generateLayerTable(layers) {
  * STYLEテーブルを生成（R12形式 - ハンドルなし）
  * @returns {string} STYLEテーブル文字列
  */
-function generateStyleTable() {
+function generateStyleTable({ fontFile = 'txt', bigFontFile = '' } = {}) {
   const lines = [];
 
   addPairs(
@@ -252,8 +340,8 @@ function generateStyleTable() {
     [50, '0.0'],
     [71, 0],
     [42, '200.0'],
-    [3, 'txt'],
-    [4, ''],
+    [3, fontFile],
+    [4, bigFontFile],
     [0, 'ENDTAB'],
   );
 
@@ -267,7 +355,13 @@ function generateStyleTable() {
  * @param {Object} bounds - モデルのバウンド
  * @returns {string} DXFテーブル文字列
  */
-export function generateTables(layers, _hasText = false, bounds = null) {
+export function generateTables(
+  layers,
+  _hasText = false,
+  bounds = null,
+  lineTypes = [],
+  textStyle = {},
+) {
   const effectiveBounds = bounds || { min: { x: 0, y: 0 }, max: { x: 10000, y: 10000 } };
   const lines = [];
 
@@ -277,13 +371,13 @@ export function generateTables(layers, _hasText = false, bounds = null) {
   lines.push(generateVportTable(effectiveBounds));
 
   // LTYPEテーブル
-  lines.push(generateLtypeTable());
+  lines.push(generateLtypeTable(lineTypes));
 
   // LAYERテーブル
   lines.push(generateLayerTable(layers));
 
   // STYLEテーブル（常に含める）
-  lines.push(generateStyleTable());
+  lines.push(generateStyleTable(textStyle));
 
   addPairs(lines, [0, 'ENDSEC']);
 
@@ -315,10 +409,10 @@ export function generateBlocks() {
  */
 export function generateLine(line) {
   const lines = [];
+  addPairs(lines, [0, 'LINE'], [8, line.layer]);
+  if (line.lineType && line.lineType !== 'CONTINUOUS') addPairs(lines, [6, line.lineType]);
   addPairs(
     lines,
-    [0, 'LINE'],
-    [8, line.layer],
     [10, line.start.x.toFixed(6)],
     [20, line.start.y.toFixed(6)],
     [30, '0.0'],
@@ -336,6 +430,7 @@ export function generateLine(line) {
  */
 export function generateText(text) {
   const lines = [];
+  const height = Number.isFinite(text.height) && text.height > 0 ? text.height : 200;
   addPairs(
     lines,
     [0, 'TEXT'],
@@ -343,10 +438,47 @@ export function generateText(text) {
     [10, text.position.x.toFixed(6)],
     [20, text.position.y.toFixed(6)],
     [30, '0.0'],
-    [40, (text.height || 200).toFixed(6)],
+    [40, height.toFixed(6)],
     [1, text.text],
     [7, 'STANDARD'],
   );
+
+  if (Number.isFinite(text.rotation) && Math.abs(text.rotation) > 1e-12) {
+    addPairs(lines, [50, text.rotation.toFixed(6)]);
+  }
+  const obliqueDeg = text.obliqueDeg == null ? 0 : Number(text.obliqueDeg);
+  if (!Number.isFinite(obliqueDeg)) throw new RangeError('DXF TEXTの斜体角が不正です。');
+  if (Math.abs(obliqueDeg) > 1e-12) addPairs(lines, [51, obliqueDeg.toFixed(6)]);
+  if (
+    Number.isFinite(text.widthFactor) &&
+    text.widthFactor > 0 &&
+    Math.abs(text.widthFactor - 1) > 1e-12
+  ) {
+    addPairs(lines, [41, text.widthFactor.toFixed(6)]);
+  }
+  const generationFlags = Number(text.generationFlags || 0);
+  if (!Number.isInteger(generationFlags) || generationFlags < 0 || (generationFlags & ~6) !== 0)
+    throw new RangeError('DXF TEXTの文字生成フラグが不正です。');
+  if (generationFlags !== 0) addPairs(lines, [71, generationFlags]);
+
+  if (text.anchor != null || text.verticalAlign != null) {
+    const horizontal = { left: 0, start: 0, center: 1, middle: 1, right: 2, end: 2 }[
+      text.anchor || 'left'
+    ];
+    const vertical = { baseline: 0, bottom: 1, middle: 2, center: 2, top: 3 }[
+      text.verticalAlign || 'baseline'
+    ];
+    if (horizontal == null || vertical == null)
+      throw new RangeError('DXF TEXTの文字揃え指定が不正です。');
+    addPairs(
+      lines,
+      [72, horizontal],
+      [73, vertical],
+      [11, text.position.x.toFixed(6)],
+      [21, text.position.y.toFixed(6)],
+      [31, '0.0'],
+    );
+  }
   return lines.join('\n');
 }
 
@@ -357,14 +489,36 @@ export function generateText(text) {
  */
 export function generateCircle(circle) {
   const lines = [];
+  addPairs(lines, [0, 'CIRCLE'], [8, circle.layer]);
+  if (circle.lineType && circle.lineType !== 'CONTINUOUS') addPairs(lines, [6, circle.lineType]);
   addPairs(
     lines,
-    [0, 'CIRCLE'],
-    [8, circle.layer],
     [10, circle.center.x.toFixed(6)],
     [20, circle.center.y.toFixed(6)],
     [30, '0.0'],
     [40, circle.radius.toFixed(6)],
+  );
+  return lines.join('\n');
+}
+
+/**
+ * DXF ARC エンティティを生成（R12形式）。
+ * DXF ARCは開始角→終了角を反時計回りで表す。
+ * @param {Object} arc - {center:{x,y},radius,startAngle,endAngle,layer}
+ * @returns {string}
+ */
+export function generateArc(arc) {
+  const lines = [];
+  addPairs(lines, [0, 'ARC'], [8, arc.layer]);
+  if (arc.lineType && arc.lineType !== 'CONTINUOUS') addPairs(lines, [6, arc.lineType]);
+  addPairs(
+    lines,
+    [10, arc.center.x.toFixed(6)],
+    [20, arc.center.y.toFixed(6)],
+    [30, '0.0'],
+    [40, arc.radius.toFixed(6)],
+    [50, arc.startAngle.toFixed(6)],
+    [51, arc.endAngle.toFixed(6)],
   );
   return lines.join('\n');
 }
@@ -413,13 +567,20 @@ export function generateEntities(lines2D, texts2D = [], circles2D = []) {
  * @param {Array} circles2D - 2D円の配列（オプション）
  * @returns {string} 完全なDXFファイル内容
  */
-export function generateDxfContent(bounds, layers, lines2D, texts2D = [], circles2D = []) {
+export function generateDxfContent(
+  bounds,
+  layers,
+  lines2D,
+  texts2D = [],
+  circles2D = [],
+  options = {},
+) {
   // ハンドルをリセット
   resetHandles();
 
   const sections = [
     generateHeader(bounds),
-    generateTables(layers, texts2D.length > 0, bounds),
+    generateTables(layers, texts2D.length > 0, bounds, [], options.textStyle),
     generateBlocks(),
     generateEntities(lines2D, texts2D, circles2D),
     dxfPair(0, 'EOF'),
@@ -443,21 +604,48 @@ export function normalizeDxfFilename(filename) {
 }
 
 /**
+ * DXF文字列から保存用Blobを作成する。
+ * AutoCAD R12はASCII + \\U+XXXX、Jw_cad R12はShift-JIS実バイトを使用する。
+ * @param {string} content
+ * @param {{profile?: string}} [options]
+ * @returns {Promise<Blob>}
+ */
+export async function createDxfBlob(content, options = {}) {
+  const profile = normalizeDxfOutputProfile(options.profile);
+  if (profile !== DXF_OUTPUT_PROFILES.JWCAD_R12) {
+    return new Blob([content], { type: 'application/dxf;charset=us-ascii' });
+  }
+
+  const { default: Encoding } = await import('encoding-japanese');
+  // 欠損値のem dashはShift-JISにないため、同形のJIS横棒へ置換する。
+  const unicodeContent = decodeR12UnicodeEscapes(content).replace(/\u2014/g, '\u2015');
+  const unicodeArray = Encoding.stringToCode(unicodeContent);
+  const sjisArray = Encoding.convert(unicodeArray, {
+    to: 'SJIS',
+    from: 'UNICODE',
+    type: 'array',
+  });
+  return new Blob([new Uint8Array(sjisArray)], { type: 'application/dxf;charset=shift-jis' });
+}
+
+/**
  * DXFファイルをダウンロード
  * @param {string} content - DXFファイル内容
  * @param {string} filename - ファイル名（.dxf有無どちらも可）
  * @param {FileSystemDirectoryHandle} [directoryHandle] - 保存先フォルダ
+ * @param {{profile?: string}} [options] - 出力互換プロファイル
  * @returns {Promise<boolean>} 保存成功フラグ
  */
-export async function downloadDxf(content, filename, directoryHandle = null) {
+export async function downloadDxf(content, filename, directoryHandle = null, options = {}) {
   const outputFilename = normalizeDxfFilename(filename);
+  const blob = await createDxfBlob(content, options);
 
   // File System Access APIを使った保存
   if (directoryHandle) {
     try {
       const fileHandle = await directoryHandle.getFileHandle(outputFilename, { create: true });
       const writable = await fileHandle.createWritable();
-      await writable.write(content);
+      await writable.write(blob);
       await writable.close();
       return true;
     } catch (error) {
@@ -466,8 +654,6 @@ export async function downloadDxf(content, filename, directoryHandle = null) {
     }
   }
 
-  // 従来のダウンロード方式
-  const blob = new Blob([content], { type: 'application/dxf' });
   downloadBlob(blob, outputFilename);
   return true;
 }

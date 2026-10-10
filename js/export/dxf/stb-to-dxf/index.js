@@ -16,6 +16,7 @@ export { canExportStbToDxf, exportStbToDxf, getStbExportStats } from './StbToDxf
 
 // バッチエクスポート機能
 export {
+  canExportAllStoriesToDxf,
   exportAllStoriesToDxf,
   exportAlongAllAxesToDxf,
   exportAlongAllAxesBothDirections,
@@ -45,12 +46,17 @@ export {
   generateText,
   generateEntities,
   generateDxfContent,
+  createDxfBlob,
+  decodeR12UnicodeEscapes,
+  DXF_OUTPUT_PROFILES,
+  normalizeDxfOutputProfile,
   downloadDxf,
 } from './DxfFormatWriter.js';
 
 // グローバル登録のためのインポート
 import { canExportStbToDxf, exportStbToDxf, getStbExportStats } from './StbToDxfExporter.js';
 import {
+  canExportAllStoriesToDxf,
   exportAllStoriesToDxf,
   exportAlongAllAxesToDxf,
   exportAlongAllAxesBothDirections,
@@ -63,6 +69,7 @@ if (typeof window !== 'undefined') {
   window.canExportStbToDxf = canExportStbToDxf;
   window.exportStbToDxf = exportStbToDxf;
   window.getStbExportStats = getStbExportStats;
+  window.canExportAllStoriesToDxf = canExportAllStoriesToDxf;
   window.exportAllStoriesToDxf = exportAllStoriesToDxf;
   window.exportAlongAllAxesToDxf = exportAlongAllAxesToDxf;
   window.exportAlongAllAxesBothDirections = exportAlongAllAxesBothDirections;

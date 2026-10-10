@@ -14,9 +14,15 @@ import {
   applyAxisClipInternal,
   clearAllClippingPlanesInternal,
   getLoadedFilenameInternal,
+  getPlanDrawingSourceInternal,
+  compileStoryDrawingRenderPlanInternal,
 } from './DxfProviders.js';
 import { canExportStbToDxf, exportStbToDxf } from './StbToDxfExporter.js';
+import { canCompileStoryBatchSelection } from '../../../data/drawing/storyBatchContract.js';
+import { downloadDrawingRenderPlanDxf } from '../DrawingRenderPlanDxfWriter.js';
+import { sha256 } from '../../../utils/sha256.js';
 import { eventBus, ToastEvents } from '../../../data/events/index.js';
+import { parseStories } from '../../../common-stb/import/parser/stbParserCore.js';
 
 const log = createLogger('DxfBatchExporter');
 
@@ -77,7 +83,263 @@ async function restoreClippingState(state) {
  * @param {number} [options.downloadDelay=100] - ダウンロード間隔（ミリ秒）
  * @returns {Promise<boolean>} 成功/失敗
  */
+function serializeStbDocument(document) {
+  if (typeof XMLSerializer !== 'function') {
+    throw new Error('XMLSerializerが利用できないため全階DXFを生成できません。');
+  }
+  return new XMLSerializer().serializeToString(document);
+}
+
+function resolveStoryDrawingSource() {
+  const source = getPlanDrawingSourceInternal();
+  if (!source?.document) {
+    return {
+      canExport: false,
+      reason: source?.reason || 'STB原本Documentが読み込まれていません。',
+      source: null,
+      // provider未初期化時は従来のscene-based batchを壊さない。
+      // providerが明示したhard blockはallowLegacyFallback=falseのまま維持する。
+      allowLegacyFallback: source == null || source?.allowLegacyFallback === true,
+    };
+  }
+  if (!['A', 'B'].includes(source.modelKey)) {
+    return { canExport: false, reason: '全階DXFのモデル識別子が不正です。', source: null };
+  }
+  if (
+    source.document?.nodeType !== 9 ||
+    source.document.documentElement?.localName !== 'ST_BRIDGE'
+  ) {
+    return { canExport: false, reason: 'STB原本Documentが不正です。', source: null };
+  }
+  return { canExport: true, reason: '', source };
+}
+
+function resolveStoryDrawingStories(source) {
+  try {
+    const stories = parseStories(source?.document);
+    if (!Array.isArray(stories) || stories.length === 0) {
+      return { canExport: false, reason: 'STB原本に階データがありません', stories: [] };
+    }
+    return { canExport: true, reason: '', stories };
+  } catch (error) {
+    return {
+      canExport: false,
+      reason: `STB原本の階情報を取得できません: ${error.message}`,
+      stories: [],
+    };
+  }
+}
+
+function legacyStoryBatchPreflight(fallbackReason = '') {
+  const stories = getCurrentStoriesInternal();
+  if (!Array.isArray(stories) || stories.length === 0) {
+    return {
+      canExport: false,
+      reason: fallbackReason
+        ? `${fallbackReason} / legacy互換経路にも階データがありません`
+        : '階データがありません',
+      route: 'legacy',
+    };
+  }
+
+  const legacy = canExportStbToDxf();
+  let reason = fallbackReason;
+  if (!legacy.canExport) {
+    reason = fallbackReason
+      ? `${fallbackReason} / legacy互換経路: ${legacy.reason}`
+      : legacy.reason;
+  }
+  return {
+    canExport: legacy.canExport,
+    reason,
+    route: 'legacy',
+  };
+}
+
+/**
+ * 全階DXFの新しいDrawingRenderPlan経路が利用可能か判定する。
+ * scene / camera / clipping stateはrender-plan経路の判定条件に含めない。
+ * sourceが一意に定まらない場合は、既存動作を壊さない範囲でlegacyへfallbackする。
+ */
+export function canExportAllStoriesToDxf(selectedElementTypes = null) {
+  if (Array.isArray(selectedElementTypes) && selectedElementTypes.length === 0) {
+    return { canExport: false, reason: 'エクスポートする部材を選択してください', route: 'none' };
+  }
+
+  // source側のhard block（例: 編集セッション中）は、未移行type(Node等)など
+  // legacy-only selectionより先に評価する。これによりlegacy fallbackでblockを迂回しない。
+  const resolved = resolveStoryDrawingSource();
+  if (!resolved.canExport && !resolved.allowLegacyFallback) {
+    return { canExport: false, reason: resolved.reason, route: 'none' };
+  }
+  const sourceFallbackReason = resolved.canExport ? '' : resolved.reason;
+
+  if (Array.isArray(selectedElementTypes)) {
+    const selection = canCompileStoryBatchSelection(selectedElementTypes);
+    if (!selection.canCompile) {
+      const reason = [sourceFallbackReason, selection.reason].filter(Boolean).join(' / ');
+      return legacyStoryBatchPreflight(reason);
+    }
+  }
+
+  if (!resolved.canExport) {
+    return legacyStoryBatchPreflight(sourceFallbackReason);
+  }
+
+  const storyResult = resolveStoryDrawingStories(resolved.source);
+  if (!storyResult.canExport) {
+    return { canExport: false, reason: storyResult.reason, route: 'none' };
+  }
+  return {
+    canExport: true,
+    reason: '',
+    route: 'render-plan',
+  };
+}
+
+async function exportAllStoriesWithRenderPlan(selectedElementTypes, options = {}) {
+  const batchOptions = /** @type {any} */ (options);
+  const resolved = resolveStoryDrawingSource();
+  if (!resolved.canExport) {
+    eventBus.emit(ToastEvents.SHOW_WARNING, {
+      message: `エクスポートできません: ${resolved.reason}`,
+    });
+    return false;
+  }
+  const storyResult = resolveStoryDrawingStories(resolved.source);
+  if (!storyResult.canExport) {
+    eventBus.emit(ToastEvents.SHOW_WARNING, {
+      message: `エクスポートできません: ${storyResult.reason}`,
+    });
+    return false;
+  }
+  const stories = storyResult.stories;
+  if (!Array.isArray(selectedElementTypes) || selectedElementTypes.length === 0) {
+    eventBus.emit(ToastEvents.SHOW_WARNING, {
+      message: 'エクスポートする部材が選択されていません',
+    });
+    return false;
+  }
+
+  const downloadDelay = batchOptions.downloadDelay || 100;
+  const includeLabels =
+    batchOptions.includeLabels !== undefined ? batchOptions.includeLabels : true;
+  const includeAxes = batchOptions.includeAxes !== undefined ? batchOptions.includeAxes : true;
+  const labelHeight = batchOptions.labelHeight || 200;
+  const scaleDenominator = batchOptions.scaleDenominator || 200;
+  const baseFilename = getLoadedFilenameInternal();
+  const { source } = resolved;
+
+  const sourceXml = serializeStbDocument(source.document);
+  const modelRevision = await sha256(new TextEncoder().encode(sourceXml));
+  if (typeof modelRevision !== 'string' || !/^[0-9a-f]{64}$/.test(modelRevision)) {
+    throw new Error('全階DXFのモデル改訂SHA-256が不正です。');
+  }
+  const snapshot = source.document.cloneNode(true);
+  const assertSourceUnchanged = () => {
+    const current = resolveStoryDrawingSource();
+    if (
+      !current.canExport ||
+      current.source.modelKey !== source.modelKey ||
+      serializeStbDocument(current.source.document) !== sourceXml
+    ) {
+      throw new Error('全階DXF生成中にSTB原本が変更されました。再実行してください。');
+    }
+  };
+
+  log.info('全階DXFエクスポート開始（DrawingRenderPlan）:', {
+    storyCount: stories.length,
+    selectedElementTypes,
+    modelKey: source.modelKey,
+    modelRevision,
+    baseFilename,
+  });
+
+  const { handle: directoryHandle, cancelled } = await pickDirectoryHandle();
+  if (cancelled) return false;
+
+  try {
+    let exportedCount = 0;
+    for (let i = 0; i < stories.length; i++) {
+      const story = stories[i];
+      const storyName = story.name || `Floor_${i + 1}`;
+      const filename = `${baseFilename}_${storyName}`;
+
+      assertSourceUnchanged();
+      log.info(`階エクスポート中: ${storyName} (${i + 1}/${stories.length})`);
+
+      const result = await compileStoryDrawingRenderPlanInternal({
+        document: snapshot,
+        source: { modelKey: source.modelKey, modelRevision },
+        stories,
+        storyId: story.id,
+        selectedElementTypes,
+        includeLabels,
+        includeAxes,
+        labelHeight,
+        scaleDenominator,
+      });
+      await downloadDrawingRenderPlanDxf(result.renderPlan, filename, directoryHandle);
+      exportedCount++;
+
+      if (i < stories.length - 1 && !directoryHandle) {
+        await new Promise((resolve) => setTimeout(resolve, downloadDelay));
+      }
+    }
+    assertSourceUnchanged();
+
+    log.info(`全階DXFエクスポート完了（DrawingRenderPlan）: ${exportedCount}/${stories.length}階`);
+    eventBus.emit(ToastEvents.SHOW_SUCCESS, {
+      message: `${exportedCount}階のDXFファイルをエクスポートしました`,
+    });
+    return true;
+  } catch (error) {
+    log.error('全階DXFエクスポートエラー（DrawingRenderPlan）:', error);
+    eventBus.emit(ToastEvents.SHOW_ERROR, {
+      message: `エクスポート中にエラーが発生しました: ${error.message}`,
+    });
+    return false;
+  }
+}
+
+/**
+ * 全階をDXFエクスポートする。
+ * 通常はSTB原本 -> DrawingModel -> DrawingRenderPlanのscene非依存経路を使用する。
+ * Level出力はまだDrawingRenderPlanへ移行していないため、明示指定時だけlegacy経路へ戻す。
+ */
 export async function exportAllStoriesToDxf(selectedElementTypes, options = {}) {
+  if (options.includeLevels === true) {
+    // Levelは未移行なのでlegacyを維持する。ただし編集セッション等のhard blockだけは
+    // route選択より先に評価し、legacy経路で迂回できないようにする。
+    const resolved = resolveStoryDrawingSource();
+    if (!resolved.canExport && !resolved.allowLegacyFallback) {
+      eventBus.emit(ToastEvents.SHOW_WARNING, {
+        message: `エクスポートできません: ${resolved.reason}`,
+      });
+      return false;
+    }
+    log.info('Level出力指定のため全階DXFはlegacy scene経路を使用します。');
+    return exportAllStoriesLegacyToDxf(selectedElementTypes, options);
+  }
+
+  const preflight = canExportAllStoriesToDxf(selectedElementTypes);
+  if (!preflight.canExport) {
+    eventBus.emit(ToastEvents.SHOW_WARNING, {
+      message: `エクスポートできません: ${preflight.reason}`,
+    });
+    return false;
+  }
+
+  if (preflight.route === 'legacy') {
+    log.info(
+      `全階DXFは既存動作を維持するためlegacy scene経路を使用します: ${preflight.reason || 'render-plan source unavailable'}`,
+    );
+    return exportAllStoriesLegacyToDxf(selectedElementTypes, options);
+  }
+  return exportAllStoriesWithRenderPlan(selectedElementTypes, options);
+}
+
+async function exportAllStoriesLegacyToDxf(selectedElementTypes, options = {}) {
   const batchOptions = /** @type {any} */ (options);
   const stories = getCurrentStoriesInternal();
   if (!stories || stories.length === 0) {
@@ -306,6 +568,11 @@ export async function exportAlongAllAxesBothDirections(selectedElementTypes, opt
  * @returns {Array<{id: string, name: string, height: number}>} 階一覧
  */
 export function getAvailableStories() {
+  const resolved = resolveStoryDrawingSource();
+  if (resolved.canExport) {
+    const storyResult = resolveStoryDrawingStories(resolved.source);
+    if (storyResult.canExport) return storyResult.stories;
+  }
   const stories = getCurrentStoriesInternal();
   return stories || [];
 }
