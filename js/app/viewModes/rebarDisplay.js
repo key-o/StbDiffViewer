@@ -21,6 +21,7 @@ import { applyColorModeToAllObjects } from '../../colorModes/applyColorMode.js';
 import { setRebarGhostActive } from '../../colorModes/modelSourceMapping.js';
 import { getRebarProjectDetailing } from '../../config/rebarProjectDetailing.js';
 import editingSession from '../editing/editingSession.js';
+import { beginConcreteAccommodationEvaluationCycle } from './concreteAccommodationDecisionStore.js';
 import { getModelContext } from './modelContext.js';
 import { createBeamStirrupMemberMeshes } from './beamStirrupDisplayAdapter.js';
 import { createRebarModelMeshes } from './rebarModelMeshBuilder.js';
@@ -470,6 +471,7 @@ export function initializeRebarDisplaySync(onHidden = null) {
 
   eventBus.on(EditEvents.WORKING_DOCUMENT_CHANGED, ({ targetDocument } = {}) => {
     if (targetDocument) invalidateRebarFactsCache(targetDocument);
+    beginConcreteAccommodationEvaluationCycle();
     if (!targetDocument || requestedGroups.size === 0) return;
     const context = getModelContext();
     refreshVisibleRebarGroups({

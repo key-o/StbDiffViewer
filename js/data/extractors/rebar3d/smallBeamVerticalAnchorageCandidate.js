@@ -1,5 +1,5 @@
 /**
- * @fileoverview R12-Q 一般小梁上端筋の90°鉛直定着candidateをbar-levelで判定する。
+ * @fileoverview R12-Q 小梁上端筋（一般/片持ち）の90°鉛直定着candidateをbar-levelで判定する。
  *
  * R12-N/P/Oで独立に解いた Lb/B/2投影・L2全長・90°余長について、
  * 同一barが3条件をすべて満たす場合だけ vertical-90 candidate-ready とする。
@@ -74,7 +74,13 @@ export function resolveSmallBeamTopVertical90Candidate({
   }
 
   const failedConditions = [];
-  if (!projection.ok) failedConditions.push('LB_PROJECTION');
+  if (!projection.ok) {
+    failedConditions.push(
+      requirement?.cantilever === true || requirement?.projectionKind === 'LA_3B4'
+        ? 'LA_3B4_PROJECTION'
+        : 'LB_PROJECTION',
+    );
+  }
   if (!tail.ok) failedConditions.push('HOOK_TAIL_90');
   if (!l2.ok) failedConditions.push('L2');
 

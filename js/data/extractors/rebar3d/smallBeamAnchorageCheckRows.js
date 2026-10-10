@@ -1,7 +1,8 @@
 /**
  * @fileoverview R12 小梁定着requirement factsを既存チェック一覧へ変換する。
  *
- * R12-N/O/Pで上端筋のLb/B/2投影、90°余長、L2全長をbar-level部分判定する。
+ * R12-N/O/Pで上端筋の投影、90°余長、L2全長をbar-level部分判定する。
+ * 一般小梁はLb/B/2、片持ち小梁はLa/3B/4を表示契約でも分離する。
  * 下端L3/L3h・折曲げ方向・RebarPathは未判定のまま保持する。
  */
 
@@ -199,6 +200,26 @@ function unresolvedRequirementRow(beamFacts, supportFacts, end, group) {
   });
 }
 
+function topProjectionDescriptor(requirement) {
+  if (requirement?.cantilever === true || requirement?.projectionKind === 'LA_3B4') {
+    return {
+      requirementKind: 'LA_3B4_PROJECTION',
+      requirementLabel: '上端筋 La/3B/4投影',
+      note:
+        `投影必要長さ=max(La=${Math.round(requirement.laByTableMm ?? 0)}mm, ` +
+        `3B/4=${Math.round(requirement.minBySupportMm ?? 0)}mm)。`,
+    };
+  }
+
+  return {
+    requirementKind: 'LB_PROJECTION',
+    requirementLabel: '上端筋 Lb/B/2投影',
+    note:
+      `投影必要長さ=max(Lb=${Math.round(requirement.lbByTableMm ?? 0)}mm, ` +
+      `B/2=${Math.round(requirement.minBySupportMm ?? 0)}mm)。`,
+  };
+}
+
 function topRows(beamFacts, supportFacts, end, group) {
   const requirement = group.requirement || {};
   if (!requirement.ok) return [unresolvedRequirementRow(beamFacts, supportFacts, end, group)];
@@ -206,6 +227,7 @@ function topRows(beamFacts, supportFacts, end, group) {
   const availability = group.projectionAvailability;
   const projectionResolved = availability?.resolved === true;
   const projectionNote = projectionAvailabilityNote(group);
+  const projectionDescriptor = topProjectionDescriptor(requirement);
   const tailAvailability = group.tailAvailability;
   const tailResolved = tailAvailability?.resolved === true;
   const tailNote = tailAvailabilityNote(group);
@@ -228,16 +250,15 @@ function topRows(beamFacts, supportFacts, end, group) {
         ' ここでのOK/NGはL2全長だけの部分判定で、投影・余長・定着全体の判定ではない。',
     }),
     resolvedRequirementRow(beamFacts, supportFacts, end, group, {
-      requirementKind: 'LB_PROJECTION',
-      requirementLabel: '上端筋 Lb/B/2投影',
+      requirementKind: projectionDescriptor.requirementKind,
+      requirementLabel: projectionDescriptor.requirementLabel,
       requiredMm: requirement.projectionRequiredMm,
       availableMm: projectionResolved ? availability.availableMm : null,
       ok: projectionResolved ? availability.ok : null,
       partialCheck: projectionResolved,
       unresolvedReason: projectionResolved ? null : availability?.reason || null,
       note:
-        `投影必要長さ=max(Lb=${Math.round(requirement.lbByTableMm ?? 0)}mm, ` +
-        `B/2=${Math.round(requirement.minBySupportMm ?? 0)}mm)。` +
+        projectionDescriptor.note +
         projectionNote +
         ' ここでのOK/NGは投影長さだけの部分判定で、定着全体の判定ではない。',
     }),

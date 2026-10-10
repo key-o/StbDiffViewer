@@ -1,5 +1,5 @@
 /**
- * @fileoverview R12-R 一般小梁上端 VERTICAL_90 のRebarPath生成前bar-level planを解決する。
+ * @fileoverview R12-R 小梁上端（一般/片持ち）VERTICAL_90 のRebarPath生成前bar-level planを解決する。
  *
  * R12-N/O/P/Qで同一barに固定した支持面・鉛直余長・L2・candidate factsを、
  * R10 buildAnchoredHookPath() が受け取れる anchor-local inputへ正規化する。

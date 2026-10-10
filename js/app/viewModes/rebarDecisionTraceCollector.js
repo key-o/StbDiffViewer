@@ -33,15 +33,15 @@ import { resolveWallWallJunctionContinuity } from '../../data/extractors/rebar3d
 import { buildWallWallJunctionBarDecisionTraces } from '../../data/extractors/rebar3d/wallRebarWallJunctionDecisionTrace.js';
 import { buildSlabRebarRenderPlan } from '../../data/extractors/rebar3d/slabRebarPlacement.js';
 import { buildSmallOpeningRebarDeflectionEvaluations } from '../../data/extractors/rebar3d/smallOpeningRebarSourceFacts.js';
+import { buildFoundationBeamCountDifferenceDecisionTraces } from '../../data/extractors/rebar3d/foundationBeamCountDifferenceDecisionTrace.js';
+import { buildRebarDecisionTraceSnapshot } from '../../data/extractors/rebar3d/rebarJointDecisionTrace.js';
 import {
-  buildFoundationBeamCountDifferenceDecisionTraces,
-  buildRebarDecisionTraceSnapshot,
   buildRebarPlacementActivationTrace,
   buildRebarPlacementProductionTrace,
-  buildGirderHaunchDecisionTraces,
-  buildSlabThroughDecisionTraces,
-  buildSmallOpeningDeflectionDecisionTraces,
-} from '../../data/extractors/rebar3d/rebarDecisionTrace.js';
+} from '../../data/extractors/rebar3d/rebarPlacementDecisionTrace.js';
+import { buildGirderHaunchDecisionTraces } from '../../data/extractors/rebar3d/girderHaunchDecisionTrace.js';
+import { buildSlabThroughDecisionTraces } from '../../data/extractors/rebar3d/slabThroughDecisionTrace.js';
+import { buildSmallOpeningDeflectionDecisionTraces } from '../../data/extractors/rebar3d/smallOpeningDeflectionDecisionTrace.js';
 import {
   collectRcColumnBeamPlacementConflictCandidates,
   resolveRebarPlacementConflictActivation,

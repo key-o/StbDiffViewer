@@ -11,10 +11,18 @@ import {
 import { getModelContext } from './modelContext.js';
 import editingSession from '../editing/editingSession.js';
 import { buildBeamRebarLayoutMaps } from '../../data/extractors/rebar3d/beamRebarPlacement.js';
+import { buildBeamStirrupLayoutMaps } from '../../data/extractors/rebar3d/hoopPlacement.js';
 import { getOrBuildRebarFact } from '../../data/extractors/rebar3d/rebarFactsCache.js';
 import { buildSmallBeamSupportFacts } from '../../data/extractors/rebar3d/smallBeamSupportFacts.js';
 import { buildSmallBeamAnchorageRequirementFacts } from '../../data/extractors/rebar3d/smallBeamAnchorageRequirementFacts.js';
 import { buildSmallBeamAnchorageCheckRows } from '../../data/extractors/rebar3d/smallBeamAnchorageCheckRows.js';
+import { buildSmallBeamCantileverTipBeamFacts } from '../../data/extractors/rebar3d/smallBeamCantileverTipBeamFacts.js';
+import { buildSmallBeamCantileverTipBeamCheckRows } from '../../data/extractors/rebar3d/smallBeamCantileverTipBeamCheckRows.js';
+import { attachSmallBeamCantileverTipBeamDetailing } from '../../data/extractors/rebar3d/smallBeamCantileverTipBeamProjectDetailing.js';
+import { attachSmallBeamCantileverTipBeamMainBarIdentity } from '../../data/extractors/rebar3d/smallBeamCantileverTipBeamMainBarIdentity.js';
+import { attachSmallBeamCantileverTipBeamPathPlan } from '../../data/extractors/rebar3d/smallBeamCantileverTipBeamPathPlan.js';
+import { attachSmallBeamCantileverTipBeamCBarStationing } from '../../data/extractors/rebar3d/smallBeamCantileverTipBeamCBarStationing.js';
+import { attachSmallBeamCantileverTipBeamCBarPaths } from '../../data/extractors/rebar3d/smallBeamCantileverTipBeamCBarPath.js';
 import { attachSmallBeamVertical90CandidateFacts } from '../../data/extractors/rebar3d/smallBeamVerticalAnchorageCandidateFacts.js';
 import { attachSmallBeamTopAnchorageModeFacts } from '../../data/extractors/rebar3d/smallBeamAnchorageModeFacts.js';
 import { attachSmallBeamVertical90PathPlanFacts } from '../../data/extractors/rebar3d/smallBeamVerticalAnchoragePathPlanFacts.js';
@@ -28,10 +36,15 @@ import {
   withRebarModelIndexScopes,
 } from '../../data/extractors/rebar3d/rebarModelIndex.js';
 
+function cachedCollectorRows(xmlDoc, generationKey, factName, options, builder) {
+  if (options?.projectDetailing !== undefined) return builder();
+  return getOrBuildRebarFact(xmlDoc, generationKey, factName, builder);
+}
+
 function collectSmallBeamRequirementChecks(xmlDoc, options = {}) {
   if (!xmlDoc) return [];
   const generationKey = resolveRebarFactsGenerationKey(xmlDoc, options);
-  return getOrBuildRebarFact(xmlDoc, generationKey, 'smallBeam.requirementChecks', () => {
+  return cachedCollectorRows(xmlDoc, generationKey, 'smallBeam.requirementChecks', options, () => {
     const scanTag = getOrBuildRebarFact(xmlDoc, generationKey, 'scanTag', () =>
       createTagScanner(xmlDoc),
     );
@@ -63,6 +76,39 @@ function collectSmallBeamRequirementChecks(xmlDoc, options = {}) {
   });
 }
 
+function collectSmallBeamCantileverTipBeamChecks(xmlDoc, options = {}) {
+  if (!xmlDoc) return [];
+  const generationKey = resolveRebarFactsGenerationKey(xmlDoc, options);
+  return cachedCollectorRows(
+    xmlDoc,
+    generationKey,
+    'smallBeam.cantileverTipBeamChecks',
+    options,
+    () => {
+      const scanTag = getOrBuildRebarFact(xmlDoc, generationKey, 'scanTag', () =>
+        createTagScanner(xmlDoc),
+      );
+      const modelIndex = buildRebarModelIndex(xmlDoc, { scanTag });
+      const beamLayouts = getOrBuildRebarFact(xmlDoc, generationKey, 'beam.main.layouts', () =>
+        buildBeamRebarLayoutMaps(xmlDoc, options),
+      );
+      const beamStirrupLayouts = getOrBuildRebarFact(
+        xmlDoc,
+        generationKey,
+        'beam.stirrup.layouts',
+        () => buildBeamStirrupLayoutMaps(xmlDoc, options),
+      );
+      let facts = buildSmallBeamCantileverTipBeamFacts(xmlDoc, { ...options, modelIndex }, scanTag);
+      facts = attachSmallBeamCantileverTipBeamDetailing(facts, options);
+      facts = attachSmallBeamCantileverTipBeamMainBarIdentity(facts, beamLayouts.beam);
+      facts = attachSmallBeamCantileverTipBeamPathPlan(facts);
+      facts = attachSmallBeamCantileverTipBeamCBarStationing(facts, beamStirrupLayouts.beam);
+      facts = attachSmallBeamCantileverTipBeamCBarPaths(facts);
+      return buildSmallBeamCantileverTipBeamCheckRows(facts);
+    },
+  );
+}
+
 function effectiveModelDocuments() {
   const { modelADocument, modelBDocument } = getModelContext();
   const editing = editingSession.getState();
@@ -90,6 +136,12 @@ export function collectRebarAnchorageChecks(options = {}) {
       if (!xmlDoc) continue;
       checks.push(
         ...collectSmallBeamRequirementChecks(xmlDoc, options).map((row) => ({
+          modelSource,
+          ...row,
+        })),
+      );
+      checks.push(
+        ...collectSmallBeamCantileverTipBeamChecks(xmlDoc, options).map((row) => ({
           modelSource,
           ...row,
         })),

@@ -397,6 +397,9 @@ export class WallGenerator extends BaseElementGenerator {
       openings.push({
         id: opening.id,
         name: opening.name,
+        guid: opening.guid || null,
+        sectionId: opening.id_section || null,
+        sourceVersion: opening.sourceVersion || null,
         positionX: pos.positionX,
         positionY: pos.positionY,
         width: opening.length_X,

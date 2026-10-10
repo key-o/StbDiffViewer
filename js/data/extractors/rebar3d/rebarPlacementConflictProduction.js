@@ -150,8 +150,7 @@ function endpointInsetGeometry(candidate, deltaU) {
     Math.max(0, axialDistanceMm) + radialClearMm + Math.max(0, collisionToleranceMm);
   // sharpStartより手前にstart Arcの接点があるため、柱主筋clearance境界から
   // tangentDistance分だけさらに梁スパン側へ送って、Arc自体も柱主筋の外へ出す。
-  const transitionLeadMm =
-    requiredLeadMm + probe.startCorner.tangentDistanceMm + EPS;
+  const transitionLeadMm = requiredLeadMm + probe.startCorner.tangentDistanceMm + EPS;
   const requiredMemberMm =
     transitionLeadMm + transitionRunMm + probe.endCorner.tangentDistanceMm + EPS;
   if (!(memberLengthMm > requiredMemberMm)) {
@@ -374,8 +373,7 @@ function preflightEndpointInsets(draft, layout) {
       ok: false,
       status: 'UNRESOLVED',
       reason:
-        unresolved[0]?.reason ||
-        'rebar-placement-conflict-endpoint-dogleg-preflight-incomplete',
+        unresolved[0]?.reason || 'rebar-placement-conflict-endpoint-dogleg-preflight-incomplete',
       appliedCount,
       unresolved,
     };
@@ -711,7 +709,8 @@ export function rebarPlacementConflictEndpointInsets(memberPlan) {
       collisionToleranceMm: shift.collisionToleranceMm,
     }))
     .sort((left, right) => {
-      const endpointOrder = left.endpoint === right.endpoint ? 0 : left.endpoint === 'start' ? -1 : 1;
+      const endpointOrder =
+        left.endpoint === right.endpoint ? 0 : left.endpoint === 'start' ? -1 : 1;
       return endpointOrder || left.barIndex - right.barIndex;
     });
 }

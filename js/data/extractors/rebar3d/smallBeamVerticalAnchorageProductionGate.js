@@ -1,5 +1,5 @@
 /**
- * @fileoverview R12-V 一般小梁 VERTICAL_90 のproduction gate。
+ * @fileoverview R12-V 小梁（一般/片持ち）VERTICAL_90 のproduction gate。
  *
  * requirement/candidate/mode/path plan/actual arc/main-bar continuity/identityがすべて成立した
  * barだけを3D generatorへ渡せる中心線candidateとする。ここではworld変換・mesh生成は行わない。

@@ -33,6 +33,47 @@ export function getBeamSchedulePositionSignature(positionData) {
   );
 }
 
+/**
+ * 梁断面リストの主筋/腹筋本数表記(例: 4-D25、4/2-D25、2-D25 + 2-D22(SD390))。
+ * @returns {string} 配筋が無い場合は '-'
+ */
+export function formatBeamBarCountText(bar) {
+  if (!bar || bar.count <= 0) return '-';
+  const layers = bar.layers?.filter((layer) => layer.count > 0) || [];
+  if (layers.length > 0) {
+    const groups = layers.flatMap((layer) =>
+      layer.barGroups?.length > 0 ? layer.barGroups : [layer],
+    );
+    const dias = new Set(groups.map((group) => group.dia).filter(Boolean));
+    const grades = new Set(groups.map((group) => group.grade).filter(Boolean));
+    const countsText = layers.map((layer) => layer.count).join('/');
+    if (dias.size === 0) return countsText;
+    if (dias.size === 1 && grades.size <= 1) return `${countsText}-${[...dias][0]}`;
+    return groups
+      .map(
+        (group) =>
+          `${group.count}${group.dia ? `-${group.dia}` : ''}${group.grade ? `(${group.grade})` : ''}`,
+      )
+      .join(' + ');
+  }
+
+  const count1st = bar.count1st || bar.count;
+  const count2nd = bar.count2nd || 0;
+  const countText = count2nd > 0 ? `${count1st}/${count2nd}` : `${count1st}`;
+  return bar.dia ? `${countText}-${bar.dia}` : countText;
+}
+
+/**
+ * 梁断面リストのあばら筋表記(例: 2-D13@200)。
+ * @returns {string} あばら筋が無い場合は '-'
+ */
+export function formatBeamStirrupText(stirrup) {
+  if (!stirrup || !stirrup.dia) return '-';
+  const countText = stirrup.count > 0 ? `${stirrup.count}-` : '';
+  const pitchText = stirrup.pitch ? `@${stirrup.pitch}` : '';
+  return `${countText}${stirrup.dia}${pitchText}`;
+}
+
 function samePosition(a, b) {
   return getBeamSchedulePositionSignature(a) === getBeamSchedulePositionSignature(b);
 }

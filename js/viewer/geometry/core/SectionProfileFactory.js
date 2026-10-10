@@ -33,10 +33,22 @@ export function createProfileFromSectionData(sectionData, sectionType, element, 
 
     if (ifcProfile) {
       log.debug(`Element ${element?.id}: profile created via IFCProfileFactory (${sectionType})`);
+      const profileParams = mapToProfileParams(dims, sectionType);
+      const shapeMeta =
+        sectionType === 'PIPE'
+          ? {
+              type: 'circular',
+              outerRadius: profileParams.outerDiameter / 2,
+              innerRadius: Math.max(
+                0,
+                profileParams.outerDiameter / 2 - profileParams.wallThickness,
+              ),
+            }
+          : { type: 'polygon' };
       return {
         shape: convertProfileToThreeShape({
           vertices: ifcProfile.points,
-          _meta: { type: sectionType === 'PIPE' ? 'circular' : 'polygon' },
+          _meta: shapeMeta,
         }),
         meta: {
           profileSource: 'IFCProfileFactory',

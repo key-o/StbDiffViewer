@@ -285,9 +285,7 @@ export function buildSmallOpeningSlabSourcePlan(
   for (const fact of sourceFacts) {
     const memberId = text(fact.memberId);
     const slabElement = slabs.get(memberId);
-    const memberCheck = baseRenderPlan.checks.find(
-      (check) => text(check?.memberId) === memberId,
-    );
+    const memberCheck = baseRenderPlan.checks.find((check) => text(check?.memberId) === memberId);
     if (!memberCheck || memberCheck.status !== 'READY') {
       return sourceFailure('small-opening-slab-source-render-plan-unresolved', {
         modelSource: normalizedModelSource,
@@ -320,10 +318,7 @@ export function buildSmallOpeningSlabSourcePlan(
     const crossingCandidates = [];
     for (let pathIndex = 0; pathIndex < baseRenderPlan.paths.length; pathIndex += 1) {
       const path = baseRenderPlan.paths[pathIndex];
-      if (
-        path?.metadata?.memberType !== 'slab' ||
-        text(path?.metadata?.memberId) !== memberId
-      ) {
+      if (path?.metadata?.memberType !== 'slab' || text(path?.metadata?.memberId) !== memberId) {
         continue;
       }
       if (!pathCrossesOpening(path, frame, geometry.opening, tolerance)) continue;

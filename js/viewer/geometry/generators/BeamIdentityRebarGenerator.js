@@ -4,7 +4,7 @@
  * 通し主筋はRebarPathを材軸方向のpieceへ変換し、既存のInstancedMesh生成経路へ渡す。
  * R8のハンチtransitionはmember-local RebarPathを表示境界でchord化してworldへ変換し、
  * 同じ円柱描画基盤へ渡す。腹筋は従来segment rendererを維持する。
- * R12-Wでは一般小梁のCENTERLINE_READYなVERTICAL_90 production pathだけを
+ * R12-Wでは小梁（一般/片持ち）のCENTERLINE_READYなVERTICAL_90 production pathだけを
  * anchor-localからworldへ変換し、member主筋とのworld連続性を再確認して描画する。
  * role metadataが無いlegacy layoutは全体を従来経路へ戻す。
  *
@@ -13,7 +13,16 @@
 
 import * as THREE from 'three';
 import { getState } from '../../../data/state/globalState.js';
-import { calculateBeamPlacement } from '../core/GeometryCalculator.js';
+import { REBAR_STANDARD_RULES } from '../../../constants/rebarStandardRules.js';
+import { resolveConcreteAccommodationRule } from '../../../config/concreteAccommodationProjectDetailing.js';
+import { evaluateBeamConcreteAccommodation } from '../../../data/extractors/rebar3d/beamConcreteAccommodationProduction.js';
+import {
+  buildBeamMemberConcreteObb,
+  buildColumnMemberConcreteObb,
+} from '../../../data/extractors/rebar3d/concreteMemberCollision.js';
+import { calculateBeamPlacement, calculateColumnPlacement } from '../core/GeometryCalculator.js';
+import { createConcreteAccommodationPreviewMesh } from './ConcreteAccommodationPreviewGenerator.js';
+import { collectActualBendShearWorldPaths } from './ActualBendShearRebarGenerator.js';
 import { anchorLocalPathToWorldLines } from '../core/RebarPathWorldAdapter.js';
 import {
   createLine,
@@ -27,10 +36,14 @@ import {
   buildSmallBeamVertical90RenderPlan,
   isSmallBeamElementBatch,
 } from '../../../data/extractors/rebar3d/smallBeamVerticalAnchorageRenderPlan.js';
+import { buildSmallBeamCantileverFreeTipRenderPlan } from '../../../data/extractors/rebar3d/smallBeamCantileverFreeTipRenderPlan.js';
+import { buildSmallBeamCantileverTipBeamCBarRenderPlan } from '../../../data/extractors/rebar3d/smallBeamCantileverTipBeamCBarRenderPlan.js';
+import { buildSmallBeamCantileverTipBeamMainBarRenderPlan } from '../../../data/extractors/rebar3d/smallBeamCantileverTipBeamMainBarRenderPlan.js';
 import { buildSmallBeamBottomL3RenderPlan } from '../../../data/extractors/rebar3d/smallBeamBottomAnchorageRenderPlan.js';
 import { buildSmallBeamBottomL3hRenderPlan } from '../../../data/extractors/rebar3d/smallBeamBottomL3hRenderPlan.js';
 import { buildSmallBeamCutoffFacts } from '../../../data/extractors/rebar3d/smallBeamCutoffFacts.js';
 import { buildSmallBeamCutoffMemberMutation } from '../../../data/extractors/rebar3d/smallBeamCutoffProduction.js';
+import { buildBeamMemberRebarPaths } from '../../../data/extractors/rebar3d/beamRebarPathBuilder.js';
 import { axialPiece } from '../../../data/extractors/rebar3d/rebarPieces.js';
 import { applyAppendixA2VerticalPlacementToLayout } from '../../../data/extractors/rebar3d/rebarAppendixA2BeamVerticalPlacement.js';
 import {
@@ -44,6 +57,8 @@ import {
   buildSmallBeamBottomL3hMemberMutation,
   resolveSmallBeamBottomL3hWorldPaths,
 } from './SmallBeamBottomL3hWorldResolver.js';
+import { buildSmallBeamCantileverFreeTipMemberMutation } from './SmallBeamCantileverFreeTipWorldResolver.js';
+import { buildSmallBeamCantileverTipBeamMainBarMemberMutation } from './SmallBeamCantileverTipBeamMainBarWorldResolver.js';
 import {
   createBeamRebarMeshes as createLegacyBeamRebarMeshes,
   createRebarPieceMeshes,
@@ -75,6 +90,116 @@ function beamPlacement(beam, nodes, layout) {
   );
   const rollAngleDegrees = Number(beam.rotate ?? beam.angle ?? 0) || 0;
   return { ...placement, localRollRad: (rollAngleDegrees * Math.PI) / 180 };
+}
+
+function columnPlacement(column, nodes) {
+  const bottom = nodes?.get(String(column.id_node_bottom));
+  const top = nodes?.get(String(column.id_node_top));
+  if (!bottom || !top) return null;
+  const rollAngle = ((Number(column.rotate ?? column.angle ?? 0) || 0) * Math.PI) / 180;
+  const placement = calculateColumnPlacement(
+    { x: bottom.x, y: bottom.y, z: bottom.z },
+    { x: top.x, y: top.y, z: top.z },
+    {
+      bottomOffset: {
+        x: Number(column.offset_bottom_X || 0),
+        y: Number(column.offset_bottom_Y || 0),
+        z: Number(column.offset_bottom_Z || 0),
+      },
+      topOffset: {
+        x: Number(column.offset_top_X || 0),
+        y: Number(column.offset_top_Y || 0),
+        z: Number(column.offset_top_Z || 0),
+      },
+      rollAngle,
+    },
+  );
+  return placement?.length > 0 ? { ...placement, localRollRad: 0 } : null;
+}
+
+function buildConcreteAccommodationMemberObstacles(context, nodes) {
+  if (!context || !nodes?.size) return [];
+  const obstacles = [];
+  const beamGroups = [
+    {
+      memberTag: 'StbBeam',
+      elements: context.beamElements || [],
+      layouts: context.beamLayouts?.beam,
+    },
+    {
+      memberTag: 'StbGirder',
+      elements: context.girderElements || [],
+      layouts: context.beamLayouts?.girder,
+    },
+  ];
+  for (const group of beamGroups) {
+    if (!group.layouts?.size) continue;
+    for (const member of group.elements) {
+      const layout = group.layouts.get(String(member.id_section));
+      if (!layout) continue;
+      const placement = beamPlacement(member, nodes, layout);
+      if (!placement) continue;
+      const obb = buildBeamMemberConcreteObb({
+        member,
+        placement,
+        layout,
+        memberTag: group.memberTag,
+      });
+      if (obb) obstacles.push(obb);
+    }
+  }
+
+  const columnLayouts = context.columnLayouts;
+  if (columnLayouts?.size) {
+    for (const member of context.columnElements || []) {
+      const layout = columnLayouts.get(String(member.id_section));
+      if (!layout) continue;
+      const placement = columnPlacement(member, nodes);
+      if (!placement) continue;
+      const obb = buildColumnMemberConcreteObb({
+        member,
+        placement,
+        layout,
+        memberTag: 'StbColumn',
+      });
+      if (obb) obstacles.push(obb);
+    }
+  }
+  return obstacles;
+}
+
+function supportJointNodeId(member, endpoint) {
+  if (endpoint === 'start') return String(member?.id_node_start ?? '');
+  if (endpoint === 'end') return String(member?.id_node_end ?? '');
+  return '';
+}
+
+function obstaclesForSupport(obstacles, supportMember, supportEndpoint) {
+  const hostId = String(supportMember?.id ?? '');
+  const jointNodeId = supportJointNodeId(supportMember, supportEndpoint);
+  return (obstacles || []).filter((obstacle) => {
+    if (obstacle.memberTag === 'StbBeam' && String(obstacle.memberId || '') === hostId)
+      return false;
+    // 接合節点で正規に一体化する柱梁は、joint面での重なりを越境扱いしない。
+    if (jointNodeId && obstacle.nodeIds?.includes?.(jointNodeId)) return false;
+    return true;
+  });
+}
+
+function memberTouchesNode(member, nodeId) {
+  if (!nodeId || !member) return false;
+  return [member.id_node_start, member.id_node_end, member.id_node_bottom, member.id_node_top]
+    .filter((value) => value !== null && value !== undefined)
+    .some((value) => String(value) === String(nodeId));
+}
+
+function combineShearCollisionResolutions(resolutions) {
+  const values = (resolutions || []).filter(Boolean);
+  return {
+    resolved: values.every((item) => item.resolved !== false),
+    paths: values.flatMap((item) => item.paths || []),
+    unresolved: values.flatMap((item) => item.unresolved || []),
+  };
 }
 
 function beamPlanLength(placement) {
@@ -751,6 +876,58 @@ function resolveSmallBeamRenderPlan(beamElements, layoutMap, options) {
   }
 }
 
+function resolveSmallBeamCantileverFreeTipPlan(beamElements, layoutMap, options) {
+  if (options?.smallBeamCantileverFreeTipRenderPlan) {
+    return options.smallBeamCantileverFreeTipRenderPlan;
+  }
+  const xmlDoc = resolveModelDocument(options);
+  if (!xmlDoc || !isSmallBeamElementBatch(xmlDoc, beamElements, options?.scanTag)) return null;
+  try {
+    return buildSmallBeamCantileverFreeTipRenderPlan(xmlDoc, layoutMap, options, options?.scanTag);
+  } catch (_error) {
+    // 近似寸法100程度を勝手にexact化せず、明示detail plan失敗時は自由端折曲げだけ生成しない。
+    return null;
+  }
+}
+
+function resolveSmallBeamCantileverTipBeamCBarPlan(beamElements, layoutMap, options) {
+  if (options?.smallBeamCantileverTipBeamCBarRenderPlan) {
+    return options.smallBeamCantileverTipBeamCBarRenderPlan;
+  }
+  const xmlDoc = resolveModelDocument(options);
+  if (!xmlDoc || !isSmallBeamElementBatch(xmlDoc, beamElements, options?.scanTag)) return null;
+  try {
+    return buildSmallBeamCantileverTipBeamCBarRenderPlan(
+      xmlDoc,
+      layoutMap,
+      options,
+      options?.scanTag,
+    );
+  } catch (_error) {
+    // 図9-4 C形筋はexplicit geometryが揃わない限り既存主筋表示へ影響させない。
+    return null;
+  }
+}
+
+function resolveSmallBeamCantileverTipBeamMainBarPlan(beamElements, layoutMap, options) {
+  if (options?.smallBeamCantileverTipBeamMainBarRenderPlan) {
+    return options.smallBeamCantileverTipBeamMainBarRenderPlan;
+  }
+  const xmlDoc = resolveModelDocument(options);
+  if (!xmlDoc || !isSmallBeamElementBatch(xmlDoc, beamElements, options?.scanTag)) return null;
+  try {
+    return buildSmallBeamCantileverTipBeamMainBarRenderPlan(
+      xmlDoc,
+      layoutMap,
+      options,
+      options?.scanTag,
+    );
+  } catch (_error) {
+    // 図9-4-2 main-bar cross-member bendはmember単位atomic。plan失敗時は既存主筋を維持する。
+    return null;
+  }
+}
+
 function resolveSmallBeamBottomRenderPlan(beamElements, layoutMap, options) {
   if (options?.smallBeamBottomL3RenderPlan) return options.smallBeamBottomL3RenderPlan;
   const xmlDoc = resolveModelDocument(options);
@@ -794,7 +971,34 @@ function resolveSmallBeamCutoffFactSet(beamElements, layoutMap, options) {
 export function createBeamRebarMeshes(beamElements, nodes, layoutMap, options = {}) {
   if (!beamElements?.length || !nodes?.size || !layoutMap?.size) return [];
 
+  const concreteAccommodationResolution = resolveConcreteAccommodationRule({
+    projectDetailing: options?.projectDetailing,
+  });
+  const explicitCoverMm = Number(options?.coverMm);
+  const concreteAccommodationCoverMm =
+    options?.coverMm !== undefined &&
+    options?.coverMm !== null &&
+    Number.isFinite(explicitCoverMm) &&
+    explicitCoverMm >= 0
+      ? explicitCoverMm
+      : REBAR_STANDARD_RULES.resolveColumnBeamCover().designMm;
+
   const smallBeamVertical90RenderPlan = resolveSmallBeamRenderPlan(
+    beamElements,
+    layoutMap,
+    options,
+  );
+  const smallBeamCantileverFreeTipRenderPlan = resolveSmallBeamCantileverFreeTipPlan(
+    beamElements,
+    layoutMap,
+    options,
+  );
+  const smallBeamCantileverTipBeamCBarRenderPlan = resolveSmallBeamCantileverTipBeamCBarPlan(
+    beamElements,
+    layoutMap,
+    options,
+  );
+  const smallBeamCantileverTipBeamMainBarRenderPlan = resolveSmallBeamCantileverTipBeamMainBarPlan(
     beamElements,
     layoutMap,
     options,
@@ -817,9 +1021,30 @@ export function createBeamRebarMeshes(beamElements, nodes, layoutMap, options = 
   const smallBeamAnchorageWorldPaths = [];
   const smallBeamBottomAnchorageWorldPaths = [];
   const smallBeamBottomL3hWorldPaths = [];
+  const smallBeamCantileverFreeTipWorldPaths = [];
+  const smallBeamCantileverTipBeamMainBarWorldPaths = [];
+  const smallBeamCantileverTipBeamCBarWorldPaths = [];
+  const concreteAccommodationPreviewMeshes = [];
   const appendixA2CornerAnchorageWorldPaths = [];
   const appendixA2UShapeWorldPaths = [];
   const placementConflictEndpointInsetWorldPaths = [];
+  const beamElementById = new Map(beamElements.map((beam) => [String(beam.id), beam]));
+  const concreteAccommodationMemberObstacles = concreteAccommodationResolution.active
+    ? buildConcreteAccommodationMemberObstacles(
+        options.concreteAccommodationCollisionContext,
+        nodes,
+      )
+    : [];
+  const basePlacementById = new Map();
+  for (const beam of beamElements) {
+    const baseLayout = layoutMap.get(String(beam.id_section));
+    if (!baseLayout) continue;
+    const placement = beamPlacement(beam, nodes, baseLayout);
+    if (placement && placement.length > 0) {
+      basePlacementById.set(String(beam.id), placement);
+    }
+  }
+
   for (const beam of beamElements) {
     const baseLayout = layoutMap.get(String(beam.id_section));
     if (!baseLayout) continue;
@@ -846,8 +1071,9 @@ export function createBeamRebarMeshes(beamElements, nodes, layoutMap, options = 
     const placementConflictPathConflict =
       placementConflictMemberPlan?.status === 'READY' &&
       (endpointTrims.length > 0 || haunchTransitions.length > 0);
-    const placementConflictEndpointInsets =
-      rebarPlacementConflictEndpointInsets(placementConflictMemberPlan);
+    const placementConflictEndpointInsets = rebarPlacementConflictEndpointInsets(
+      placementConflictMemberPlan,
+    );
     const layout =
       placementConflictMemberPlan?.status === 'READY' && !placementConflictPathConflict
         ? applyRebarPlacementConflictPlanToLayout(
@@ -902,6 +1128,175 @@ export function createBeamRebarMeshes(beamElements, nodes, layoutMap, options = 
       }
     }
     smallBeamBottomL3hWorldPaths.push(...bottomL3hPaths);
+
+    const cantileverFreeTipMemberPlan =
+      smallBeamCantileverFreeTipRenderPlan?.members?.get?.(memberId) || null;
+    if (cantileverFreeTipMemberPlan) {
+      const freeTipMutation = buildSmallBeamCantileverFreeTipMemberMutation({
+        memberPlan: cantileverFreeTipMemberPlan,
+        memberPaths: built.paths,
+        placement,
+        memberLengthMm: placement.length,
+        memberId,
+        sectionId: beam.id_section,
+      });
+      if (freeTipMutation.applied) {
+        built = { ...built, paths: freeTipMutation.memberPaths };
+        smallBeamCantileverFreeTipWorldPaths.push(...freeTipMutation.paths);
+      }
+    }
+
+    const cantileverTipMainBarMemberPlan =
+      smallBeamCantileverTipBeamMainBarRenderPlan?.members?.get?.(memberId) || null;
+    if (cantileverTipMainBarMemberPlan) {
+      const cantileverId = String(cantileverTipMainBarMemberPlan.sourceCantileverId || '');
+      const cantileverBeam = beamElementById.get(cantileverId) || null;
+      const cantileverPlacement = basePlacementById.get(cantileverId) || null;
+      const mainBarMutation = buildSmallBeamCantileverTipBeamMainBarMemberMutation({
+        memberPlan: cantileverTipMainBarMemberPlan,
+        memberPaths: built.paths,
+        tipBeamPlacement: placement,
+        cantileverPlacement,
+        memberLengthMm: placement.length,
+        memberId,
+        sectionId: beam.id_section,
+        cantileverSectionId: cantileverBeam?.id_section ?? null,
+      });
+      if (mainBarMutation.applied) {
+        built = { ...built, paths: mainBarMutation.memberPaths };
+        smallBeamCantileverTipBeamMainBarWorldPaths.push(...mainBarMutation.paths);
+
+        if (
+          concreteAccommodationResolution.resolved &&
+          concreteAccommodationResolution.active &&
+          cantileverBeam &&
+          cantileverPlacement
+        ) {
+          const cantileverLayout = layoutMap.get(String(cantileverBeam.id_section));
+          const existingSupportMainRebarPaths =
+            cantileverLayout && cantileverPlacement
+              ? buildBeamMemberRebarPaths(cantileverLayout, cantileverPlacement.length, {
+                  memberId: cantileverId,
+                })
+                  .paths.map((path) =>
+                    memberLocalPathToWorld(path, cantileverPlacement, cantileverId),
+                  )
+                  .filter((path) => path && validateRebarPath(path).ok)
+              : [];
+          const collisionContext = options.concreteAccommodationCollisionContext;
+          const jointNodeId = supportJointNodeId(
+            cantileverBeam,
+            cantileverTipMainBarMemberPlan.cantileverEndpoint,
+          );
+          const connectedBeamElements = (collisionContext?.beamElements || beamElements).filter(
+            (member) => memberTouchesNode(member, jointNodeId),
+          );
+          const connectedGirderElements = (collisionContext?.girderElements || []).filter(
+            (member) => memberTouchesNode(member, jointNodeId),
+          );
+          const connectedColumnElements = (collisionContext?.columnElements || []).filter(
+            (member) => memberTouchesNode(member, jointNodeId),
+          );
+          const beamShearResolution = collisionContext?.beamShearLayouts?.beam
+            ? collectActualBendShearWorldPaths(
+                connectedBeamElements,
+                nodes,
+                collisionContext.beamShearLayouts.beam,
+                { memberType: 'beam' },
+              )
+            : { resolved: true, paths: [], unresolved: [] };
+          const girderShearResolution = collisionContext?.beamShearLayouts?.girder
+            ? collectActualBendShearWorldPaths(
+                connectedGirderElements,
+                nodes,
+                collisionContext.beamShearLayouts.girder,
+                { memberType: 'beam' },
+              )
+            : { resolved: true, paths: [], unresolved: [] };
+          const columnHoopResolution = collisionContext?.columnHoopLayouts
+            ? collectActualBendShearWorldPaths(
+                connectedColumnElements,
+                nodes,
+                collisionContext.columnHoopLayouts,
+                { memberType: 'column' },
+              )
+            : { resolved: true, paths: [], unresolved: [] };
+          const supportShearResolution = combineShearCollisionResolutions([
+            beamShearResolution,
+            girderShearResolution,
+            columnHoopResolution,
+          ]);
+          const existingSupportRebarPaths = [
+            ...existingSupportMainRebarPaths,
+            ...supportShearResolution.paths,
+          ];
+          const rawAccommodation = evaluateBeamConcreteAccommodation({
+            worldPaths: mainBarMutation.paths,
+            supportMember: cantileverBeam,
+            supportPlacement: cantileverPlacement,
+            supportEndpoint: cantileverTipMainBarMemberPlan.cantileverEndpoint,
+            supportWidthMm: cantileverTipMainBarMemberPlan.cantileverBeamWidthMm,
+            supportDepthMm: cantileverTipMainBarMemberPlan.cantileverBeamDepthMm,
+            requiredCoverMm: concreteAccommodationCoverMm,
+            rule: concreteAccommodationResolution.rule,
+            sourceRuleId: 'R12-AO',
+            xmlDoc: resolveModelDocument(options),
+            existingRebarPaths: existingSupportRebarPaths,
+            existingRebarGeometryResolved: supportShearResolution.resolved,
+            memberConcreteObstacles: obstaclesForSupport(
+              concreteAccommodationMemberObstacles,
+              cantileverBeam,
+              cantileverTipMainBarMemberPlan.cantileverEndpoint,
+            ),
+          });
+          rawAccommodation.supportShearCollisionResolution = supportShearResolution;
+          const accommodation =
+            typeof options.concreteAccommodationDecisionResolver === 'function'
+              ? options.concreteAccommodationDecisionResolver(rawAccommodation, {
+                  modelSource: options.modelSource,
+                })
+              : rawAccommodation;
+          if (typeof options.concreteAccommodationEvaluationSink === 'function') {
+            options.concreteAccommodationEvaluationSink(accommodation, {
+              modelSource: options.modelSource,
+            });
+          }
+          if (Array.isArray(options.concreteAccommodationCollector)) {
+            options.concreteAccommodationCollector.push(accommodation);
+          }
+          if (
+            options.concreteAccommodationPreview === true &&
+            accommodation.candidate &&
+            accommodation.candidateSolid
+          ) {
+            const preview = createConcreteAccommodationPreviewMesh({
+              candidate: accommodation.candidate,
+              solid: accommodation.candidateSolid,
+              supportPlacement: cantileverPlacement,
+              supportEndpoint: cantileverTipMainBarMemberPlan.cantileverEndpoint,
+              modelSource: options.modelSource,
+            });
+            if (preview) concreteAccommodationPreviewMeshes.push(preview);
+          }
+        }
+      }
+    }
+
+    const cantileverTipCBarMemberPlan =
+      smallBeamCantileverTipBeamCBarRenderPlan?.members?.get?.(memberId) || null;
+    if (
+      cantileverTipCBarMemberPlan?.paths?.length &&
+      (cantileverTipCBarMemberPlan.sectionId === null ||
+        cantileverTipCBarMemberPlan.sectionId === undefined ||
+        String(cantileverTipCBarMemberPlan.sectionId) === String(beam.id_section))
+    ) {
+      const worldPaths = cantileverTipCBarMemberPlan.paths
+        .map((path) => memberLocalPathToWorld(path, placement, memberId))
+        .filter((path) => path && validateRebarPath(path).ok);
+      if (worldPaths.length === cantileverTipCBarMemberPlan.paths.length) {
+        smallBeamCantileverTipBeamCBarWorldPaths.push(...worldPaths);
+      }
+    }
 
     for (const path of built.paths.filter(isPlacementConflictEndpointInsetPath)) {
       const world = memberLocalPathToWorld(path, placement, memberId);
@@ -1042,6 +1437,27 @@ export function createBeamRebarMeshes(beamElements, nodes, layoutMap, options = 
       })
     : [];
 
+  const smallBeamCantileverFreeTipMeshes = smallBeamCantileverFreeTipWorldPaths.length
+    ? createColumnJointRebarMeshes(smallBeamCantileverFreeTipWorldPaths, {
+        modelSource: options.modelSource,
+        rebarKind: 'smallBeamCantileverFreeTip',
+      })
+    : [];
+
+  const smallBeamCantileverTipBeamMainBarMeshes = smallBeamCantileverTipBeamMainBarWorldPaths.length
+    ? createColumnJointRebarMeshes(smallBeamCantileverTipBeamMainBarWorldPaths, {
+        modelSource: options.modelSource,
+        rebarKind: 'smallBeamCantileverTipBeamMainBar',
+      })
+    : [];
+
+  const smallBeamCantileverTipBeamCBarMeshes = smallBeamCantileverTipBeamCBarWorldPaths.length
+    ? createColumnJointRebarMeshes(smallBeamCantileverTipBeamCBarWorldPaths, {
+        modelSource: options.modelSource,
+        rebarKind: 'smallBeamCantileverTipBeamCBar',
+      })
+    : [];
+
   const webLayouts = webOnlyLayoutMap(layoutMap);
   const semanticWebMeshes =
     semanticElements.length && webLayouts.size
@@ -1059,6 +1475,10 @@ export function createBeamRebarMeshes(beamElements, nodes, layoutMap, options = 
     ...smallBeamAnchorageMeshes,
     ...smallBeamBottomAnchorageMeshes,
     ...smallBeamBottomL3hMeshes,
+    ...smallBeamCantileverFreeTipMeshes,
+    ...smallBeamCantileverTipBeamMainBarMeshes,
+    ...smallBeamCantileverTipBeamCBarMeshes,
+    ...concreteAccommodationPreviewMeshes,
     ...semanticWebMeshes,
     ...legacyMeshes,
   ];

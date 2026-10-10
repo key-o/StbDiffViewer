@@ -264,18 +264,17 @@ export function resolveFoundationBeamCountDifference(input = {}, options = {}) {
 }
 
 function layoutForTopology(scanTag, layoutMaps, topology) {
-  const sectionId = topology?.sectionId === null || topology?.sectionId === undefined
-    ? null
-    : String(topology.sectionId);
+  const sectionId =
+    topology?.sectionId === null || topology?.sectionId === undefined
+      ? null
+      : String(topology.sectionId);
   if (!sectionId) return null;
   if (layoutMaps instanceof Map) return layoutMaps.get(sectionId) || null;
 
   const section =
     findElementById(scanTag, 'StbSecBeam_RC', sectionId) ||
     findElementById(scanTag, 'StbSecGirder_RC', sectionId);
-  const useGirderMap = section
-    ? isGirderSection(section)
-    : topology?.memberTag !== 'StbBeam';
+  const useGirderMap = section ? isGirderSection(section) : topology?.memberTag !== 'StbBeam';
   const primary = useGirderMap ? layoutMaps?.girder : layoutMaps?.beam;
   const fallback = useGirderMap ? layoutMaps?.beam : layoutMaps?.girder;
   return primary?.get?.(sectionId) || fallback?.get?.(sectionId) || null;
@@ -353,9 +352,7 @@ function endpointSegment(layout, side) {
 
 function endpointMainBarUnresolvedReasons(layout, side) {
   const segment = endpointSegment(layout, side);
-  return (segment?.unresolved || [])
-    .map(String)
-    .filter((reason) => !reason.startsWith('web-bar-'));
+  return (segment?.unresolved || []).map(String).filter((reason) => !reason.startsWith('web-bar-'));
 }
 
 function makeEndpointEntry(scanTag, topology, end, layoutMaps) {

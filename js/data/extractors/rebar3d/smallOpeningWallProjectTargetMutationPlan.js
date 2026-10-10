@@ -102,14 +102,11 @@ export function buildSmallOpeningWallMainMutationPlansFromProjectTargets(
     });
   }
   if (!targetResolution?.resolved) {
-    return unresolved(
-      targetResolution?.reason || 'small-opening-wall-project-target-unresolved',
-      {
-        ...common,
-        targetStatus: targetResolution?.status || null,
-        targetSourceRef: targetResolution?.sourceRef || null,
-      },
-    );
+    return unresolved(targetResolution?.reason || 'small-opening-wall-project-target-unresolved', {
+      ...common,
+      targetStatus: targetResolution?.status || null,
+      targetSourceRef: targetResolution?.sourceRef || null,
+    });
   }
 
   const targets = Array.isArray(targetResolution.targets) ? targetResolution.targets : [];

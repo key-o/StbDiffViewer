@@ -3,6 +3,8 @@
  *
  * R12-N/O/Pが保持するbarFactsを同一bar indexで対応付け、R12-Q-A pure resolverへ渡す。
  * candidate-readyは定着mode採用やproduction可否を意味せず、既存requirement.resolvedも変更しない。
+ * requirementが持つ投影契約（一般小梁: Lb/B/2、片持ち小梁: La/3B/4）をそのまま使い、
+ * 片持ち小梁も同一のidentity-preserving VERTICAL_90後段へ接続する。
  */
 
 import { resolveSmallBeamTopVertical90Candidate } from './smallBeamVerticalAnchorageCandidate.js';

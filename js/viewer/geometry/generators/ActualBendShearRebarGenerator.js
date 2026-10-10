@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { HOOP_RENDER_OPTIONS } from '../../../constants/rebarPlacementRules.js';
 import {
+  createArc,
+  createLine,
+  createRebarPath,
   rebarPathToLineSegments,
   validateRebarPath,
 } from '../../../data/extractors/rebar3d/rebarPath.js';
@@ -160,6 +163,154 @@ function push(item, axial, sequence, placement, world, accumulator, tessellation
   accumulator.byDia.set(dia, list);
   accumulator.barCount += 1;
   return lines.length;
+}
+
+function localPointToWorld(pointValue, axial, placement) {
+  const local = point(pointValue, axial, placement.localRollRad || 0);
+  local.applyQuaternion(
+    new THREE.Quaternion(
+      placement.rotation.x,
+      placement.rotation.y,
+      placement.rotation.z,
+      placement.rotation.w,
+    ),
+  );
+  local.add(
+    new THREE.Vector3(
+      Number(placement.center.x),
+      Number(placement.center.y),
+      Number(placement.center.z),
+    ),
+  );
+  return { x: local.x, y: local.y, z: local.z };
+}
+
+function localVectorToWorld(vectorValue, placement) {
+  const local = point(vectorValue, 0, placement.localRollRad || 0);
+  local.applyQuaternion(
+    new THREE.Quaternion(
+      placement.rotation.x,
+      placement.rotation.y,
+      placement.rotation.z,
+      placement.rotation.w,
+    ),
+  );
+  return { x: local.x, y: local.y, z: local.z };
+}
+
+function shearPathToWorld(pathValue, axial, placement, element, sequence, item, memberType) {
+  if (!pathValue || !validateRebarPath(pathValue).ok) return null;
+  const primitives = [];
+  for (const primitive of pathValue.primitives || []) {
+    if (primitive.type === 'line') {
+      primitives.push(
+        createLine(
+          localPointToWorld(primitive.start, axial, placement),
+          localPointToWorld(primitive.end, axial, placement),
+        ),
+      );
+      continue;
+    }
+    if (primitive.type === 'arc') {
+      primitives.push(
+        createArc({
+          center: localPointToWorld(primitive.center, axial, placement),
+          radius: primitive.radius,
+          planeNormal: localVectorToWorld(primitive.planeNormal, placement),
+          startDirection: localVectorToWorld(primitive.startDirection, placement),
+          sweepAngleRad: primitive.sweepAngleRad,
+        }),
+      );
+      continue;
+    }
+    return null;
+  }
+  const worldPath = createRebarPath(primitives, {
+    ...pathValue.metadata,
+    coordinateSpace: 'world',
+    sourceCoordinateSpace: 'section-local',
+    generationStatus: 'CENTERLINE_READY',
+    memberId: String(element?.id ?? ''),
+    memberTag: memberType === 'column' ? 'StbColumn' : 'StbBeam',
+    shearSequence: sequence,
+    shearRole: item?.role || item?.type || null,
+  });
+  return validateRebarPath(worldPath).ok ? worldPath : null;
+}
+
+/**
+ * productionで実折曲げ形状まで解決済みの帯筋・あばら筋RebarPathをworldへ展開する。
+ * unresolved / legacy sharp fallbackは推定せず除外する。
+ */
+export function collectActualBendShearWorldPaths(elements, nodes, layoutMap, options = {}) {
+  if (!elements?.length || !nodes?.size || !layoutMap?.size) {
+    return { resolved: true, paths: [], unresolved: [] };
+  }
+  const memberType = options.memberType === 'column' ? 'column' : 'beam';
+  const paths = [];
+  const unresolved = [];
+
+  for (const element of elements) {
+    const lookupKey = layoutMap.lookupKey === 'elementId' ? element.id : element.id_section;
+    const layout = layoutMap.get(String(lookupKey));
+    if (!layout) continue;
+    const placement =
+      memberType === 'column'
+        ? columnPlacement(element, nodes)
+        : beamPlacement(element, nodes, layout);
+    if (!placement || !(placement.length > 0)) {
+      unresolved.push({
+        memberId: String(element.id ?? ''),
+        reason: 'shear-collision-placement-unresolved',
+      });
+      continue;
+    }
+
+    let sequence = 0;
+    const groups = [
+      ...(layout.segments || []).map((segment) => ({ segment, aux: false })),
+      ...(layout.auxiliarySegments || []).map((segment) => ({ segment, aux: true })),
+    ];
+    for (const group of groups) {
+      const segment = group.aux ? normalizeAux(layout, group.segment) : group.segment;
+      for (const axial of positions(placement.length, segment)) {
+        for (const item of [...(segment.loops || []), ...(segment.ties || [])]) {
+          if (item?.actualBendRequired !== true) continue;
+          if (item?.bendStatus !== 'RESOLVED') {
+            unresolved.push({
+              memberId: String(element.id ?? ''),
+              sequence,
+              role: item?.role || item?.type || null,
+              reason: item?.bendReason || 'shear-collision-actual-bend-unresolved',
+            });
+            continue;
+          }
+          const pathValue = selectedPath(item, sequence);
+          const worldPath = shearPathToWorld(
+            pathValue,
+            axial,
+            placement,
+            element,
+            sequence,
+            item,
+            memberType,
+          );
+          if (worldPath) paths.push(worldPath);
+          else {
+            unresolved.push({
+              memberId: String(element.id ?? ''),
+              sequence,
+              role: item?.role || item?.type || null,
+              reason: 'shear-collision-world-path-invalid',
+            });
+          }
+        }
+        sequence += 1;
+      }
+    }
+  }
+
+  return { resolved: unresolved.length === 0, paths, unresolved };
 }
 
 function collect(element, nodes, layout, memberType, accumulator, options) {

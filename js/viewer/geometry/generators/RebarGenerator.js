@@ -19,6 +19,7 @@ import {
   REBAR_RENDER_OPTIONS,
 } from '../../../constants/rebarPlacementRules.js';
 import { createLogger } from '../../../utils/logger.js';
+import { spreadCenteredAxialPositions } from '../../../data/extractors/rebar3d/rebarAxialPositions.js';
 
 const log = createLogger('viewer:rebar');
 
@@ -240,23 +241,6 @@ const LEG_DIRECTION_QUATERNIONS = {
 };
 
 /**
- * 区間内のループ中心を材軸方向に並べる
- *
- * 本数はピッチで割った数とし、区間内で中央寄せに配置する。
- * 区間がピッチに満たない場合も1組は置く（配筋が無いように見えるのを避ける）。
- * @param {number} segmentStart - 区間始点の材軸座標（部材中心が原点）
- * @param {number} segmentLength - 区間長 [mm]
- * @param {number} pitch - ピッチ [mm]
- * @returns {number[]} ループ中心の材軸座標
- */
-function spreadLoopPositions(segmentStart, segmentLength, pitch) {
-  const count = Math.max(1, Math.floor(segmentLength / pitch));
-  const spread = (count - 1) * pitch;
-  const first = segmentStart + (segmentLength - spread) / 2;
-  return Array.from({ length: count }, (_, index) => first + index * pitch);
-}
-
-/**
  * 矩形ループ1組を4辺の直線に分解して行列を積む
  *
  * 角の折り曲げ・フックは表現せず、水平辺を呼び径ぶん伸ばして角を閉じる。
@@ -371,7 +355,11 @@ function collectHoopMatrices(placement, layout, accumulator) {
     if (!(segmentLength > 0) || !(segment.pitch > 0)) continue;
     const segmentStart = placement.length * (segment.startRatio - 0.5);
 
-    for (const axialPos of spreadLoopPositions(segmentStart, segmentLength, segment.pitch)) {
+    for (const axialPos of spreadCenteredAxialPositions(
+      segmentStart,
+      segmentLength,
+      segment.pitch,
+    )) {
       for (const loop of segment.loops) {
         const isCircle = loop.type === 'CIRCLE';
         // 矩形は1組が4辺まとめて積まれるため、積む前に必要数ぶんの空きを確かめる

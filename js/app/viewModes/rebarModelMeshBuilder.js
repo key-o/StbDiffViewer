@@ -22,6 +22,10 @@ import { buildSlabRebarProductionRenderPlan } from '../../data/extractors/rebar3
 import { buildWallRebarProductionRenderPlan } from '../../data/extractors/rebar3d/smallOpeningWallProductionRenderPlan.js';
 import { buildFoundationRebarRenderPlan } from '../../data/extractors/rebar3d/foundationRebarPlacement.js';
 import { buildStripFootingRebarRenderPlan } from '../../data/extractors/rebar3d/stripFootingRebarPlacement.js';
+import { buildBeamStirrupMemberLayoutMaps } from '../../data/extractors/rebar3d/beamStirrupMemberPlacement.js';
+import { buildColumnHoopMemberLayoutMap } from '../../data/extractors/rebar3d/columnHoopMemberPlacement.js';
+import { decorateShearRebarLayoutMap } from '../../data/extractors/rebar3d/shearRebarActualBendDecorator.js';
+import { resolveConcreteAccommodationRule } from '../../config/concreteAccommodationProjectDetailing.js';
 import { buildBeamAnchorageMaps } from '../../data/extractors/rebar3d/beamAnchoragePlacement.js';
 import { buildBeamCutoffMaps } from '../../data/extractors/rebar3d/beamCutoffPlacement.js';
 import { buildFoundationBeamAnchorageRenderPlan2023 } from '../../data/extractors/rebar3d/foundationBeamAnchorageRenderPlan2023.js';
@@ -61,6 +65,7 @@ export function createRebarModelMeshes(
   if (!xmlDoc || !REBAR_MEMBERS?.[memberKey] || !REBAR_KINDS?.[kindKey]) return [];
 
   const projectDetailing = resolveProjectDetailing(options);
+  const concreteAccommodationResolution = resolveConcreteAccommodationRule({ projectDetailing });
   const kind = REBAR_KINDS[kindKey];
   const placementConflictActivation = resolveRebarPlacementConflictActivation(projectDetailing);
   const placementConflictReady =
@@ -197,6 +202,39 @@ export function createRebarModelMeshes(
     () => kind.buildBeamLayouts(xmlDoc, options),
   );
   const scanTag = kind.withAnchorage ? cachedScanTag(xmlDoc, options) : null;
+  const concreteAccommodationShearLayouts =
+    kind.withAnchorage &&
+    memberKey === 'beam' &&
+    concreteAccommodationResolution.resolved &&
+    concreteAccommodationResolution.active
+      ? cachedRebarFact(xmlDoc, options, 'beam.hoop.collisionLayouts', () => {
+          const built = buildBeamStirrupMemberLayoutMaps(xmlDoc, {
+            ...options,
+            scanTag,
+          });
+          return {
+            beam: decorateShearRebarLayoutMap(built.beam, { memberType: 'beam' }),
+            girder: decorateShearRebarLayoutMap(built.girder, { memberType: 'beam' }),
+          };
+        })
+      : null;
+  const concreteAccommodationColumnHoopLayouts =
+    kind.withAnchorage &&
+    memberKey === 'beam' &&
+    concreteAccommodationResolution.resolved &&
+    concreteAccommodationResolution.active
+      ? cachedRebarFact(xmlDoc, options, 'column.hoop.collisionLayouts', () =>
+          decorateShearRebarLayoutMap(
+            buildColumnHoopMemberLayoutMap(xmlDoc, {
+              ...options,
+              scanTag,
+              projectDetailing,
+              modelSource,
+            }),
+            { memberType: 'column' },
+          ),
+        )
+      : null;
 
   const topStoryColumnHeadRenderPlan =
     kind.withAnchorage && memberKey === 'column'
@@ -393,6 +431,17 @@ export function createRebarModelMeshes(
         appendixA2CornerAnchorageMap:
           memberKey === 'girder' ? anchoragesAfterPlacementConflict?.girder || null : null,
         appendixA2MemberTag: memberKey === 'girder' ? 'StbGirder' : 'StbBeam',
+        concreteAccommodationCollisionContext: kind.withAnchorage
+          ? {
+              beamElements,
+              girderElements,
+              columnElements,
+              beamLayouts,
+              columnLayouts,
+              beamShearLayouts: concreteAccommodationShearLayouts,
+              columnHoopLayouts: concreteAccommodationColumnHoopLayouts,
+            }
+          : null,
         projectDetailing,
       }),
     );

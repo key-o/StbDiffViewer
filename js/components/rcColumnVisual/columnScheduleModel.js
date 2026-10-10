@@ -689,6 +689,61 @@ function buildCircularColumnGeometry(sectionData, options) {
 }
 
 /**
+ * 断面リスト用断面データと1つの配筋位置(柱頭/柱脚/全断面)から、描画幾何の入力を作る。
+ * @param {Object} sectionData columnSectionListExtractor のレンダリング用断面データ
+ * @param {Object} arrangement sectionData.arrangements の1要素
+ */
+export function columnScheduleInputFromSection(sectionData, arrangement) {
+  const mainBar = arrangement?.mainBar || null;
+  const cover = arrangement?.cover ?? sectionData.cover;
+  const hoop = arrangement?.hoop || null;
+  const coreBar = arrangement?.coreBar || null;
+
+  if (sectionData.isCircular || sectionData.diameter > 0) {
+    return {
+      diameter: sectionData.diameter,
+      cover,
+      mainBar: mainBar
+        ? {
+            count: mainBar.countTotal ?? mainBar.count,
+            countTotal: mainBar.countTotal,
+            dia: mainBar.dia,
+            center: mainBar.center ?? mainBar.dt,
+          }
+        : null,
+      hoop,
+      coreBar,
+    };
+  }
+  return {
+    width: sectionData.width,
+    height: sectionData.height,
+    cover,
+    mainBar: mainBar
+      ? {
+          countX: mainBar.countX,
+          countY: mainBar.countY,
+          countTotal: mainBar.countTotal,
+          dia: mainBar.dia,
+          diaSub: mainBar.diaSub,
+          mainDirection: mainBar.mainDirection,
+          layers: mainBar.layers,
+          firstLayerExtraGroups: mainBar.firstLayerExtraGroups,
+          secondLayer: mainBar.secondLayer,
+          centerStartX: mainBar.centerStartX,
+          centerEndX: mainBar.centerEndX,
+          centerStartY: mainBar.centerStartY,
+          centerEndY: mainBar.centerEndY,
+          dtX: mainBar.dtX,
+          dtY: mainBar.dtY,
+        }
+      : null,
+    hoop,
+    coreBar,
+  };
+}
+
+/**
  * 柱断面リストの描画幾何を生成する。
  * @param {Object} sectionData ColumnSectionListRenderer.prepareSvgData() 相当
  * @param {{coverFaces?:Object,sharedSlotCounts?:Object}} options

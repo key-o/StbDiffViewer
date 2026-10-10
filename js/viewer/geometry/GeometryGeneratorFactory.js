@@ -90,12 +90,6 @@ const GENERATOR_MAP = {
     },
     method: 'createSlabMeshes',
   },
-  ShearWall: {
-    get class() {
-      return WallGenerator;
-    },
-    method: 'createWallMeshes',
-  },
   Wall: {
     get class() {
       return WallGenerator;

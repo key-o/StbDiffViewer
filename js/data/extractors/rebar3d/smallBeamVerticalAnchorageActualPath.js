@@ -1,5 +1,5 @@
 /**
- * @fileoverview R12-S 一般小梁 VERTICAL_90 path planをR10 actual-arc RebarPathへ接続する。
+ * @fileoverview R12-S 小梁（一般/片持ち）VERTICAL_90 path planをR10 actual-arc RebarPathへ接続する。
  *
  * R12-Rのr10InputだけをR10 buildAnchoredHookPath()へ渡し、生成された中心線の
  * validation・実曲げArc・中心線長をpath planと独立照合する。

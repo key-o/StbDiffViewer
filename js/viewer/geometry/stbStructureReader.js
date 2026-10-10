@@ -243,10 +243,16 @@ export function refreshCachedSectionsForType(modelKey, xmlDoc, elementType) {
  * @param {Object} options - オプション
  * @param {string} options.modelKey - モデルキー ('A' or 'B') - globalStateに保存する場合に指定
  * @param {boolean} options.saveToGlobalState - trueの場合、パース結果をglobalStateに保存
+ * @param {boolean} options.exposeDebugState - falseの場合、windowの診断用グローバルへ公開しない
  * @return {Object} 解析結果を含むオブジェクト (Three.js形式のデータを含む)
  */
 export function parseStbFile(xmlDoc, options = {}) {
-  const { modelKey, saveToGlobalState = false, forceReparse = false } = options;
+  const {
+    modelKey,
+    saveToGlobalState = false,
+    forceReparse = false,
+    exposeDebugState = true,
+  } = options;
 
   // キャッシュチェック: modelKeyが指定されていてキャッシュがあれば再利用
   if (modelKey && !forceReparse && parseCache.has(modelKey)) {
@@ -450,7 +456,7 @@ export function parseStbFile(xmlDoc, options = {}) {
   );
 
   // 5. グローバル公開（診断/デバッグ用）
-  if (typeof window !== 'undefined') {
+  if (exposeDebugState && typeof window !== 'undefined') {
     window.stbParsedData = {
       nodes,
       steelSections,

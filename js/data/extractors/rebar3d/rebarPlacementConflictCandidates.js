@@ -16,7 +16,7 @@ import {
   DEFAULT_REBAR_PLACEMENT_RULE_SET,
   resolveRebarPairConflict,
 } from './rebarPlacementRuleSet.js';
-import { buildRebarConflictDecisionTrace } from './rebarDecisionTrace.js';
+import { buildRebarConflictDecisionTrace } from './rebarPlacementDecisionTrace.js';
 import {
   resolveRebarPlacementConflictActivation,
   resolveRebarPlacementConflictOverride,

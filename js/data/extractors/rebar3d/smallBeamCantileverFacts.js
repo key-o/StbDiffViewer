@@ -35,7 +35,7 @@ function oppositeSides(left, right) {
  * 図9-3(3)の片持ち小梁カットオフ寸法を純粋factsへ変換する。
  *
  * 上端2段筋のカットオフは支持面から自由端側へ 2L/3 を基準とし、さらに15d延長する。
- * 図中の自由端100程度は近似注記であり、production cut stationには使用しない。
+ * 図中の自由端100程度は自由端面から折曲げ位置までの材軸方向近似寸法であり、production stationには使用しない。
  */
 export function resolveSmallBeamCantileverPattern({ cantileverLengthMm, barDiaMm } = {}) {
   const length = Number(cantileverLengthMm);
@@ -94,16 +94,18 @@ export function resolveSmallBeamCantileverPattern({ cantileverLengthMm, barDiaMm
       fitsWithinCantilever: cutoffFromSupportMm <= length + TOLERANCE_MM,
     },
     freeTip: {
-      returnApproxMm: 100,
+      bendInsetFromTipApproxMm: 100,
+      dimensionAxis: 'MEMBER_AXIS',
       exact: false,
       productionReady: false,
-      reason: 'cantilever-free-tip-100mm-is-approximate-detail',
+      reason: 'cantilever-free-tip-bend-inset-100mm-is-approximate-detail',
     },
     topSupportAnchorage: {
       lengthKind: 'L2',
       projectionRule: 'max(La,3B/4)',
       productionReady: false,
-      reason: 'cantilever-top-L2-La-3B4-geometry-not-yet-resolved',
+      productionPathConnected: true,
+      reason: 'cantilever-top-support-anchorage-requires-instance-production-gate',
     },
     bottomSupportAnchorage: {
       straight: straightBottom,
@@ -199,6 +201,36 @@ export function resolveSmallBeamCantileverSpanFact(params = {}) {
   return { ...geometry, ...pattern };
 }
 
+function supportAnchorageFacts(group) {
+  if (group?.role !== 'top') return null;
+
+  const requirement = group?.requirement || null;
+  const projectionAvailability = group?.projectionAvailability || null;
+  const tailAvailability = group?.tailAvailability || null;
+  const totalLengthAvailability = group?.totalLengthAvailability || null;
+  const availabilityResolved =
+    requirement?.ok === true &&
+    projectionAvailability?.resolved === true &&
+    tailAvailability?.resolved === true &&
+    totalLengthAvailability?.resolved === true;
+  const availabilityOk =
+    availabilityResolved &&
+    projectionAvailability?.ok === true &&
+    tailAvailability?.ok === true &&
+    totalLengthAvailability?.ok === true;
+
+  return {
+    source: 'R12-AA-cantilever-top-support-anchorage-facts',
+    requirement,
+    projectionAvailability,
+    tailAvailability,
+    totalLengthAvailability,
+    availabilityResolved,
+    availabilityOk,
+    pathProductionConnected: true,
+  };
+}
+
 function groupSummary(group, geometry) {
   const pattern = resolveSmallBeamCantileverPattern({
     cantileverLengthMm: geometry.cantileverLengthMm,
@@ -210,6 +242,7 @@ function groupSummary(group, geometry) {
     grade: group?.grade || null,
     barCount: Array.isArray(group?.bars) ? group.bars.length : null,
     pattern,
+    topSupportAnchorageFacts: supportAnchorageFacts(group),
   };
 }
 

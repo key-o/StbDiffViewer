@@ -2,8 +2,8 @@
  * @fileoverview R12 小梁定着の適用範囲を geometry 非依存で解決する strategy。
  *
  * 標準値の数値解決は REBAR_STANDARD_RULES に委譲し、この層では日建連 §9 の
- * 「小梁を大梁へ定着する」適用範囲だけを判定する。片持ち小梁上端筋は §3-2 の
- * Lb 対象外なので、一般小梁用 resolver へ流さず fail-closed にする。
+ * 「小梁を大梁へ定着する」適用範囲だけを判定する。一般小梁上端筋は L2 / Lb / B/2、
+ * 片持ち小梁上端筋は §9-3(3) の L2 / La / 3B/4 を別 resolver へ流す。
  */
 
 import { REBAR_STANDARD_RULES } from '../../../constants/rebarStandardRules.js';
@@ -25,8 +25,8 @@ function specialRequirement(kind, reason, input = {}) {
 /**
  * 小梁上端筋の大梁内折曲げ定着 requirement を解決する。
  *
- * 一般小梁かつ大梁支持の場合だけ L2 / Lb / B/2 resolver を適用する。
- * 片持ち小梁上端筋、柱支持、小梁支持、未解決支持はこの標準経路へ流さない。
+ * 一般小梁は L2 / Lb / B/2、片持ち小梁は L2 / La / 3B/4 を使用する。
+ * 柱支持、小梁支持、未解決支持はどちらの標準経路にも流さない。
  */
 export function resolveSmallBeamTopAnchorageRequirement({
   cantilever = false,
@@ -36,31 +36,41 @@ export function resolveSmallBeamTopAnchorageRequirement({
   fc,
   grade,
 } = {}) {
-  if (cantilever === true) {
-    return specialRequirement('TOP', 'cantilever-top-lb-not-applicable', {
-      cantilever: true,
-      supportType: supportType || null,
-    });
-  }
-
   if (supportType !== 'GIRDER') {
-    return specialRequirement('TOP', `unsupported-top-support:${supportType || 'UNKNOWN'}`, {
-      cantilever: false,
+    const reason =
+      cantilever === true && supportType === 'BEAM'
+        ? 'cantilever-tip-beam-figure-9-4'
+        : `unsupported-top-support:${supportType || 'UNKNOWN'}`;
+    return specialRequirement('TOP', reason, {
+      cantilever: cantilever === true,
       supportType: supportType || null,
+      sourceFigure: reason === 'cantilever-tip-beam-figure-9-4' ? '9-4' : null,
     });
   }
 
-  const resolved = REBAR_STANDARD_RULES.resolveSmallBeamTopAnchorage({
-    barDiaMm,
-    supportWidthMm,
-    fc,
-    grade,
-  });
+  const resolved =
+    cantilever === true
+      ? REBAR_STANDARD_RULES.resolveSmallBeamCantileverTopAnchorage({
+          barDiaMm,
+          supportWidthMm,
+          fc,
+          grade,
+        })
+      : REBAR_STANDARD_RULES.resolveSmallBeamTopAnchorage({
+          barDiaMm,
+          supportWidthMm,
+          fc,
+          grade,
+        });
   return {
     ...resolved,
     kind: 'TOP',
-    reason: resolved.ok ? null : 'top-anchorage-length-unresolved',
-    cantilever: false,
+    reason: resolved.ok
+      ? null
+      : cantilever === true
+        ? 'cantilever-top-anchorage-length-unresolved'
+        : 'top-anchorage-length-unresolved',
+    cantilever: cantilever === true,
     supportType,
     source: STANDARD_SOURCE,
   };
@@ -78,10 +88,15 @@ export function resolveSmallBeamBottomAnchorageRequirement({
   barDiaMm,
 } = {}) {
   if (supportType !== 'GIRDER') {
-    return specialRequirement('BOTTOM', `unsupported-bottom-support:${supportType || 'UNKNOWN'}`, {
+    const reason =
+      cantilever === true && supportType === 'BEAM'
+        ? 'cantilever-tip-beam-figure-9-4'
+        : `unsupported-bottom-support:${supportType || 'UNKNOWN'}`;
+    return specialRequirement('BOTTOM', reason, {
       cantilever: cantilever === true,
       hooked: hooked === true,
       supportType: supportType || null,
+      sourceFigure: reason === 'cantilever-tip-beam-figure-9-4' ? '9-4' : null,
     });
   }
 

@@ -1,5 +1,5 @@
 /**
- * @fileoverview R12-W 一般小梁 VERTICAL_90 production gateを3D consumer向けplanへ集約する。
+ * @fileoverview R12-W 小梁（一般/片持ち）VERTICAL_90 production gateを3D consumer向けplanへ集約する。
  *
  * R12 requirement -> candidate -> mode -> path plan -> actual path -> continuity -> identity
  * -> production gate の既存pipelineを再利用し、CENTERLINE_READYになったbarだけを

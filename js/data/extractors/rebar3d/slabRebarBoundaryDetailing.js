@@ -279,8 +279,7 @@ function markThrough(plan, a, b, support) {
       ...sideMetadata(current.side, 'THROUGH', {
         [`${current.side === 'start' ? 'boundaryStart' : 'boundaryEnd'}ThroughSlabId`]:
           other.slabId,
-        [`${current.side === 'start' ? 'boundaryStart' : 'boundaryEnd'}EdgeKey`]:
-          current.edgeKey,
+        [`${current.side === 'start' ? 'boundaryStart' : 'boundaryEnd'}EdgeKey`]: current.edgeKey,
         [`${current.side === 'start' ? 'boundaryStart' : 'boundaryEnd'}SupportMemberId`]:
           support?.memberId || null,
       }),

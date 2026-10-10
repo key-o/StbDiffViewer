@@ -9,6 +9,9 @@
  * - center_* がなく STB depth_cover が明示されていれば、かぶり + 1段筋半径で主筋芯を求める
  * - 位置情報がなければ基準DXF由来の作図プロファイル（HOOP芯50mm・主筋芯72mm）で補う
  * - 作図かぶりoverride時は従来どおりHOOP芯を優先し、center欠損面は共通オフセットで補う
+ * - 主筋位置がcenter(dt)・かぶりで指定された面は、STPを主筋に接する位置
+ *   (主筋芯 - 主筋半径 - STP半径)へ合わせる。補完値の面は基準位置を初期値とし、
+ *   主筋がSTPの内側に収まるよう同位置より外側(かぶり側)へ寄せる
  * - 多段筋は重心間距離、段筋あき、日建連2023 表2-4の順に段間隔を解決する
  */
 
@@ -243,6 +246,45 @@ function createHorizontalLayers(bar, side, context) {
   return result;
 }
 
+/** 主筋位置がSTBのcenter(dt)・かぶりで指定された面。既定プロファイル補完の面は含めない。 */
+const SOURCE_SPECIFIED_FACE_SOURCES = new Set([
+  'stb-center',
+  'stb-apply-center',
+  'stb-cover',
+  'stb-apply-cover',
+  'standard-cover',
+]);
+
+/**
+ * STP芯(各面からの距離)。主筋の外面にSTPの内面が接する位置より内側へは置かない。
+ * 主筋位置がSTBかぶり・center由来でSTP基準位置と独立に決まる場合でも、
+ * 主筋がSTP線上や外側へ描かれないようにする。
+ * 主筋位置がcenter(dt)またはかぶりで指定された面は、STPを主筋へ接する位置に合わせる。
+ */
+function resolveStirrupFaces({ hoopFaces, mainFaces, faceSources, positionData, stirrupRadius }) {
+  const topRadius = beamLayerLayoutRadiusMm(
+    normalizeBeamRebarLayers(positionData?.topBar, DEFAULT_MAIN_DIA)[0],
+    DEFAULT_MAIN_DIA,
+  );
+  const bottomRadius = beamLayerLayoutRadiusMm(
+    normalizeBeamRebarLayers(positionData?.bottomBar, DEFAULT_MAIN_DIA)[0],
+    DEFAULT_MAIN_DIA,
+  );
+  const sideRadius = Math.max(topRadius, bottomRadius);
+  const mainRadii = { top: topRadius, bottom: bottomRadius, left: sideRadius, right: sideRadius };
+  return Object.fromEntries(
+    BEAM_FACE_KEYS.map((key) => {
+      const hoop = hoopFaces[key];
+      const main = Number(mainFaces?.[key]);
+      if (!Number.isFinite(main)) return [key, hoop];
+      const insideLimit = main - mainRadii[key] - stirrupRadius;
+      if (SOURCE_SPECIFIED_FACE_SOURCES.has(faceSources?.[key]))
+        return [key, Math.max(stirrupRadius, insideLimit)];
+      return [key, Math.max(stirrupRadius, Math.min(hoop, insideLimit))];
+    }),
+  );
+}
+
 export function buildBeamScheduleGeometry(positionData, options = {}) {
   const width = Number(positionData?.width) || 0;
   const depth = Number(positionData?.depth) || 0;
@@ -282,12 +324,19 @@ export function buildBeamScheduleGeometry(positionData, options = {}) {
 
   const stirrup = positionData?.stirrup || null;
   const hasStirrup = !!stirrup?.dia;
+  const stirrupFaces = resolveStirrupFaces({
+    hoopFaces,
+    mainFaces,
+    faceSources: positionResolution.faceSources,
+    positionData,
+    stirrupRadius: hasStirrup ? beamBarRadiusMm(stirrup.dia, 10) : 0,
+  });
   const stirrupBounds = hasStirrup
     ? {
-        left: hoopFaces.left,
-        right: width - hoopFaces.right,
-        top: hoopFaces.top,
-        bottom: depth - hoopFaces.bottom,
+        left: stirrupFaces.left,
+        right: width - stirrupFaces.right,
+        top: stirrupFaces.top,
+        bottom: depth - stirrupFaces.bottom,
       }
     : null;
   const mainCenters = {
@@ -380,7 +429,7 @@ export function buildBeamScheduleGeometry(positionData, options = {}) {
     covers: sourceCovers,
     sourceCovers,
     layerSpacing,
-    scheduleHoopFaces: hoopFaces,
+    scheduleHoopFaces: stirrupFaces,
     scheduleMainFaces: mainFaces,
     positionSources: positionResolution.faceSources,
     unresolvedPlacement: [...positionResolution.unresolved, ...webUnresolved],

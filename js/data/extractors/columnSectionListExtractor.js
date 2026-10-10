@@ -858,6 +858,21 @@ function convertSectionForRender(section, storyUsages) {
 }
 
 /**
+ * 1つのStbSecColumn_RCを断面リストと同じレンダリング用データへ変換する。
+ * 配筋は柱脚→全断面→柱頭の優先順で1つを選び、その位置を返す。
+ * @param {Element} sectionElement - StbSecColumn_RC要素
+ * @returns {{sectionData:Object, arrangement:Object|null}}
+ */
+export function extractRcColumnSectionFigureSource(sectionElement) {
+  const section = extractRcColumnSectionDetail(sectionElement);
+  const sectionData = convertSectionForRender(section, []);
+  return {
+    sectionData,
+    arrangement: selectPreferredArrangement(section.arrangements),
+  };
+}
+
+/**
  * RC柱断面リスト用のデータをグリッド形式で抽出・整理
  * 階を行、符号を列とした2次元グリッド構造を返します
  * @param {Document} xmlDoc - XMLドキュメント

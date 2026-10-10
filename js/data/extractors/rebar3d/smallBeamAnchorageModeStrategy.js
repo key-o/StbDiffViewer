@@ -1,5 +1,5 @@
 /**
- * @fileoverview R12-Q-C 一般小梁上端筋の定着mode選択strategy。
+ * @fileoverview R12-Q-C 小梁上端筋（一般/片持ち）の定着mode選択strategy。
  *
  * 90°鉛直candidateが成立する場合だけVERTICAL_90を選択する。
  * 不成立時は日建連§9-2の斜め定着等が候補となり得るため、別modeを推定せずalternativeRequiredを返す。
