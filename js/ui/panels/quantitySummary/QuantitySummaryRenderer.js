@@ -9,7 +9,7 @@ import {
 } from './QuantitySummaryState.js';
 
 const STATUS_LABELS = Object.freeze({
-  CALCULATED: '確定',
+  CALCULATED: '算定済',
   PARTIAL: '部分',
   INSUFFICIENT_DATA: '不足',
   UNSUPPORTED: '未対応',
@@ -116,7 +116,47 @@ export function renderStatusCounts(statusCounts = {}) {
     .join(' / ');
 }
 
-export function renderQuantitySummaryControls(container, state) {
+/** RC限定の明示診断のみを表示し、未診断やrevision更新を未判定と区別する。 */
+export function renderWorkingJoinAudit(container, editing, audit, modelSide) {
+  if (!container) return;
+  if (!editing?.active || modelSide === 'B') {
+    container.textContent = '';
+    container.hidden = true;
+    return;
+  }
+  container.hidden = false;
+  if (!audit || audit.sessionId !== editing.sessionId) {
+    container.textContent =
+      'モデルA RC取り合い診断：未実施。編集リボンの「RC取り合い」で検査できます。';
+    return;
+  }
+  if (audit.workingRevision !== editing.workingRevision) {
+    container.textContent =
+      'モデルA RC取り合い診断：編集後に更新されていません。再診断が必要です。';
+    return;
+  }
+  const reductionM3 = (audit.estimatedReductionMm3 / 1e9).toFixed(4);
+  const verification = audit.quantityReconciliation?.failed
+    ? ' / QuantityService部材数量照合：数量再計算に失敗（未確認）'
+    : audit.quantityReconciliation
+      ? ` / QuantityService部材数量照合：一致 ${audit.quantityReconciliation.matched}件、不一致 ${audit.quantityReconciliation.mismatch}件、未確認 ${audit.quantityReconciliation.unavailable}件`
+      : audit.appliedCount
+        ? ' / QuantityService部材数量照合：再計算待ち（未確認）'
+        : '';
+  const applied = audit.appliedCount
+    ? ` / 直前適用 ${audit.appliedCount}部材（概算低減 ${(audit.appliedReductionMm3 / 1e9).toFixed(4)} m³）`
+    : '';
+  container.textContent =
+    `モデルA RC取り合い限定診断：調整候補 ${audit.proposalCount}部材 / 保留警告 ${audit.warningCount}件` +
+    ` / 残候補の概算低減 ${reductionM3} m³${applied}${verification}。` +
+    '未対応の接合・全体の重複は検査していません。';
+}
+
+export function renderQuantitySummaryControls(
+  container,
+  state,
+  { joinAuditAvailable = false } = {},
+) {
   if (!container) return;
   const dimensionOptions = [
     ['storyName', '階'],
@@ -129,7 +169,7 @@ export function renderQuantitySummaryControls(container, state) {
     ['lengthMm', '長さ'],
     ['surfaceAreaMm2', '面積'],
     ['grossVolumeMm3', '総体積'],
-    ['netVolumeMm3', '正味体積'],
+    ['netVolumeMm3', '部材正味体積'],
     ['concreteVolumeMm3', 'コンクリート体積'],
     ['structuralSteelVolumeMm3', '鉄骨体積'],
   ];
@@ -142,7 +182,7 @@ export function renderQuantitySummaryControls(container, state) {
     `${digits}桁`,
   ]);
   const statuses = [
-    ['CALCULATED', '確定'],
+    ['CALCULATED', '算定済'],
     ['PARTIAL', '部分確定'],
     ['INSUFFICIENT_DATA', 'データ不足'],
     ['UNSUPPORTED', '未対応'],
@@ -193,7 +233,7 @@ export function renderQuantitySummaryControls(container, state) {
       </label>
     </div>
     <fieldset class="quantity-summary-statuses">
-      <legend>Status</legend>
+      <legend title="部材単位の算定状況。部材間の重複控除を保証しません">Status（部材単位）</legend>
       ${statuses
         .map(
           ([status, label]) => `
@@ -202,9 +242,15 @@ export function renderQuantitySummaryControls(container, state) {
         )
         .join('')}
     </fieldset>
+    ${
+      state.measure?.endsWith('VolumeMm3')
+        ? '<div class="quantity-summary-message" role="note" data-quantity-overlap-note>この体積は部材別数量の集計です。「部材正味体積」は部材内部の控除を含みますが、建物全体の3DソリッドUnionによる重複控除済み体積ではありません。RC取り合いを調整しても未判定の重複が残り得ます。Statusの「算定済」は全体正味数量の確定を意味しません。</div>'
+        : ''
+    }
     <div class="quantity-summary-export-actions">
       <button type="button" data-quantity-export="summary">集計CSV</button>
       <button type="button" data-quantity-export="facts">部材CSV</button>
+      <button type="button" data-quantity-export="join-audit" title="モデルAの現行RC取り合い診断のみ。概算控除量、保留警告、部材間重複未検証を出力"${joinAuditAvailable ? '' : ' disabled'}>RC診断CSV</button>
     </div>
   `;
 }

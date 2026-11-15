@@ -114,16 +114,15 @@ function getSectionDimension(sectionData) {
   );
 }
 
-export async function exportConfiguredColumnSectionListToDxf(
-  gridData,
-  filename = 'rc-column-section-list',
-  stbName = '',
-  options = {},
-) {
+/**
+ * 断面リストの図形（モデル座標のlines/circles/texts）を生成する。DXF出力とシート配置で共有する。
+ * @returns {{bounds,lines2D,circles2D,texts2D,stories,symbols,scheduleProfile}|null}
+ */
+export function buildConfiguredColumnSectionListEntities(gridData, stbName = '', options = {}) {
   const { stories, symbols, grid } = gridData;
   if (!stories?.length || !symbols?.length) {
     log.warn('断面データが空のためDXFを出力できません');
-    return;
+    return null;
   }
 
   const scheduleProfile = resolveRcScheduleProfile(options.scheduleProfile || {});
@@ -257,17 +256,22 @@ export async function exportConfiguredColumnSectionListToDxf(
     });
   });
 
+  return { bounds, lines2D, circles2D, texts2D, stories, symbols, scheduleProfile };
+}
+
+export async function exportConfiguredColumnSectionListToDxf(
+  gridData,
+  filename = 'rc-column-section-list',
+  stbName = '',
+  options = {},
+) {
+  const built = buildConfiguredColumnSectionListEntities(gridData, stbName, options);
+  if (!built) return;
   await finalizeSectionListDxf({
-    bounds,
-    lines2D,
-    circles2D,
-    texts2D,
+    ...built,
     filename,
     logLabel: '柱断面リストDXF生成',
-    stories,
-    symbols,
     stbName,
-    scheduleProfile,
     dxfProfile: options.dxfProfile,
   });
 }

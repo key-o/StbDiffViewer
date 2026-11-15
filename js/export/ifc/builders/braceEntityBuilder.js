@@ -5,6 +5,7 @@
  */
 
 import { generateIfcGuid } from '../StepWriter.js';
+import { encodeLinearOffsetMetadata } from '../../../common-ifc/pipeline/StbLinearOffsetMetadata.js';
 import { calculateBeamBasis, rotateVectorAroundAxis } from '../../../data/geometry/vectorMath.js';
 
 /**
@@ -22,8 +23,17 @@ import { calculateBeamBasis, rotateVectorAroundAxis } from '../../../data/geomet
  * @returns {number} ブレースエンティティID
  */
 export function createBraceEntities(w, params) {
-  const { name, startPoint, endPoint, length, rotation, kindStructure, profileId, bodyContext } =
-    params;
+  const {
+    name,
+    startPoint,
+    endPoint,
+    length,
+    rotation,
+    kindStructure,
+    sourceLinearOffsets,
+    profileId,
+    bodyContext,
+  } = params;
 
   // ブレースの方向ベクトル（正規化）
   const dx = endPoint.x - startPoint.x;
@@ -101,7 +111,7 @@ export function createBraceEntities(w, params) {
     generateIfcGuid(),
     null, // OwnerHistory
     name,
-    null, // Description
+    encodeLinearOffsetMetadata('brace', sourceLinearOffsets), // STB-origin node offsets
     kindStructure, // ObjectType: kind_structure (S)
     `#${braceLocalPlacement}`,
     `#${productShape}`,

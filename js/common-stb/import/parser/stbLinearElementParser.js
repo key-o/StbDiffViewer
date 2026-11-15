@@ -107,6 +107,7 @@ function extractBeamLikeElements(xmlDoc, elementType) {
     // rotate属性を取得（大梁・小梁は梁天端中心、ブレースはジオメトリ中心を回転軸とする）
     const rotate = el.getAttribute('rotate');
     const kindStructure = el.getAttribute('kind_structure'); // eslint-disable-line camelcase
+    const foundationAttribute = el.getAttribute('isFoundation');
 
     if (id && idNodeStart && idNodeEnd && idSection) {
       const data = {
@@ -117,6 +118,9 @@ function extractBeamLikeElements(xmlDoc, elementType) {
         name: name,
         guid: guid || undefined,
         kind_structure: kindStructure || 'S', // eslint-disable-line camelcase
+        ...(foundationAttribute === 'true' || foundationAttribute === 'false'
+          ? { isFoundation: foundationAttribute === 'true' }
+          : {}),
       };
 
       // SS7原典配置情報（StbExtensionsから読み込み）

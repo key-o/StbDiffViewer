@@ -44,6 +44,9 @@ export class FrustumCuller {
 
     /** @type {THREE.Box3} 再利用用の一時ボックス */
     this._tempBox = new THREE.Box3();
+
+    /** Meshes hidden by this culler (not by the user display filters). */
+    this._autoHidden = new Set();
   }
 
   /**
@@ -145,7 +148,12 @@ export class FrustumCuller {
         if (child.userData && child.userData.skipCulling) continue;
 
         const visible = this.isVisible(child);
-        child.visible = visible;
+        if (!visible && child.visible) {
+          this._autoHidden.add(child);
+          child.visible = false;
+        } else if (visible && this._autoHidden.delete(child)) {
+          child.visible = true;
+        }
 
         if (visible) {
           this.visibleCount++;
@@ -154,6 +162,15 @@ export class FrustumCuller {
         }
       }
     }
+  }
+
+  /** AR開始時にカリングだけが非表示にしたメッシュを戻す。 */
+  restoreCulledVisibility() {
+    for (const child of this._autoHidden) {
+      child.visible = true;
+    }
+    this._autoHidden.clear();
+    this.culledCount = 0;
   }
 
   /**

@@ -1,6 +1,8 @@
 /**
- * @fileoverview Phase 6 の数値 MOVE / ALIGN / COPY を独立モデル編集パネルから共通 CAD operation service へ接続する。
+ * @fileoverview Phase 6 の数値 MOVE / ALIGN / COPY を要素情報パネルから共通 CAD operation service へ接続する。
  *
+ * 選択要素ごとの数値入力はここ（要素情報パネル）に置き、モデル編集リボンの「修正」タブは
+ * 各操作の欄を開くコマンドと、関連節点追従・ギズモ位置の設定だけを持つ。
  * 選択 Object3D を直接変更せず semantic selection -> Working Document semantic Command の順に解決する。
  * MOVE は Working Session の追従設定に応じて semantic Node または member offset、
  * ALIGN は semantic Node grip、COPY は semantic element identity を正本として1 transaction化する。
@@ -23,7 +25,7 @@ function isReadOnlySelection(identity) {
   return identity && ['B', 'onlyB'].includes(identity.modelSource);
 }
 
-function mountUnavailablePanel(content, message) {
+function createEditor(titleText) {
   const editor = document.createElement('div');
   editor.className = 'cad-operation-editor';
   editor.style.marginTop = '12px';
@@ -33,8 +35,13 @@ function mountUnavailablePanel(content, message) {
   const title = document.createElement('div');
   title.style.fontWeight = 'var(--font-weight-bold)';
   title.style.marginBottom = '4px';
-  title.textContent = 'CAD操作';
+  title.textContent = titleText;
   editor.appendChild(title);
+  return editor;
+}
+
+function mountUnavailablePanel(content, message) {
+  const editor = createEditor('CAD操作');
 
   const note = document.createElement('div');
   note.className = 'add-member-summary';
@@ -97,6 +104,15 @@ function pointFromInputs(inputs) {
   return { x: inputs.x.value, y: inputs.y.value, z: inputs.z.value };
 }
 
+/** リボンの「修正」コマンドが data-cad-operation で探してフォーカスする操作単位の欄。 */
+function createOperationSection(editor, kind) {
+  const section = document.createElement('div');
+  section.className = 'cad-operation-section';
+  section.dataset.cadOperation = kind;
+  editor.appendChild(section);
+  return section;
+}
+
 function appendOperationButton(parent, text, handler) {
   const button = document.createElement('button');
   button.type = 'button';
@@ -117,23 +133,14 @@ function notifyResult(result, successMessage, noChangeMessage) {
  * @returns {boolean} panelを表示した場合 true
  */
 export function mountCadOperationPanel(options = {}) {
-  const containerId = options.containerId || 'model-edit-cad-operations';
-  const content = document.getElementById(containerId);
+  const content = document.getElementById(options.containerId || 'element-info-content');
   if (!content) return false;
   content.querySelector('.cad-operation-editor')?.remove();
-  content.querySelector('.add-member-summary')?.remove();
 
-  if (editingSession.getState()?.active !== true) {
-    return mountUnavailablePanel(content, '編集モードをONにすると CAD 操作を利用できます。');
-  }
-
+  // 未選択・編集モード外では要素情報の表示を優先し、CAD操作欄を出さない。
+  if (editingSession.getState()?.active !== true) return false;
   const selections = collectSemanticSelections(options.objects);
-  if (selections.length === 0) {
-    return mountUnavailablePanel(
-      content,
-      'Model A の要素を選択すると MOVE / ALIGN / COPY 操作が表示されます。',
-    );
-  }
+  if (selections.length === 0) return false;
   if (selections.some(isReadOnlySelection)) {
     return mountUnavailablePanel(
       content,
@@ -152,68 +159,32 @@ export function mountCadOperationPanel(options = {}) {
     return mountUnavailablePanel(content, '選択要素には移動可能な semantic Node がありません。');
   }
 
-  const editor = document.createElement('div');
-  editor.className = 'cad-operation-editor';
-  editor.style.marginTop = '12px';
-  editor.style.paddingTop = '8px';
-  editor.style.borderTop = '1px solid var(--border-color, #666)';
-
-  const title = document.createElement('div');
-  title.style.fontWeight = 'var(--font-weight-bold)';
-  title.style.marginBottom = '4px';
-  title.textContent = `CAD操作 (${nodeIds.length} Node)`;
-  editor.appendChild(title);
+  const editor = createEditor(`CAD操作 (${nodeIds.length} Node)`);
+  const followRelatedNodes = () => editingSession.getMoveFollowRelatedNodes();
 
   const note = document.createElement('div');
   note.className = 'add-member-summary';
-  note.textContent =
-    'MOVE は追従設定に応じて semantic Node / member offset を使い分け、ALIGN は semantic Node、COPY は semantic 要素として編集します。';
+  note.textContent = followRelatedNodes()
+    ? '節点追従ON: 共有節点を参照する部材も追従します（リボン「修正」で切替）。'
+    : '節点追従OFF: 節点を固定し、選択部材の offset だけを更新します（リボン「修正」で切替）。';
   editor.appendChild(note);
 
-  const followRow = createRow('MOVE 設定');
-  const followLabel = document.createElement('label');
-  followLabel.style.display = 'inline-flex';
-  followLabel.style.alignItems = 'center';
-  followLabel.style.gap = '6px';
-  const followCheckbox = document.createElement('input');
-  followCheckbox.type = 'checkbox';
-  followCheckbox.id = 'model-edit-move-follow-related-nodes';
-  followCheckbox.checked = editingSession.getMoveFollowRelatedNodes();
-  followCheckbox.setAttribute('aria-label', 'MOVE時に関連節点を追従');
-  const followText = document.createElement('span');
-  followText.textContent = '関連節点を追従';
-  followLabel.append(followCheckbox, followText);
-  followRow.appendChild(followLabel);
-  editor.appendChild(followRow);
-
-  const followNote = document.createElement('div');
-  followNote.className = 'add-member-summary';
-  const updateFollowNote = () => {
-    followNote.textContent = followCheckbox.checked
-      ? 'ON: 選択要素の semantic Node を移動し、共有節点を参照する部材も追従します。'
-      : 'OFF: StbNode は固定し、選択部材の offset を更新して部材本体だけを移動します。';
-  };
-  followCheckbox.addEventListener('change', () => {
-    editingSession.setMoveFollowRelatedNodes(followCheckbox.checked);
-    updateFollowNote();
-  });
-  updateFollowNote();
-  editor.appendChild(followNote);
-
-  const moveRow = createRow('MOVE ΔX / ΔY / ΔZ');
+  const moveSection = createOperationSection(editor, 'move');
+  const moveRow = createRow('移動 ΔX / ΔY / ΔZ');
   const move = createCoordinateInputs(['x', 'y', 'z']);
   moveRow.appendChild(move.wrapper);
-  editor.appendChild(moveRow);
-  appendOperationButton(editor, '数値 MOVE', () => {
+  moveSection.appendChild(moveRow);
+  appendOperationButton(moveSection, '移動', () => {
     try {
+      const follow = followRelatedNodes();
       const result = cadOperationService.moveSelectionsByVector(
         selections,
         pointFromInputs(move.inputs),
-        { followRelatedNodes: followCheckbox.checked },
+        { followRelatedNodes: follow },
       );
       notifyResult(
         result,
-        followCheckbox.checked
+        follow
           ? `${nodeIds.length} Node を移動しました`
           : `${selections.length}要素を節点固定で移動しました`,
         '移動量は0です',
@@ -225,11 +196,12 @@ export function mountCadOperationPanel(options = {}) {
     }
   });
 
-  const copyRow = createRow('COPY ΔX / ΔY / ΔZ');
+  const copySection = createOperationSection(editor, 'copy');
+  const copyRow = createRow('複写 ΔX / ΔY / ΔZ');
   const copy = createCoordinateInputs(['x', 'y', 'z']);
   copyRow.appendChild(copy.wrapper);
-  editor.appendChild(copyRow);
-  appendOperationButton(editor, '数値 COPY', () => {
+  copySection.appendChild(copyRow);
+  appendOperationButton(copySection, '複写', () => {
     try {
       const result = cadOperationService.copySelectionsByVector(
         selections,
@@ -245,7 +217,8 @@ export function mountCadOperationPanel(options = {}) {
     }
   });
 
-  const axisRow = createRow('軸 ALIGN');
+  const axisSection = createOperationSection(editor, 'align-axis');
+  const axisRow = createRow('軸揃え 軸 / 座標');
   const axisSelect = document.createElement('select');
   axisSelect.className = 'parameter-dropdown';
   for (const axis of ['X', 'Y', 'Z']) {
@@ -258,8 +231,8 @@ export function mountCadOperationPanel(options = {}) {
   axisValue.placeholder = '座標';
   axisRow.appendChild(axisSelect);
   axisRow.appendChild(axisValue);
-  editor.appendChild(axisRow);
-  appendOperationButton(editor, '軸へ ALIGN', () => {
+  axisSection.appendChild(axisRow);
+  appendOperationButton(axisSection, '軸揃え', () => {
     try {
       const result = cadOperationService.alignNodesToAxis(
         nodeIds,
@@ -278,16 +251,17 @@ export function mountCadOperationPanel(options = {}) {
     }
   });
 
-  const sourceRow = createRow('2点 ALIGN 始点');
+  const pointsSection = createOperationSection(editor, 'align-points');
+  const sourceRow = createRow('2点揃え 始点');
   const source = createCoordinateInputs(['x', 'y', 'z']);
   sourceRow.appendChild(source.wrapper);
-  editor.appendChild(sourceRow);
+  pointsSection.appendChild(sourceRow);
 
-  const targetRow = createRow('2点 ALIGN 終点');
+  const targetRow = createRow('2点揃え 終点');
   const target = createCoordinateInputs(['x', 'y', 'z']);
   targetRow.appendChild(target.wrapper);
-  editor.appendChild(targetRow);
-  appendOperationButton(editor, '2点 ALIGN', () => {
+  pointsSection.appendChild(targetRow);
+  appendOperationButton(pointsSection, '2点揃え', () => {
     try {
       const result = cadOperationService.alignNodesByPoints(
         nodeIds,

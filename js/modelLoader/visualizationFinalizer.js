@@ -48,6 +48,9 @@ export async function finalizeVisualization(finalizationData, scheduleRender, _c
   const initViewModesResult = await Promise.resolve(
     initViewModes(finalizationData, scheduleRender),
   );
+  if (initViewModesResult?.aborted || initViewModesResult?.errors?.length) {
+    throw new Error('初期表示モードの描画に失敗しました。');
+  }
 
   // Setup camera and grid
   createOrUpdateGridHelper(modelBounds);
@@ -71,33 +74,10 @@ export async function finalizeVisualization(finalizationData, scheduleRender, _c
     hasBothModels: !!modelADocument && !!modelBDocument,
   });
 
-  if (initViewModesResult?.errors?.length > 0) {
-    logger.warn('Initial display mode redraw completed with errors:', initViewModesResult.errors);
-  }
-
   return {
     stats: renderingStats,
     initViewModesResult,
   };
-}
-
-/**
- * Handle finalization errors and cleanup
- * @param {Error} error - Error that occurred
- */
-export function handleFinalizationError(error) {
-  logger.error('Finalization error occurred:', error);
-
-  try {
-    eventBus.emit(FinalizationEvents.SET_GLOBAL_STATE, {
-      nodeLabels: [],
-      stories: [],
-      axesData: { xAxes: [], yAxes: [] },
-    });
-    eventBus.emit(FinalizationEvents.UPDATE_SELECTORS);
-  } catch (cleanupError) {
-    logger.error('Error during cleanup:', cleanupError);
-  }
 }
 
 /**

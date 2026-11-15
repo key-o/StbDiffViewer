@@ -217,6 +217,7 @@ function resolveFootingStoryOwnership(raw, targetStory, stories, nodes, toleranc
     return {
       status: 'unresolved',
       resolution: 'node-list',
+      unassigned: true,
       detail: `id_node=${nodeId} is not assigned to any StbStory node list; Z fallback is disabled while explicit story node lists exist`,
     };
   }
@@ -242,6 +243,7 @@ function resolveFootingStoryOwnership(raw, targetStory, stories, nodes, toleranc
     return {
       status: 'unresolved',
       resolution: 'z-fallback',
+      unassigned: zMatches.length === 0,
       detail: `id_node=${nodeId}; nodeZ=${nodeZ}; matchingStories=${
         zMatches.map((story) => story.id).join(',') || 'none'
       }`,
@@ -528,6 +530,8 @@ export async function buildStbPlanDrawing({
   signal = null,
   // 開口の表示可否を親Wallから切り離す場合に指定する(例: Open単独出力)。
   openingVisibilitySource = null,
+  // Node symbol is opt-in. Ordinary SVG drawings must not acquire implicit node markers.
+  includeNodes = false,
   parse = parseStbFile,
   getGeneratorInfo = (type) => geometryGeneratorFactory.getGeneratorInfo(type),
   yieldControl = () => new Promise((resolve) => setTimeout(resolve, 0)),
@@ -984,6 +988,97 @@ export async function buildStbPlanDrawing({
       if (++count % 25 === 0) await yieldControl();
     }
   }
+  // #455 Node: STB node coordinates and explicit story ownership are the only authorities.
+  // The planar node outline is a 16-sided, radius-50 mm polygon matching the
+  // legacy sphere's Z=0 section, with no scene/camera dependency.
+  // This intentionally does not use the legacy viewer's camera-dependent Node geometry.
+  if (includeNodes) {
+    const seenNodeIds = new Set();
+    for (const raw of parseElements(snapshot, 'StbNode')) {
+      checkCancelled(signal);
+      const id = String(raw.getAttribute('id') || '').trim();
+      if (!id) throw new Error('NODE_ID_MISSING: StbNode.id is required');
+      if (seenNodeIds.has(id)) throw new Error(`NODE_ID_DUPLICATE: ${id}`);
+      seenNodeIds.add(id);
+      const ref = createElementRef(source, 'Node', id, raw.getAttribute('guid'));
+      const key = elementRefKey(ref);
+      const record = {
+        key,
+        ref,
+        renderType: 'Node',
+        mark: '',
+        sectionId: null,
+        state: 'failed',
+        primitiveIds: [],
+        memberAxisModel: null,
+        taggable: false,
+      };
+      drawing.elements.push(record);
+      const ownership = resolveFootingStoryOwnership(
+        { getAttribute: (name) => (name === 'id_node' ? id : null) },
+        story,
+        allStories,
+        parsed.nodes,
+      );
+      if (ownership.status === 'outside') {
+        record.state = 'outside-view';
+      } else if (ownership.status === 'unresolved' && ownership.unassigned) {
+        // Mid-member nodes (e.g. kind=ON_POST) belong to no story. They cannot be drawn
+        // on any story, but must not make every story's Node export fail.
+        record.state = 'outside-view';
+        drawing.diagnostics.push({
+          code: 'NODE_STORY_UNASSIGNED',
+          elementKey: key,
+          detail: ownership.detail,
+        });
+      } else if (ownership.status === 'unresolved') {
+        drawing.diagnostics.push({
+          code: 'NODE_STORY_OWNERSHIP_UNRESOLVED',
+          elementKey: key,
+          detail: ownership.detail,
+        });
+      } else {
+        if (ownership.resolution === 'z-fallback') {
+          drawing.diagnostics.push({
+            code: 'NODE_STORY_Z_FALLBACK',
+            elementKey: key,
+            detail: ownership.detail,
+          });
+        }
+        const node = parsed.nodes?.get(id);
+        const x = Number(node?.x);
+        const y = Number(node?.y);
+        const z = Number(node?.z);
+        if (![x, y, z].every(Number.isFinite)) {
+          drawing.diagnostics.push({
+            code: 'NODE_COORDINATE_INVALID',
+            elementKey: key,
+            detail: `StbNode ${id} has no finite XYZ coordinates`,
+          });
+        } else {
+          const radius = 50;
+          const segments = 16;
+          const points = Array.from({ length: segments }, (_, index) => {
+            const angle = (2 * Math.PI * index) / segments;
+            return assertPoint([x + radius * Math.cos(angle), y + radius * Math.sin(angle)]);
+          });
+          const primitive = {
+            id: JSON.stringify([key, 'node-outline']),
+            kind: 'polyline',
+            closed: true,
+            ref,
+            elementKey: key,
+            points,
+          };
+          drawing.primitives.push(primitive);
+          record.primitiveIds.push(primitive.id);
+          extendBounds(bounds, points);
+          record.state = 'drawn';
+        }
+      }
+      if (++count % 25 === 0) await yieldControl();
+    }
+  }
   checkCancelled(signal);
   drawing.bounds = drawing.primitives.length ? bounds : null;
   if (drawing.bounds) {
@@ -1000,7 +1095,7 @@ export async function buildStbPlanDrawing({
   }
   const primaryElements = drawing.elements.filter((element) => element.renderType !== 'Open');
   drawing.coverage = {
-    supportedTypes: [...PLAN_MEMBER_TYPES],
+    supportedTypes: [...PLAN_MEMBER_TYPES, ...(includeNodes ? ['Node'] : [])],
     auxiliaryTypes: ['Open'],
     sourceMembers: primaryElements.length,
     drawn: primaryElements.filter((element) => element.state === 'drawn').length,
@@ -1011,7 +1106,7 @@ export async function buildStbPlanDrawing({
       (element) => element.renderType === 'Open' && element.state === 'drawn',
     ).length,
     scopeNote:
-      '柱・間柱・大梁・小梁・ブレース・スラブ外形・壁外形・壁開口・フーチング・布基礎・杭頭・パラペット + STB明示平行通り芯・通り間寸法・全体寸法。',
+      '柱・間柱・大梁・小梁・ブレース・スラブ外形・壁外形・壁開口・フーチング・布基礎・杭頭・パラペット・Node(選択時) + STB明示平行通り芯・通り間寸法・全体寸法。',
   };
   return drawing;
 }

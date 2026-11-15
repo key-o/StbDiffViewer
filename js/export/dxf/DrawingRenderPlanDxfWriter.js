@@ -307,7 +307,7 @@ export function collectDrawingRenderPlanDxfEntities(renderPlan) {
     if (element.visible === false || !layerVisible(primitive.layerId)) continue;
     if (
       primitive.kind !== 'polyline' ||
-      !['member-outline', 'wall-opening-outline'].includes(primitive.role)
+      !['member-outline', 'member-axis', 'wall-opening-outline'].includes(primitive.role)
     ) {
       throw new TypeError(
         `DXF writer未対応のDrawingRenderPlan primitiveです: ${primitive.kind}/${primitive.role}`,

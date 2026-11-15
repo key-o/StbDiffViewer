@@ -105,7 +105,8 @@ export function buildNodeMap(doc) {
   if (!doc) return nodeMap;
   const nodes = parseElements(doc, 'StbNode');
   for (const node of nodes) {
-    const id = node.getAttribute('id');
+    // STB numeric IDs may be space-padded (e.g. id=" 1") while member refs are not.
+    const id = node.getAttribute('id')?.trim();
 
     // 属性値を取得
     const xAttr = node.getAttribute('X');

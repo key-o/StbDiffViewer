@@ -68,7 +68,7 @@ export function planLegacyPdfDrawingMemoMigration({
     return blocked(
       'DRAWING_CONTEXT_MISSING',
       legacy.length,
-      'SVG図面を生成してから旧PDFメモを移行してください。',
+      '図面を生成してから旧PDFメモを移行してください。',
     );
   if (!legacyPdfIdentity || !currentPdfInfo)
     return blocked(

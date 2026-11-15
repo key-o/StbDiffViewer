@@ -7,6 +7,10 @@ import { EditEvents, eventBus } from '../../data/events/index.js';
 import { getState, setState } from '../../data/state/globalState.js';
 import { buildQuantityFacts } from '../../quantities/analytics/QuantityFactBuilder.js';
 import { calculateModelQuantities } from '../../quantities/QuantityService.js';
+import {
+  failJoinQuantityReconciliation,
+  reconcileJoinQuantityAudit,
+} from '../editing/joinQuantityReconciliation.js';
 import { parseStbFile } from '../../viewer/index.js';
 import { createLogger } from '../../utils/logger.js';
 
@@ -106,6 +110,13 @@ export function createWorkingQuantityLifecycleController(dependencies = {}) {
       deps.setState('models.workingQuantitySessionId', sessionId);
       deps.setState('models.workingQuantityRevision', revision);
       deps.setState('models.workingQuantityError', null);
+      // すでに同じsession/revisionのRC診断があれば、再計算済みの部材数量で照合する。
+      // 旧revision、別セッション、未実施の診断へは書き込まない。
+      const audit = deps.getState('models.workingJoinAudit');
+      if (audit?.sessionId === sessionId && audit.workingRevision === revision) {
+        const reconciled = reconcileJoinQuantityAudit(audit, store);
+        if (reconciled) deps.setState('models.workingJoinAudit', reconciled);
+      }
       notify({ sessionId, workingRevision: revision, status: 'ready' });
       return true;
     } catch (error) {
@@ -126,6 +137,11 @@ export function createWorkingQuantityLifecycleController(dependencies = {}) {
       deps.setState('models.workingQuantitySessionId', sessionId);
       deps.setState('models.workingQuantityRevision', revision);
       deps.setState('models.workingQuantityError', error?.message || String(error));
+      const audit = deps.getState('models.workingJoinAudit');
+      if (audit?.sessionId === sessionId && audit.workingRevision === revision) {
+        const failed = failJoinQuantityReconciliation(audit);
+        if (failed) deps.setState('models.workingJoinAudit', failed);
+      }
       notify({ sessionId, workingRevision: revision, status: 'failed' });
       return false;
     }

@@ -181,6 +181,10 @@ class ApplicationState {
    * @private
    */
   notifyListeners(path, newValue, oldValue) {
+    if (this.pendingReplacement) {
+      this.pendingReplacement.paths.add(path);
+      return;
+    }
     const pathListeners = this.listeners.get(path);
     if (pathListeners) {
       pathListeners.forEach((listener) => {
@@ -191,6 +195,29 @@ class ApplicationState {
         }
       });
     }
+  }
+
+  /** Stage loader writes without notifying consumers about a provisional model. */
+  beginReplacement() {
+    if (this.pendingReplacement) throw new Error('A state replacement is already active');
+    const previous = this.state;
+    const pending = { paths: new Set() };
+    this.pendingReplacement = pending;
+    // reset() creates fresh model/UI/importance branches; never clear the old Maps.
+    this.reset();
+    const finish = (commit) => {
+      if (this.pendingReplacement !== pending) return;
+      this.pendingReplacement = null;
+      if (!commit) {
+        this.state = previous;
+        return;
+      }
+      for (const path of pending.paths) {
+        const oldValue = path.split('.').reduce((value, key) => value?.[key], previous);
+        this.notifyListeners(path, this.get(path), oldValue);
+      }
+    };
+    return { commit: () => finish(true), rollback: () => finish(false) };
   }
 
   /**

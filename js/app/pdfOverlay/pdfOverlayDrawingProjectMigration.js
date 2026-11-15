@@ -582,7 +582,12 @@ function contextViewMatches({ project, document, context, drawingModel, currentV
  * DrawingProjectのreview/annotationを現在のDrawingModelへfail-closedで復元する。
  * 異なるrevision/viewは履歴として保持されるが、現在のruntime stateへ自動継承しない。
  */
-export function restoreDrawingWorkspaceReviewState({ project, drawingId, drawingModel } = {}) {
+export function restoreDrawingWorkspaceReviewState({
+  project,
+  drawingId,
+  drawingModel,
+  projectNativePlacements = false,
+} = {}) {
   const normalized = normalizeDrawingProject(project);
   const document = drawingDocumentById(normalized, requiredString(drawingId, 'drawingId'));
   if (
@@ -625,6 +630,7 @@ export function restoreDrawingWorkspaceReviewState({ project, drawingId, drawing
         review.context.sourceRevisionId,
       );
       if (!mapped) invalidationCode = 'BINDING_MISSING';
+      else if (mapped.revision.orphaned) invalidationCode = 'BINDING_ORPHANED';
     }
     if (!invalidationCode) {
       const sourceRef = mapped.revision.sourceRef;
@@ -694,7 +700,7 @@ export function restoreDrawingWorkspaceReviewState({ project, drawingId, drawing
       invalidationCode = 'STB_CHANGED';
     else if (!sameView(planViewSnapshot(document.view), currentView))
       invalidationCode = 'STB_VIEW_CHANGED';
-    else if (intent.placement.mode !== 'model-fixed')
+    else if (intent.placement.mode !== 'model-fixed' && !projectNativePlacements)
       invalidationCode = 'UNSUPPORTED_TAG_PLACEMENT_MODE';
 
     let mapped = null;
@@ -707,6 +713,7 @@ export function restoreDrawingWorkspaceReviewState({ project, drawingId, drawing
         document.sourceRevisionId,
       );
       if (!mapped) invalidationCode = 'BINDING_MISSING';
+      else if (mapped.revision.orphaned) invalidationCode = 'BINDING_ORPHANED';
     }
     if (!invalidationCode) {
       const sourceRef = mapped.revision.sourceRef;
@@ -722,7 +729,9 @@ export function restoreDrawingWorkspaceReviewState({ project, drawingId, drawing
 
     const active = invalidationCode == null;
     tagStatuses.push({ id: intent.id, active, invalidationCode });
-    if (active) {
+    // Non-legacy placements remain in DrawingProject for the sheet RenderPlan.
+    // Do not convert paper-mm offsets or semantic anchors into legacy model coordinates.
+    if (active && intent.placement.mode === 'model-fixed') {
       tagPlacements.push({
         schemaVersion: 2,
         identity: [

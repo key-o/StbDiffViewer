@@ -1,5 +1,6 @@
 export {
   displayElementInfo,
+  displayGlbElementInfo,
   displayMultiSelectionSummary,
   refreshElementInfoPanel,
   exportElementInfoAsJson,

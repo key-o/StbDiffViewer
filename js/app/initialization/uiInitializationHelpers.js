@@ -39,6 +39,11 @@ import { handleTreeElementSelection } from './eventHandlers.js';
 import {
   initColumnSectionListPanel,
   initBeamSectionListPanel,
+  initSlabSectionListPanel,
+  initSteelColumnSectionListPanel,
+  initSteelBeamSectionListPanel,
+  initSrcColumnSectionListPanel,
+  initSrcBeamSectionListPanel,
 } from '../../ui/panels/sectionList/index.js';
 import { initializeBeamOpeningDiagramPanel } from '../../ui/panels/beamOpeningDiagram/BeamOpeningDiagramPanel.js';
 import { initializeAnchorageCheckPanel } from '../../ui/panels/anchorageCheckPanel.js';
@@ -172,6 +177,11 @@ export function initializeComparisonControls() {
 export function initializeSectionListPanels() {
   initializeOptionalPanel(initColumnSectionListPanel, 'RC柱断面リストパネル');
   initializeOptionalPanel(initBeamSectionListPanel, 'RC梁断面リストパネル');
+  initializeOptionalPanel(initSlabSectionListPanel, 'RCスラブリストパネル');
+  initializeOptionalPanel(initSteelColumnSectionListPanel, 'S柱断面リストパネル');
+  initializeOptionalPanel(initSteelBeamSectionListPanel, 'S梁断面リストパネル');
+  initializeOptionalPanel(initSrcColumnSectionListPanel, 'SRC柱断面リストパネル');
+  initializeOptionalPanel(initSrcBeamSectionListPanel, 'SRC梁断面リストパネル');
   initializeOptionalPanel(initializeBeamOpeningDiagramPanel, '梁貫通孔配置図パネル');
   initializeOptionalPanel(initializeAnchorageCheckPanel, '定着・カットオフチェックパネル');
   initializeOptionalPanel(initializeRebarDecisionTracePanel, '配筋判断トレースパネル');

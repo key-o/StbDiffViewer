@@ -8,6 +8,10 @@ import { getState, setState } from '../../../data/state/globalState.js';
 import { eventBus, EditEvents, ModelEvents, RenderEvents } from '../../../data/events/index.js';
 import { aggregateQuantityFacts } from '../../../quantities/analytics/QuantityAggregator.js';
 import {
+  buildJoinAuditCsvFilename,
+  serializeJoinAuditCsv,
+} from '../../../quantities/analytics/JoinAuditCsvExporter.js';
+import {
   buildQuantityCsvFilename,
   serializeQuantityFactsCsv,
   serializeQuantitySummaryCsv,
@@ -33,6 +37,7 @@ import {
   renderQuantityDrilldown,
   renderQuantitySummaryControls,
   renderQuantitySummaryTable,
+  renderWorkingJoinAudit,
 } from './QuantitySummaryRenderer.js';
 import { focusQuantityFact } from './QuantitySummarySelection.js';
 
@@ -126,6 +131,7 @@ class QuantitySummaryPanel {
     this.controls = null;
     this.table = null;
     this.summary = null;
+    this.joinAudit = null;
     this.drilldown = null;
     this.selectedGroupKey = null;
     this.drilldownPage = 1;
@@ -142,6 +148,7 @@ class QuantitySummaryPanel {
     this.controls = this.root?.querySelector('[data-quantity-summary-controls]') || null;
     this.table = this.root?.querySelector('[data-quantity-summary-table]') || null;
     this.summary = this.root?.querySelector('[data-quantity-summary-summary]') || null;
+    this.joinAudit = this.root?.querySelector('[data-quantity-join-audit]') || null;
     this.drilldown = this.root?.querySelector('[data-quantity-summary-drilldown]') || null;
 
     floatingWindowManager.registerWindow({
@@ -184,6 +191,7 @@ class QuantitySummaryPanel {
         <div class="quantity-summary-body">
           <div data-quantity-summary-controls></div>
           <div class="quantity-summary-summary" data-quantity-summary-summary></div>
+          <div class="quantity-summary-join-audit" role="status" data-quantity-join-audit hidden></div>
           <div class="quantity-summary-table-host" data-quantity-summary-table></div>
           <div class="quantity-summary-drilldown" data-quantity-summary-drilldown></div>
         </div>
@@ -203,6 +211,7 @@ class QuantitySummaryPanel {
     eventBus.on(EditEvents.MODE_TOGGLED, refreshIfVisible);
     eventBus.on(EditEvents.WORKING_DOCUMENT_CHANGED, refreshIfVisible);
     eventBus.on(EditEvents.WORKING_QUANTITIES_UPDATED, refreshIfVisible);
+    eventBus.on(EditEvents.JOIN_AUDIT_UPDATED, refreshIfVisible);
   }
 
   handleControlChange(key, value) {
@@ -259,6 +268,24 @@ class QuantitySummaryPanel {
     return getState(`models.quantityFacts${side}`);
   }
 
+  currentJoinAudit() {
+    const editing = getState('models.editing');
+    const audit = getState('models.workingJoinAudit');
+    if (
+      !editing?.active ||
+      this.state.modelSide === 'B' ||
+      !audit ||
+      audit.sessionId !== editing.sessionId ||
+      audit.workingRevision !== editing.workingRevision ||
+      !Array.isArray(audit.proposals) ||
+      !Array.isArray(audit.appliedProposals) ||
+      !Array.isArray(audit.warnings)
+    ) {
+      return null;
+    }
+    return audit;
+  }
+
   canExportQuantities() {
     const editingA = Boolean(getState('models.editing.active'));
     if (
@@ -287,6 +314,11 @@ class QuantitySummaryPanel {
   }
 
   exportCsv(kind) {
+    if (kind === 'join-audit') {
+      const audit = this.currentJoinAudit();
+      if (!audit) return false;
+      return downloadQuantityCsv(serializeJoinAuditCsv(audit), buildJoinAuditCsvFilename());
+    }
     if (!this.canExportQuantities()) return false;
 
     if (kind === 'summary') {
@@ -411,7 +443,15 @@ class QuantitySummaryPanel {
       ...this.state,
       storyMatchCriterion: comparisonKeyManager.getStoryAxisMatchCriterion(),
     });
-    renderQuantitySummaryControls(this.controls, this.state);
+    renderQuantitySummaryControls(this.controls, this.state, {
+      joinAuditAvailable: Boolean(this.currentJoinAudit()),
+    });
+    renderWorkingJoinAudit(
+      this.joinAudit,
+      getState('models.editing'),
+      getState('models.workingJoinAudit'),
+      this.state.modelSide,
+    );
     setState(
       'ui.quantitySummaryVisible',
       Boolean(floatingWindowManager.isWindowVisible(WINDOW_ID)),

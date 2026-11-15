@@ -25,21 +25,33 @@ const log = createLogger('eventHandlers');
  * @param {boolean} dependencies.rendererInitialized - レンダラー初期化フラグ
  * @param {Object} dependencies.camera - カメラオブジェクト
  * @param {Object} dependencies.controls - コントロールオブジェクト
- * @returns {Promise<void>}
+ * @param {boolean} [dependencies.requireCompleteRendering=false] - 部分描画を成功扱いしない
+ * @returns {Promise<boolean>}
  */
 export async function handleCompareModelsClick(scheduleRender, dependencies) {
-  const { rendererInitialized, camera, controls } = dependencies;
+  const {
+    rendererInitialized,
+    camera,
+    controls,
+    requireCompleteRendering = false,
+    drawingProjectLoadHandoff = null,
+  } = dependencies;
 
   // レンダラーが初期化されていない場合は処理中断
   if (!rendererInitialized) {
     showError('ビューアが初期化されていません。');
-    return;
+    return false;
   }
 
   // モデルの読み込みと比較処理
-  const compareSucceeded = await compareModels(scheduleRender, { camera, controls });
+  const compareSucceeded = await compareModels(scheduleRender, {
+    camera,
+    controls,
+    requireCompleteRendering,
+    drawingProjectLoadHandoff,
+  });
   if (!compareSucceeded) {
-    return;
+    return false;
   }
 
   const scheduleDeferredTask = (task) => {
@@ -78,6 +90,7 @@ export async function handleCompareModelsClick(scheduleRender, dependencies) {
     // 再描画
     if (typeof window.requestRender === 'function') window.requestRender();
   }, UI_TIMING.LABEL_UPDATE_DELAY_MS);
+  return true;
 }
 
 /**

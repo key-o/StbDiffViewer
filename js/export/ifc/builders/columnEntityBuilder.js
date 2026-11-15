@@ -5,6 +5,7 @@
  */
 
 import { generateIfcGuid } from '../StepWriter.js';
+import { encodeLinearOffsetMetadata } from '../../../common-ifc/pipeline/StbLinearOffsetMetadata.js';
 
 /**
  * 柱のIFCエンティティを作成
@@ -29,6 +30,7 @@ export function createColumnEntities(w, params) {
     rotation,
     isReferenceDirection,
     kindStructure,
+    sourceLinearOffsets,
     profileId,
     bodyContext,
     createSteelProfileId = null,
@@ -116,7 +118,7 @@ export function createColumnEntities(w, params) {
     generateIfcGuid(),
     null, // OwnerHistory
     name,
-    null, // Description
+    encodeLinearOffsetMetadata('column', sourceLinearOffsets), // STB-origin node offsets
     kindStructure, // ObjectType: kind_structure (S/RC/SRC/CFT)
     `#${columnLocalPlacement}`,
     `#${productShape}`,
@@ -147,6 +149,7 @@ export function createPostEntities(w, params) {
     rotation,
     isReferenceDirection,
     kindStructure,
+    sourceLinearOffsets,
     profileId,
     bodyContext,
   } = params;
@@ -216,7 +219,7 @@ export function createPostEntities(w, params) {
     generateIfcGuid(),
     null, // OwnerHistory
     name,
-    null, // Description
+    encodeLinearOffsetMetadata('column', sourceLinearOffsets), // STB-origin node offsets
     kindStructure, // ObjectType: kind_structure (S/RC/SRC/CFT)
     `#${postLocalPlacement}`,
     `#${productShape}`,

@@ -1,0 +1,21 @@
+{
+  "id": "./",
+  "name": "STB Diff Viewer AR",
+  "short_name": "STB AR",
+  "description": "ST-Bridge構造モデルの比較とAR表示",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f172a",
+  "theme_color": "#1e293b",
+  "icons": [
+    {
+      "src": "./favicon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

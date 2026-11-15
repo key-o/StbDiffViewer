@@ -9,7 +9,14 @@
  */
 
 import { createLogger } from '../../utils/logger.js';
-import { eventBus, ModelEvents, ToastEvents } from '../../data/events/index.js';
+import {
+  eventBus,
+  EditEvents,
+  ModelEvents,
+  SceneEvents,
+  ToastEvents,
+  UIEvents,
+} from '../../data/events/index.js';
 import { getAcceptAttribute } from '../../config/fileTypeConfig.js';
 
 const log = createLogger('ui:events:fileDropListeners');
@@ -53,7 +60,7 @@ function extractAcceptedFiles(dataTransfer) {
 /**
  * file inputにファイルを設定し、changeイベントを発火する
  * @param {string} inputId - 'fileA' または 'fileB'
- * @param {File} file - 設定するファイル
+ * @param {File|File[]} file - 設定するファイル
  * @returns {boolean} 設定に成功したか
  */
 function assignFileToInput(inputId, file) {
@@ -63,7 +70,9 @@ function assignFileToInput(inputId, file) {
   }
 
   const dt = new DataTransfer();
-  dt.items.add(file);
+  for (const item of Array.isArray(file) ? file : [file]) {
+    dt.items.add(item);
+  }
   input.files = dt.files;
   input.dispatchEvent(new Event('change', { bubbles: true }));
   log.info(`[Load] ドロップされたファイルを ${inputId} に設定: ${file.name}`);
@@ -123,6 +132,25 @@ function assignFilesToSlots(files) {
 }
 
 /**
+ * GLBを画面上のどこにドロップしても重ね表示用の入力へ渡す。
+ * モデルA/Bのドロップ処理より先に捕捉することで、GLBを比較対象に混入させない。
+ * @param {DragEvent} event
+ */
+function handleGlbDrop(event) {
+  const files = Array.from(event.dataTransfer?.files ?? []);
+  const glbFiles = files.filter((item) => item.name?.toLowerCase().endsWith('.glb'));
+  if (glbFiles.length === 0) return;
+  const metadataFiles = files.filter((item) => item.name?.toLowerCase().endsWith('.json'));
+
+  event.preventDefault();
+  event.stopPropagation();
+  document
+    .querySelectorAll('.drag-over')
+    .forEach((element) => element.classList.remove('drag-over'));
+  assignFileToInput('glbFile', [...glbFiles, ...metadataFiles]);
+}
+
+/**
  * キャンバス上の空状態ヒントの表示制御を設定する
  */
 function setupCanvasDropHint() {
@@ -130,8 +158,16 @@ function setupCanvasDropHint() {
   if (!hint) return;
 
   const loadBtn = document.getElementById('canvas-load-btn');
+  const editStartBtn = document.getElementById('canvas-edit-start-btn');
   const inputA = document.getElementById('fileA');
   const inputB = document.getElementById('fileB');
+  let editModeActive = false;
+  let modelLoaded = false;
+  let glbLoaded = false;
+
+  const updateHintVisibility = () => {
+    hint.classList.toggle('hidden', editModeActive || modelLoaded || glbLoaded);
+  };
 
   // ステージ済みファイルの有無に応じて中央の読込ボタンの表示を更新する
   const updateLoadButton = () => {
@@ -140,6 +176,7 @@ function setupCanvasDropHint() {
     const hasB = inputB?.files?.length > 0;
     const staged = hasA || hasB;
     loadBtn.classList.toggle('hidden', !staged);
+    editStartBtn?.classList.toggle('hidden', staged);
     loadBtn.textContent = hasA && hasB ? '📥 モデルを比較' : '📥 モデル読込';
   };
 
@@ -153,12 +190,44 @@ function setupCanvasDropHint() {
     }
   });
 
+  editStartBtn?.addEventListener('click', async () => {
+    try {
+      const { toggleEditMode } = await import('../panels/element-info/editMode/editModeToggle.js');
+      toggleEditMode();
+    } catch (error) {
+      log.error('編集モードの開始に失敗しました:', error);
+      eventBus.emit(ToastEvents.SHOW_ERROR, {
+        message: `編集モードを開始できませんでした: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  });
+
   inputA?.addEventListener('change', updateLoadButton);
   inputB?.addEventListener('change', updateLoadButton);
 
-  eventBus.on(ModelEvents.LOADED, () => hint.classList.add('hidden'));
+  eventBus.on(EditEvents.MODE_TOGGLED, ({ active } = {}) => {
+    editModeActive = active === true;
+    updateHintVisibility();
+  });
+  eventBus.on(ModelEvents.LOADED, () => {
+    modelLoaded = true;
+    updateHintVisibility();
+  });
+  eventBus.on(SceneEvents.GLB_LOADED, () => {
+    glbLoaded = true;
+    updateHintVisibility();
+  });
+  eventBus.on(SceneEvents.GLB_CLEARED, () => {
+    glbLoaded = false;
+    updateHintVisibility();
+  });
+  // 簡易CADへ入った後は、3Dへ戻っても初期画面（読込・編集開始の案内）を再表示しない。
+  eventBus.on(UIEvents.WORKSPACE_VISIBILITY_CHANGED, ({ visible } = {}) => {
+    if (visible === true) hint.classList.add('hidden');
+  });
   eventBus.on(ModelEvents.CLEARED, () => {
-    hint.classList.remove('hidden');
+    modelLoaded = false;
+    updateHintVisibility();
     updateLoadButton();
   });
 
@@ -179,6 +248,7 @@ function setupCanvasDropHint() {
 export function setupFileDropListeners() {
   // ドロップ失敗時にブラウザがファイルを開いてしまうのを防ぐ
   window.addEventListener('dragover', (event) => event.preventDefault());
+  window.addEventListener('drop', handleGlbDrop, true);
   window.addEventListener('drop', (event) => event.preventDefault());
 
   for (const [wrapperId, inputId] of [

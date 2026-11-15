@@ -10,6 +10,7 @@ import { buildNodeMap, parseStories, parseAxes } from '../common-stb/import/pars
 import { extractAllSections } from '../common-stb/import/extractor/sectionExtractor.js';
 import {
   detectStbVersion,
+  findRootElement,
   getVersionInfo,
 } from '../common-stb/import/parser/utils/versionDetector.js';
 import {
@@ -20,6 +21,7 @@ import {
 import { parseStbCalData } from '../common-stb/import/extractor/StbCalDataExtractor.js';
 import { getLoaderSetState } from './loaderDependencies.js';
 import { createEmptyElementData, createEmptySectionMaps } from '../data/state/modelStateFactory.js';
+import { SOURCE_TYPES } from '../common-stb/import/constants/importTypes.js';
 
 /**
  * Process model documents and extract structural data.
@@ -31,7 +33,7 @@ import { createEmptyElementData, createEmptySectionMaps } from '../data/state/mo
  * @throws {TypeError} If fileA or fileB is provided but not a File object
  * @throws {Error} If both fileA and fileB are null or processing fails
  */
-export async function processModelDocuments(fileA, fileB) {
+export async function processModelDocuments(fileA, fileB, { activateSchema = true } = {}) {
   if (fileA !== null && !(fileA instanceof File)) {
     throw new TypeError('fileA must be a File object if provided');
   }
@@ -80,8 +82,9 @@ export async function processModelDocuments(fileA, fileB) {
   ];
   if (schemaVersions.length > 0) {
     await Promise.all(schemaVersions.map((version) => loadJsonSchemaForVersion(version)));
-    const activeVersion = schemaVersions.find((version) => isVersionLoaded(version));
-    if (activeVersion) setActiveVersion(activeVersion);
+    // A provisional load may parse and cache schemas but must not switch the
+    // live editor's active version before the new model is committed.
+    if (activateSchema) activateModelProcessingSchema(schemaVersions);
   }
   const versionInfo = {
     versionA: versionA || 'unknown',
@@ -93,6 +96,8 @@ export async function processModelDocuments(fileA, fileB) {
     sourceTypeB: resultB?.sourceType || 'stb',
     ifcSchemaA: resultA?.ifcSchema || null,
     ifcSchemaB: resultB?.ifcSchema || null,
+    ifcDiagnosticsA: resultA?.ifcDiagnostics || null,
+    ifcDiagnosticsB: resultB?.ifcDiagnostics || null,
   };
 
   return {
@@ -104,9 +109,20 @@ export async function processModelDocuments(fileA, fileB) {
     axesData,
     sectionMaps,
     versionInfo,
+    schemaVersions,
     calDataA: resultA?.calData || null,
     calDataB: resultB?.calData || null,
+    ifcDiagnosticsA: resultA?.ifcDiagnostics || null,
+    ifcDiagnosticsB: resultB?.ifcDiagnostics || null,
   };
+}
+
+/** Commit the prepared model's JSON schema selection after replacing the live model. */
+export function activateModelProcessingSchema(versions) {
+  if (!Array.isArray(versions)) throw new TypeError('STB schema versions must be an array');
+  const selected = versions.find((version) => isVersionLoaded(version));
+  if (selected) setActiveVersion(selected);
+  return selected ?? null;
 }
 
 /**
@@ -141,6 +157,12 @@ async function processModelFile(file) {
   if (!document) {
     throw new Error('モデルファイルの解析に失敗しました。');
   }
+  if (
+    metadata.sourceType === SOURCE_TYPES.STB &&
+    findRootElement(document) !== document.documentElement
+  ) {
+    throw new Error('STBファイルのルート要素がST-Bridgeではありません。');
+  }
 
   return {
     document,
@@ -153,6 +175,7 @@ async function processModelFile(file) {
     versionInfo: getVersionInfo(document),
     sourceType: metadata.sourceType,
     ifcSchema: metadata.ifcSchema || null,
+    ifcDiagnostics: metadata.ifcDiagnostics || null,
   };
 }
 
@@ -185,6 +208,8 @@ export function clearModelProcessingState() {
   setState('models.modelBounds', null);
   setState('sectionsData', null);
   setState('models.versionInfo', null);
+  setState('models.ifcDiagnosticsA', null);
+  setState('models.ifcDiagnosticsB', null);
   setState('models.stbVersionA', null);
   setState('models.stbVersionB', null);
   setState('models.activeXsdVersion', null);

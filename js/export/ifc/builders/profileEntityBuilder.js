@@ -28,7 +28,7 @@ export function createIShapeProfileEntity(w, position, params) {
 
   return w.createEntity('IFCISHAPEPROFILEDEF', [
     '.AREA.', // ProfileType
-    'H-Shape', // ProfileName
+    params.profileName || 'H-Shape', // ProfileName
     position, // Position
     overallWidth, // OverallWidth (mm)
     overallDepth, // OverallDepth (mm)
@@ -82,7 +82,7 @@ export function createHollowRectangleProfileEntity(w, position, params) {
 
   return w.createEntity('IFCRECTANGLEHOLLOWPROFILEDEF', [
     '.AREA.', // ProfileType
-    'Box', // ProfileName
+    params.profileName || 'Box', // ProfileName
     position, // Position
     width, // XDim (mm)
     height, // YDim (mm)
@@ -144,17 +144,17 @@ export function createCircleProfileEntity(w, position, params) {
  * @returns {number} プロファイルエンティティID
  */
 export function createLShapeProfileEntity(w, position, params) {
-  const { depth = 75, width = 75, thickness = 6, filletRadius = 0 } = params;
+  const { depth = 75, width = 75, thickness = 6, filletRadius = 0, edgeRadius = 0 } = params;
 
   return w.createEntity('IFCLSHAPEPROFILEDEF', [
     '.AREA.', // ProfileType
-    'L-Shape', // ProfileName
+    params.profileName || 'L-Shape', // ProfileName
     position, // Position
     depth, // Depth (mm)
     width, // Width (mm)
     thickness, // Thickness (mm)
     filletRadius > 0 ? filletRadius : null, // FilletRadius (mm)
-    null, // EdgeRadius
+    edgeRadius > 0 ? edgeRadius : null, // EdgeRadius
     null, // LegSlope (傾斜角度)
   ]);
 }
@@ -178,18 +178,19 @@ export function createUShapeProfileEntity(w, position, params) {
     webThickness = 7.5,
     flangeThickness = 11,
     filletRadius = 0,
+    edgeRadius = 0,
   } = params;
 
   return w.createEntity('IFCUSHAPEPROFILEDEF', [
     '.AREA.', // ProfileType
-    'U-Shape', // ProfileName
+    params.profileName || 'U-Shape', // ProfileName
     position, // Position
     depth, // Depth (mm)
     flangeWidth, // FlangeWidth (mm)
     webThickness, // WebThickness (mm)
     flangeThickness, // FlangeThickness (mm)
     filletRadius > 0 ? filletRadius : null, // FilletRadius (mm)
-    null, // EdgeRadius
+    edgeRadius > 0 ? edgeRadius : null, // EdgeRadius
     null, // FlangeSlope
   ]);
 }

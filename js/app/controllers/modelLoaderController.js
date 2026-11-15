@@ -74,6 +74,7 @@ import {
 } from '../../modelLoader/fileValidation.js';
 import {
   processModelDocuments,
+  activateModelProcessingSchema,
   clearModelProcessingState,
 } from '../../modelLoader/modelProcessing.js';
 import {
@@ -92,13 +93,13 @@ import {
   onLoadingComplete,
   onLoadingError,
 } from '../../modelLoader/progressiveRendering.js';
-import {
-  finalizeVisualization,
-  handleFinalizationError,
-} from '../../modelLoader/visualizationFinalizer.js';
+import { finalizeVisualization } from '../../modelLoader/visualizationFinalizer.js';
 import { syncDisplayModeFromUI } from '../viewModes/index.js';
 import { convertToAdapterFormat } from './modelLoaderAdapterFormat.js';
+import { prepareModelLoad } from '../../modelLoader/modelLoadPreflight.js';
 import { updateObjectMaterialAsync } from './modelLoaderMaterialUpdate.js';
+import { beginModelLoadReplacement } from './modelLoadReplacement.js';
+import { assertNoOpenDrawingProjectForModelLoad } from './modelLoadDrawingProjectGuard.js';
 
 // モデル状態管理
 let stories = [];
@@ -113,6 +114,7 @@ let modelsLoaded = false;
 let sectionMaps = null; // 断面データ
 let modelStateGeneration = 0;
 let comparisonInProgress = false;
+let pendingModelClear = false;
 
 // 比較キータイプ変更時に自動再比較を実行
 comparisonKeyManager.onChange(async (newKeyType, oldKeyType) => {
@@ -226,13 +228,17 @@ function clearAdapterContent(adapter) {
  * @param {Function} [requestRender] - 再描画要求関数
  * @returns {number} クリア後のモデル状態世代
  */
-export function clearLoadedModels(requestRender) {
+export function clearLoadedModels(requestRender, { provisional = false } = {}) {
+  if (comparisonInProgress && !provisional) {
+    pendingModelClear = true;
+    return modelStateGeneration;
+  }
   log.info('全状態を初期化しています...');
   const generation = ++modelStateGeneration;
 
   const adapter = getState('viewer.adapter');
   try {
-    clearAdapterContent(adapter);
+    if (!provisional) clearAdapterContent(adapter);
   } catch (error) {
     // adapter固有の破棄失敗で、標準シーンやアプリ状態のクリアを中断しない。
     log.warn('common viewer adapterのモデル解除に失敗しました:', error);
@@ -257,11 +263,13 @@ export function clearLoadedModels(requestRender) {
 
   eventBus.emit(ModelEvents.CLEARED);
   eventBus.emit(AppEvents.CLEAR_UI_STATE);
-  resetSelection();
+  if (!provisional) resetSelection();
   eventBus.emit(AppEvents.CLEAR_TREE);
   eventBus.emit(AppEvents.CLEAR_SECTION_TREE);
-  clearParseCache();
-  clearClippingPlanes();
+  if (!provisional) {
+    clearParseCache();
+    clearClippingPlanes();
+  }
   createOrUpdateGridHelper(modelBounds);
 
   const render = requestRender || scheduleRender;
@@ -276,9 +284,14 @@ export function clearLoadedModels(requestRender) {
  * @param {Object} options - カメラとコントロールの参照
  * @returns {Promise<boolean>} 処理結果
  */
-export async function compareModels(scheduleRender, { camera, controls } = {}) {
+export async function compareModels(
+  scheduleRender,
+  { camera, controls, requireCompleteRendering = false, drawingProjectLoadHandoff = null } = {},
+) {
   // Phase 1: Validation and Input Processing
-  const fileValidation = validateAndGetFiles();
+  const fileValidation = validateAndGetFiles({
+    fileAOverride: drawingProjectLoadHandoff?.fileA || null,
+  });
   if (!fileValidation.isValid) {
     return false;
   }
@@ -303,19 +316,82 @@ export async function compareModels(scheduleRender, { camera, controls } = {}) {
     return false;
   }
 
+  // #650: the DrawingProject UI has no atomic participant in this model transaction.
+  // Do not silently invalidate a registered drawing/review when reloading A/B.
+  // Export and close the active drawing first; slot rebind may be staged as ZIP.
+  try {
+    if (drawingProjectLoadHandoff) drawingProjectLoadHandoff.assertPreflight();
+    else assertNoOpenDrawingProjectForModelLoad();
+  } catch (error) {
+    eventBus.emit(ToastEvents.SHOW_ERROR, { message: error.message });
+    return false;
+  }
+
   // 比較・再読込はシーンとglobalStateを一括更新するため、同時実行させない。
   // 解除中の中央読込や設定変更イベントなど、ボタン以外の入口からの競合もここで防ぐ。
   if (comparisonInProgress) {
     log.warn('モデルの読込/比較処理が進行中のため、重複実行をスキップしました');
     return false;
   }
-  // === Phase 0: Comprehensive State Reset ===
-  const loadGeneration = clearLoadedModels(scheduleRender);
   comparisonInProgress = true;
+  pendingModelClear = false;
   setLoadingState(true);
+  const previousModel = getModelData();
+  let replacement = null;
+  let drawingParticipant = null;
 
   try {
     onLoadingStart();
+
+    // Invalid XML and superseded File selections must not erase an existing scene.
+    // The scene replacement below also protects failures after this parse gate.
+    let processingResult;
+    try {
+      processingResult = await prepareModelLoad({
+        fileA,
+        fileB,
+        processDocuments: (candidateA, candidateB) =>
+          processModelDocuments(candidateA, candidateB, { activateSchema: false }),
+        readSelectedFiles: () => ({
+          fileA:
+            drawingProjectLoadHandoff?.fileA ||
+            document.getElementById('fileA')?.files?.[0] ||
+            null,
+          fileB: document.getElementById('fileB')?.files?.[0] || null,
+        }),
+      });
+    } catch (error) {
+      log.error('モデル事前解析に失敗（既存モデルは保持）:', error);
+      onLoadingError(error.message || 'STB解析に失敗しました。');
+      eventBus.emit(ToastEvents.SHOW_ERROR, {
+        message: `STB解析に失敗しました（既存モデルは保持）: ${error.message}`,
+      });
+      return false;
+    }
+
+    if (pendingModelClear) return false;
+    // The loader's parsed STB-A DOM and the staged original bytes must be
+    // attested together, before even provisional 3D state is touched.
+    if (drawingProjectLoadHandoff)
+      drawingParticipant = await drawingProjectLoadHandoff.prepare(processingResult.modelADocument);
+    // The asynchronous STB preflight may have allowed a drawing project to be
+    // registered after our initial guard. Recheck at the synchronous commit
+    // boundary before touching model state, scene or registration events.
+    if (drawingProjectLoadHandoff) drawingProjectLoadHandoff.assertBeforePublish();
+    else assertNoOpenDrawingProjectForModelLoad();
+    // The external common-viewer adapter has no resource-preserving rollback API.
+    // Refuse a replacement before touching it rather than losing its displayed model.
+    if (modelsLoaded && getState('viewer.useCommonViewer') && getState('viewer.adapter')) {
+      throw new Error('common viewerでのモデル差替えには、一度モデルを解除してください。');
+    }
+    replacement = beginModelLoadReplacement();
+    // clearLoadedModels mutates these collections; use fresh provisional instances.
+    stories = [];
+    nodeMapA = new Map();
+    nodeMapB = new Map();
+    nodeLabels = [];
+    const loadGeneration = clearLoadedModels(scheduleRender, { provisional: true });
+    activateModelProcessingSchema(processingResult.schemaVersions);
 
     // 元のSTBファイルをグローバル状態に再保存（リセット後に行う）
     // IFC変換やSTBバージョン変換で使用するため
@@ -326,8 +402,7 @@ export async function compareModels(scheduleRender, { camera, controls } = {}) {
       setState('files.originalFileB', fileB);
     }
 
-    // Phase 2: Model Document Processing (throws on failure)
-    const processingResult = await processModelDocuments(fileA, fileB);
+    // Phase 2 was preflighted before clearLoadedModels.
 
     // Update local state with processed data
     ({ modelADocument, modelBDocument, nodeMapA, nodeMapB, stories, axesData, sectionMaps } =
@@ -345,6 +420,8 @@ export async function compareModels(scheduleRender, { camera, controls } = {}) {
     setState('models.sectionMaps', sectionMaps);
     setState('sectionsData', sectionMaps);
     setState('models.versionInfo', versionInfo);
+    setState('models.ifcDiagnosticsA', processingResult.ifcDiagnosticsA ?? null);
+    setState('models.ifcDiagnosticsB', processingResult.ifcDiagnosticsB ?? null);
     setState('models.calDataA', calDataA);
     setState('models.calDataB', calDataB);
     setState('models.stbVersionA', versionInfo.versionA);
@@ -548,6 +625,16 @@ export async function compareModels(scheduleRender, { camera, controls } = {}) {
       }
     }
 
+    // A replacement must roll back on render errors; an initial import may keep partial geometry.
+    if (
+      (previousModel.modelsLoaded || requireCompleteRendering) &&
+      renderingResult.errors?.length
+    ) {
+      throw new Error(
+        `モデル描画に失敗しました: ${renderingResult.errors.map((e) => e.error || e.message).join(', ')}`,
+      );
+    }
+
     // Update node labels
     nodeLabels = renderingResult.nodeLabels;
 
@@ -643,7 +730,45 @@ export async function compareModels(scheduleRender, { camera, controls } = {}) {
       controls,
     });
 
-    // Clear clipping planes
+    // Reject stale input even when it changed after XML parsing, during rendering.
+    if (
+      pendingModelClear ||
+      (drawingProjectLoadHandoff?.fileA || document.getElementById('fileA')?.files?.[0] || null) !==
+        fileA ||
+      (document.getElementById('fileB')?.files?.[0] || null) !== fileB
+    ) {
+      throw new Error('モデル描画中に選択状態が変更されました。再度読み込んでください。');
+    }
+
+    // #650: drawing registration can occur during await finalizeVisualization().
+    // Guard the final publish boundary; failure follows the normal rollback path.
+    if (drawingProjectLoadHandoff) drawingProjectLoadHandoff.assertBeforePublish();
+    else assertNoOpenDrawingProjectForModelLoad();
+    resetSelection();
+    // resetSelection and synchronous subscribers may register a DrawingProject.
+    // Validate once more at the irrevocable scene/state publish boundary.
+    const commitResult = replacement.commit({
+      validateBeforePublish: drawingProjectLoadHandoff
+        ? () => drawingProjectLoadHandoff.assertBeforePublish()
+        : assertNoOpenDrawingProjectForModelLoad,
+      drawingParticipant,
+    });
+    replacement = null;
+    // Rendering and Document Control are now irreversible. UI synchronization
+    // is a separate operation: a failure revokes drawing authorization without
+    // pretending the new STB-A model was rolled back.
+    let drawingResyncError = null;
+    if (drawingProjectLoadHandoff) {
+      if (commitResult?.drawingStatus !== 'rebound') {
+        drawingResyncError = new Error('Document Controlの改訂登録が確定していません。');
+      } else {
+        try {
+          drawingProjectLoadHandoff.afterCommit(commitResult);
+        } catch (error) {
+          drawingResyncError = error;
+        }
+      }
+    }
     clearClippingPlanes();
 
     // Mark models as loaded
@@ -654,6 +779,16 @@ export async function compareModels(scheduleRender, { camera, controls } = {}) {
       hasModelB: !!modelBDocument,
     });
     onLoadingComplete();
+    for (const [side, diagnostics] of [
+      ['A', processingResult.ifcDiagnosticsA],
+      ['B', processingResult.ifcDiagnosticsB],
+    ]) {
+      if (!diagnostics) continue;
+      eventBus.emit(ToastEvents.SHOW_WARNING, {
+        message: `モデル${side}のIFC→STBは完全復元未検証です（分類${diagnostics.classifiedElementCount}件、STB要素未生成${diagnostics.unconvertedClassifiedCount}件）。`,
+        options: { duration: 10000 },
+      });
+    }
 
     schedulePostLoadTask(() => {
       if (loadGeneration !== modelStateGeneration) return;
@@ -688,39 +823,56 @@ export async function compareModels(scheduleRender, { camera, controls } = {}) {
       });
     });
 
+    if (drawingResyncError) {
+      log.error('STB-A公開後の図面・シート再同期に失敗:', drawingResyncError);
+      eventBus.emit(ToastEvents.SHOW_ERROR, {
+        message:
+          '新STB-Aは公開されましたが図面登録・再描画を確定できず、図面権限を失効しました: ' +
+          drawingResyncError.message,
+      });
+      return false;
+    }
     return true;
   } catch (error) {
+    if (replacement) {
+      replacement.rollback();
+      replacement = null;
+      ({
+        stories,
+        nodeMapA,
+        nodeMapB,
+        nodeLabels,
+        modelBounds,
+        axesData,
+        modelADocument,
+        modelBDocument,
+        modelsLoaded,
+        sectionMaps,
+      } = previousModel);
+      ++modelStateGeneration;
+      scheduleRender();
+    }
     log.error('モデル比較に失敗:', error);
     onLoadingError(error.message || '不明なエラー');
     eventBus.emit(ToastEvents.SHOW_ERROR, {
       message: `エラーが発生しました: ${error.message || '不明なエラー'}`,
     });
 
-    // Error cleanup
-    handleFinalizationError(error);
-
-    // Reset state safely
-    try {
-      modelBounds = clearSceneContent(elementGroups, nodeLabels || []);
-      setState('models.modelBounds', modelBounds);
-      stories.length = 0;
-      nodeMapA.clear();
-      nodeMapB.clear();
-      axesData = { xAxes: [], yAxes: [] };
-      nodeLabels = [];
-      createOrUpdateGridHelper(modelBounds);
-      clearModelProcessingState();
-      modelsLoaded = false;
-      // シーンをクリアしたため、モデルクリアを通知（ARボタン等の活性状態が追従する）
-      eventBus.emit(ModelEvents.CLEARED);
-    } catch (cleanupError) {
-      log.error('状態クリーンアップ中のエラー:', cleanupError);
-    }
-
     return false;
   } finally {
     comparisonInProgress = false;
     setLoadingState(false);
+    if (pendingModelClear) {
+      pendingModelClear = false;
+      // A clear requested while loading must not erase a DrawingProject opened
+      // during the async pipeline or while rollback was in progress.
+      try {
+        assertNoOpenDrawingProjectForModelLoad();
+        clearLoadedModels(scheduleRender);
+      } catch (error) {
+        eventBus.emit(ToastEvents.SHOW_ERROR, { message: error.message });
+      }
+    }
   }
 }
 

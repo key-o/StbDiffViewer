@@ -128,6 +128,11 @@ function approvedMappingIndex(approvedMappings, requiredIds) {
 
 function oldSourceRef(binding, sourceRevisionId) {
   const revision = binding.revisions.find((item) => item.sourceRevisionId === sourceRevisionId);
+  if (revision?.orphaned) {
+    // 孤児化済みentityは、最後に対応していたsourceRefを候補表示・再関連付けの起点にする。
+    const last = [...binding.revisions].reverse().find((item) => item.sourceRef);
+    if (last) return freezeSourceRef(last.sourceRef);
+  }
   if (!revision?.sourceRef)
     throw new Error(
       'BindingRegistryにDrawingDocument source revisionのmappingがありません: ' + binding.entityId,
@@ -135,7 +140,17 @@ function oldSourceRef(binding, sourceRevisionId) {
   return freezeSourceRef(revision.sourceRef);
 }
 
-function mappingStatus({ entityId, fromSourceRef, approvedSourceRef, candidates }) {
+function mappingStatus({ entityId, fromSourceRef, approvedSourceRef, candidates, orphaned }) {
+  if (orphaned)
+    return Object.freeze({
+      entityId,
+      status: 'resolved',
+      method: 'orphaned',
+      fromSourceRef,
+      toSourceRef: null,
+      candidateOrigin: null,
+      candidateState: null,
+    });
   if (approvedSourceRef) {
     const candidate = candidates.byKey.get(sourceRefKey(approvedSourceRef));
     if (!candidate)
@@ -282,6 +297,24 @@ export function planDrawingProjectStoryRevisionRebind({
   });
 }
 
+/** 孤児化は部材/寸法のentityだけに許可する。対象階bindingは孤児にできず、approved mappingとも併用できない。 */
+function orphanEntityIndex(orphanedEntityIds, requiredIds, document, approved) {
+  if (!Array.isArray(orphanedEntityIds)) throw new TypeError('orphanedEntityIdsは配列が必要です。');
+  const result = new Set();
+  const storyEntityId = document.view?.storyBinding?.entityId;
+  for (const [i, raw] of orphanedEntityIds.entries()) {
+    const entityId = requiredString(raw, `orphanedEntityIds[${i}]`);
+    if (!requiredIds.has(entityId))
+      throw new Error('孤児化するentityIdは対象DrawingDocumentで使用されていません: ' + entityId);
+    if (entityId === storyEntityId) throw new Error('対象階bindingは孤児として保持できません。');
+    if (approved.has(entityId))
+      throw new Error('approved mappingと孤児化を同じentityIdに指定できません: ' + entityId);
+    if (result.has(entityId)) throw new Error('孤児化entityIdが重複しています: ' + entityId);
+    result.add(entityId);
+  }
+  return result;
+}
+
 function rejectDuplicateTargets(results) {
   const owners = new Map();
   for (const mapping of results) {
@@ -319,6 +352,7 @@ export function planDrawingProjectDrawingRevisionRebind({
   newRevision,
   drawingModel,
   approvedMappings = [],
+  orphanedEntityIds = [],
 } = {}) {
   const normalized = normalizeDrawingProject(project);
   const document = documentById(normalized, drawingId);
@@ -326,9 +360,17 @@ export function planDrawingProjectDrawingRevisionRebind({
   if (slot.currentRevisionId !== document.sourceRevisionId)
     throw new Error('current revision以外のDrawingDocumentはreplacement対象にできません。');
 
+  // Canonical DrawingModel SHA and original STB byte SHA are distinct revision facts.
+  // Keep the optional raw hash through staging/commit so a subsequent ZIP export can
+  // verify the original bytes rather than comparing them against serialized XML.
+  const originalSha256 =
+    newRevision?.originalSha256 == null
+      ? null
+      : sha256(newRevision.originalSha256, 'newRevision.originalSha256');
   const toRevision = Object.freeze({
     id: requiredString(newRevision?.id, 'newRevision.id'),
     sha256: sha256(newRevision?.sha256, 'newRevision.sha256'),
+    ...(originalSha256 == null ? {} : { originalSha256 }),
   });
   if (toRevision.id === document.sourceRevisionId)
     throw new Error('replacement先revision IDは現在revisionと異なる必要があります。');
@@ -340,6 +382,12 @@ export function planDrawingProjectDrawingRevisionRebind({
   const sameId = slot.revisions.find((item) => item.id === toRevision.id);
   if (sameId && String(sameId.sha256).toLowerCase() !== toRevision.sha256)
     throw new Error('newRevision.idが異なるSHA-256で既に登録されています。');
+  if (
+    sameId?.originalSha256 &&
+    toRevision.originalSha256 &&
+    String(sameId.originalSha256).toLowerCase() !== toRevision.originalSha256
+  )
+    throw new Error('newRevision.idの既存STB原本SHA-256が新原本と一致しません。');
   const sameHash = slot.revisions.find(
     (item) => String(item.sha256).toLowerCase() === toRevision.sha256,
   );
@@ -357,6 +405,7 @@ export function planDrawingProjectDrawingRevisionRebind({
   const bindings = bindingByEntityId(normalized, document);
   const approved = approvedMappingIndex(approvedMappings, requiredIds);
   const candidates = candidateSourceRefs(drawingModel);
+  const orphans = orphanEntityIndex(orphanedEntityIds, requiredIds, document, approved);
   const results = [];
   for (const entityId of [...requiredIds].sort()) {
     const binding = bindings.get(entityId);
@@ -369,6 +418,7 @@ export function planDrawingProjectDrawingRevisionRebind({
         fromSourceRef,
         approvedSourceRef: approved.get(entityId) || null,
         candidates,
+        orphaned: orphans.has(entityId),
       }),
     );
   }
@@ -396,7 +446,31 @@ export function planDrawingProjectDrawingRevisionRebind({
     status: unresolved.length === 0 ? 'ready' : 'blocked',
     mappings: Object.freeze(checkedResults),
     unresolved: Object.freeze(unresolved),
+    diagnostics: drawStateDiagnostics(checkedResults),
   });
+}
+
+const NOT_DRAWN_DIAGNOSTIC_CODES = Object.freeze({
+  'outside-view': 'MEMBER_OUTSIDE_VIEW',
+  failed: 'MEMBER_DRAWING_FAILED',
+});
+
+/** 解決済み対応先が新DrawingModelで描画されない場合の事前診断。statusは変えず、確定前に理由を示す。 */
+function drawStateDiagnostics(mappings) {
+  const diagnostics = [];
+  for (const mapping of mappings) {
+    if (mapping.status !== 'resolved' || !mapping.toSourceRef) continue;
+    const state = mapping.candidateState;
+    if (state == null || state === 'drawn') continue;
+    diagnostics.push(
+      Object.freeze({
+        entityId: mapping.entityId,
+        code: NOT_DRAWN_DIAGNOSTIC_CODES[state] || 'MEMBER_NOT_DRAWN',
+        toSourceRef: mapping.toSourceRef,
+      }),
+    );
+  }
+  return Object.freeze(diagnostics);
 }
 
 function assertPlan(plan) {
@@ -437,7 +511,8 @@ export function commitDrawingProjectDrawingRevisionRebind({ project, plan: planI
   const currentBindings = bindingByEntityId(normalized, document);
   const targetOwners = new Map();
   for (const mapping of plan.mappings) {
-    if (mapping.status !== 'resolved' || !mapping.toSourceRef)
+    const orphaned = mapping.method === 'orphaned';
+    if (mapping.status !== 'resolved' || (!mapping.toSourceRef && !orphaned))
       throw new Error('ready planにunresolved mappingが含まれています。');
     const binding = currentBindings.get(mapping.entityId);
     if (!binding)
@@ -447,6 +522,7 @@ export function commitDrawingProjectDrawingRevisionRebind({ project, plan: planI
       throw new Error(
         'rebind plan作成後にBindingRegistry mappingが変更されています: ' + mapping.entityId,
       );
+    if (orphaned) continue;
     const targetKey = sourceRefKey(freezeSourceRef(mapping.toSourceRef));
     if (targetOwners.has(targetKey))
       throw new Error(
@@ -458,23 +534,35 @@ export function commitDrawingProjectDrawingRevisionRebind({ project, plan: planI
   const next = clone(normalized);
   const nextDocument = documentById(next, plan.drawingId);
   const nextSlot = slotForDocument(next, nextDocument);
-  if (!nextSlot.revisions.some((item) => item.id === plan.toRevision.id))
+  const existingRevision = nextSlot.revisions.find((item) => item.id === plan.toRevision.id);
+  if (!existingRevision) {
     nextSlot.revisions.push({ ...plan.toRevision });
+  } else if (plan.toRevision.originalSha256) {
+    // A pre-existing canonical revision must not silently point to different STB bytes.
+    if (
+      existingRevision.originalSha256 &&
+      String(existingRevision.originalSha256).toLowerCase() !== plan.toRevision.originalSha256
+    )
+      throw new Error('既存revisionのSTB原本SHA-256がrebind planと一致しません。');
+    existingRevision.originalSha256 = plan.toRevision.originalSha256;
+  }
   nextSlot.currentRevisionId = plan.toRevision.id;
 
   const nextBindings = new Map(next.bindings.map((item) => [item.entityId, item]));
   for (const mapping of plan.mappings) {
-    if (mapping.status !== 'resolved' || !mapping.toSourceRef)
+    const orphaned = mapping.method === 'orphaned';
+    if (mapping.status !== 'resolved' || (!mapping.toSourceRef && !orphaned))
       throw new Error('ready planにunresolved mappingが含まれています。');
     const binding = nextBindings.get(mapping.entityId);
     if (!binding || binding.modelSlotId !== nextDocument.modelSlotId)
       throw new Error('commit対象bindingがありません: ' + mapping.entityId);
     if (binding.revisions.some((item) => item.sourceRevisionId === plan.toRevision.id))
       throw new Error('commit対象bindingにnew revision mappingが既にあります: ' + mapping.entityId);
-    binding.revisions.push({
-      sourceRevisionId: plan.toRevision.id,
-      sourceRef: clone(mapping.toSourceRef),
-    });
+    binding.revisions.push(
+      orphaned
+        ? { sourceRevisionId: plan.toRevision.id, sourceRef: null, orphaned: true }
+        : { sourceRevisionId: plan.toRevision.id, sourceRef: clone(mapping.toSourceRef) },
+    );
   }
   const storyEntityId = nextDocument.view?.storyBinding?.entityId;
   if (storyEntityId) {
@@ -484,5 +572,24 @@ export function commitDrawingProjectDrawingRevisionRebind({ project, plan: planI
     nextDocument.view.storyId = String(storyMapping.toSourceRef.elementId);
   }
   nextDocument.sourceRevisionId = plan.toRevision.id;
+  // シート上の断面リスト領域(柱/梁/スラブ)は図形を保存せず、現行STB-Aから出力時に再生成する。
+  // 参照改訂だけを新改訂へ付け替える。新STBに存在しない階・符号・行は再生成時に明示エラーとなる。
+  next.drawingSheets = (next.drawingSheets ?? []).map((sheet) =>
+    sheet.listPlacements?.some(
+      (item) =>
+        item.modelSlotId === nextDocument.modelSlotId &&
+        item.sourceRevisionId === plan.fromRevisionId,
+    )
+      ? {
+          ...sheet,
+          listPlacements: sheet.listPlacements.map((item) =>
+            item.modelSlotId === nextDocument.modelSlotId &&
+            item.sourceRevisionId === plan.fromRevisionId
+              ? { ...item, sourceRevisionId: plan.toRevision.id }
+              : item,
+          ),
+        }
+      : sheet,
+  );
   return normalizeDrawingProject(next);
 }

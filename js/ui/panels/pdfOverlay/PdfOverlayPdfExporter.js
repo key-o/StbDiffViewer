@@ -1,5 +1,6 @@
 /** @fileoverview PDF照合ワークスペースの注記付きPDF出力。 */
 import { multiplyAffine, transformPoint } from '../../../data/drawing/affine2d.js';
+import { isSheetPaperName } from '../../../data/drawing/drawingSheetPaper.js';
 import { resolveMeasurementOffsetModelMm } from './PdfOverlayMeasurementController.js';
 
 const EXPORT_RENDER_SCALE = 2;
@@ -215,6 +216,208 @@ function drawStoredAnnotations(panel, canvas, render, pageNumber) {
   measurements.forEach((measurement) =>
     drawMeasurement(ctx, canvasRender, measurement, annotationScale),
   );
+}
+
+/**
+ * 印刷用SVGのuser unitは用紙mm。画面px固定線幅を実寸mmへ正規化する。
+ * 紙面mmの寸法/タグとテキスト白縁はそれぞれの用途を保つ。
+ */
+const CSS_PX_TO_MM = 25.4 / 96;
+const PDF_LINE_WIDTH_FACTORS = Object.freeze({
+  svg: 1,
+  thin: 0.6,
+  fine: 0.5,
+  legacy: null,
+});
+
+/** Relative luminance 0-1 of a CSS color, or null when it is not a plain hex/rgb()/named color. */
+function cssColorLuminance(value) {
+  const text = String(value).trim().toLowerCase();
+  if (text === 'white') return 1;
+  if (text === 'black') return 0;
+  let channels = null;
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/.exec(text);
+  if (hex) {
+    const digits =
+      hex[1].length === 3 ? [...hex[1]].map((digit) => digit + digit) : hex[1].match(/../g);
+    channels = digits.map((part) => parseInt(part, 16));
+  } else {
+    const rgb = /^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/.exec(text);
+    if (rgb) channels = [rgb[1], rgb[2], rgb[3]].map(Number);
+  }
+  if (!channels) return null;
+  return (0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]) / 255;
+}
+
+/**
+ * Monochrome print: every visible stroke, fill and text color becomes black. Near-white
+ * paints (page background, text halos) stay white so contrast and knock-outs survive.
+ */
+function applyMonochrome(svg) {
+  const keep = new Set(['none', 'transparent', 'currentcolor', 'inherit']);
+  const convert = (value) => {
+    if (value == null || value === '') return null;
+    const text = String(value).trim().toLowerCase();
+    if (keep.has(text) || text.startsWith('url(')) return null;
+    const luminance = cssColorLuminance(text);
+    // Light paints (white halo, paper) stay; anything else, including unknown names, prints black.
+    return luminance !== null && luminance >= 0.9 ? null : '#000000';
+  };
+  for (const element of svg.querySelectorAll('*')) {
+    for (const property of ['fill', 'stroke']) {
+      const attribute = convert(element.getAttribute(property));
+      if (attribute) element.setAttribute(property, attribute);
+      const inline = convert(element.style?.[property]);
+      if (inline) element.style[property] = inline;
+    }
+  }
+}
+
+export function applyDrawingSheetPdfPrintStyle(
+  svg,
+  { lineWidthPreset = 'thin', linePattern = 'svg', colorMode = 'color' } = {},
+) {
+  if (!Object.hasOwn(PDF_LINE_WIDTH_FACTORS, lineWidthPreset))
+    throw new RangeError('未対応のPDF線幅設定です。');
+  if (linePattern !== 'svg' && linePattern !== 'solid')
+    throw new RangeError('未対応のPDF線種設定です。');
+  if (colorMode !== 'color' && colorMode !== 'monochrome')
+    throw new RangeError('未対応のPDF色設定です。');
+
+  const factor = PDF_LINE_WIDTH_FACTORS[lineWidthPreset];
+  for (const element of svg.querySelectorAll('[stroke-width]')) {
+    // テキストの白縁は線ではなく可読性のための縁取りなので対象外。
+    if (element.localName === 'text') continue;
+    if (factor != null) {
+      const rawWidth = Number(element.getAttribute('stroke-width'));
+      if (Number.isFinite(rawWidth) && rawWidth > 0) {
+        const isScreenWidth = element.getAttribute('vector-effect') === 'non-scaling-stroke';
+        const widthMm = Number((rawWidth * (isScreenWidth ? CSS_PX_TO_MM : 1) * factor).toFixed(4));
+        element.setAttribute('stroke-width', String(widthMm));
+        if (element.style?.strokeWidth) element.style.strokeWidth = String(widthMm);
+        // 非拡大線の破線長も画面px単位。線幅だけ換算すると実線/空白比が崩れる。
+        // 紙面mm指定の寸法線の破線長は変更しない。
+        if (isScreenWidth && linePattern === 'svg') {
+          const rawDash =
+            element.style?.strokeDasharray || element.getAttribute('stroke-dasharray');
+          const segments = rawDash
+            ?.trim()
+            .split(/[\s,]+/)
+            .map(Number);
+          if (segments?.length && segments.every((value) => Number.isFinite(value) && value >= 0)) {
+            const dashMm = segments
+              .map((value) => Number((value * CSS_PX_TO_MM).toFixed(4)))
+              .join(' ');
+            element.setAttribute('stroke-dasharray', dashMm);
+            if (element.style?.strokeDasharray) element.style.strokeDasharray = dashMm;
+          }
+        }
+        // 印刷SVGは紙面mm座標なのでpx固定指定を除去する。
+        if (isScreenWidth) element.removeAttribute('vector-effect');
+      }
+    }
+  }
+  if (linePattern === 'solid') {
+    for (const element of svg.querySelectorAll('[stroke-dasharray]')) {
+      if (element.localName === 'text') continue;
+      element.removeAttribute('stroke-dasharray');
+      if (element.style?.strokeDasharray) element.style.strokeDasharray = 'none';
+    }
+  }
+  if (colorMode === 'monochrome') applyMonochrome(svg);
+  return svg;
+}
+
+/** A3図面の出力範囲だけを切り出す。作業ビューの余白や表示ズームは出力しない。 */
+export function prepareDrawingSheetSvgForPdf(sourceSvg, layout, printOptions = {}) {
+  if (!sourceSvg || !layout || !isSheetPaperName(layout.paper))
+    throw new Error('PDF保存には生成済みの図面（A0〜A4）が必要です。');
+  const { widthMm, heightMm } = layout;
+  if (![widthMm, heightMm].every((value) => Number.isFinite(value) && value > 0))
+    throw new RangeError('PDF用紙寸法が不正です。');
+  const svg = sourceSvg.cloneNode(true);
+  svg.setAttribute('viewBox', `0 0 ${widthMm} ${heightMm}`);
+  svg.setAttribute('width', String(widthMm));
+  svg.setAttribute('height', String(heightMm));
+  svg.style.width = `${widthMm}px`;
+  svg.style.height = `${heightMm}px`;
+  for (const element of svg.querySelectorAll('*')) {
+    if (ignoredDuringExport(element)) element.remove();
+    else element.classList?.remove('is-selected', 'is-candidate');
+  }
+  return applyDrawingSheetPdfPrintStyle(svg, printOptions);
+}
+
+/** PDF未読込でも、表示中のSTB/DXF図面・図面メモ・寸法をA3用紙に出力する。 */
+export async function exportDrawingSheetPdf(
+  panel,
+  {
+    filename,
+    onProgress = null,
+    html2canvas: captureOverride = null,
+    JsPdf: pdfOverride = null,
+    printOptions = {},
+    mode = 'vector',
+    fontFile = null,
+    vectorRenderOverride = null,
+  } = {},
+) {
+  const layout = panel?.sheetLayout;
+  const source = panel?.e?.['pdf-overlay-svg-layer']?.querySelector?.('svg');
+  if (!source || !layout) throw new Error('図面を生成してからPDF保存してください。');
+  if (mode !== 'vector' && mode !== 'raster') throw new RangeError('PDF出力モードが不正です。');
+  const JsPdf = pdfOverride || (await import('jspdf')).jsPDF;
+  const svg = prepareDrawingSheetSvgForPdf(source, layout, printOptions);
+  const ownerDocument = source.ownerDocument;
+  const holder = ownerDocument.createElement('div');
+  holder.className = 'pdf-overlay-svg-layer';
+  Object.assign(holder.style, {
+    position: 'fixed',
+    top: '0',
+    left: '0',
+    zIndex: '-1',
+    width: `${layout.widthMm}px`,
+    height: `${layout.heightMm}px`,
+    pointerEvents: 'none',
+    overflow: 'hidden',
+    opacity: '1',
+  });
+  holder.append(svg);
+  ownerDocument.body.append(holder);
+  try {
+    onProgress?.({ pageNumber: 1, numPages: 1 });
+    if (mode === 'vector') {
+      const { renderSvgToVectorPdf } = await import('./PdfOverlayVectorPdf.js');
+      const pdf = await renderSvgToVectorPdf(svg, layout, {
+        JsPdf,
+        fontFile,
+        ...(vectorRenderOverride ? { render: vectorRenderOverride } : {}),
+      });
+      await pdf.save(filename);
+      return filename;
+    }
+    const capture = captureOverride || (await import('html2canvas')).default;
+    const canvas = await capture(holder, {
+      scale: 200 / 25.4, // A3を約200dpiで保存（表示倍率に依存しない）
+      backgroundColor: '#ffffff',
+      logging: false,
+      useCORS: true,
+      allowTaint: false,
+    });
+    const pointsPerMm = 72 / 25.4;
+    const pdf = addCanvasToPdf(
+      null,
+      canvas,
+      layout.widthMm * pointsPerMm,
+      layout.heightMm * pointsPerMm,
+      true,
+      JsPdf,
+    );
+    pdf.save(filename);
+    return filename;
+  } finally {
+    holder.remove();
+  }
 }
 
 function addCanvasToPdf(pdf, canvas, widthPt, heightPt, firstPage, JsPdf) {

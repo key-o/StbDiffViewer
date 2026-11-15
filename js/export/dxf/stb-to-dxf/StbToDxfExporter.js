@@ -13,6 +13,7 @@ import {
   getOrthographicCameraInternal,
   getElementGroupsInternal,
   getCurrentClippingStateInternal,
+  getPlanDrawingSourceInternal,
 } from './DxfProviders.js';
 import {
   detectViewDirection,
@@ -45,6 +46,23 @@ function isStoryPlanMode(viewDirection, clippingState) {
  * @returns {{canExport: boolean, reason: string, solidElementTypes?:Array<string>}}
  */
 export function canExportStbToDxf() {
+  // The legacy exporter reads the shared scene, which may include the B reference model.
+  const source = getPlanDrawingSourceInternal();
+  if (source?.referenceModelBPresent) {
+    return {
+      canExport: false,
+      reason: '参照用STB-Bが存在するため旧scene経路の単独DXF出力は使用できません。',
+    };
+  }
+  if (source && !source.document) {
+    return {
+      canExport: false,
+      reason: source.reason || 'STB-Aの図面出力が許可されていません。',
+    };
+  }
+  if (source?.document && source.modelKey !== 'A') {
+    return { canExport: false, reason: 'STB-A以外を図面出力正本にはできません。' };
+  }
   const elementGroups = getElementGroupsInternal();
   if (!elementGroups || Object.keys(elementGroups).length === 0) {
     return { canExport: false, reason: 'モデルが読み込まれていません' };

@@ -6,7 +6,6 @@
  */
 
 import { floatingWindowManager } from './floatingWindowManager.js';
-import { dxfController } from '../../app/controllers/dxfController.js';
 import {
   getDynamicWindows,
   getStaticWindows,
@@ -16,21 +15,6 @@ import {
 import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('ui:panels:floatingWindow');
-
-/**
- * onShowコールバックのマッピング
- * hasOnShowCallback: true が設定されたウィンドウ用
- */
-const onShowCallbacks = {
-  'dxf-floating': () => {
-    try {
-      dxfController.updatePlacementOptions();
-      dxfController.updateExportStatus();
-    } catch (e) {
-      // 無ければ無視
-    }
-  },
-};
 
 /**
  * 全てのフローティングウィンドウを初期化
@@ -68,10 +52,6 @@ export function initializeFloatingWindow() {
   for (const windowDef of staticWindows) {
     const registerConfig = getRegisterConfig(windowDef.windowId);
     if (registerConfig) {
-      // onShowコールバックがある場合は追加
-      if (windowDef.hasOnShowCallback && onShowCallbacks[windowDef.windowId]) {
-        registerConfig.onShow = onShowCallbacks[windowDef.windowId];
-      }
       floatingWindowManager.registerWindow(registerConfig);
     }
   }

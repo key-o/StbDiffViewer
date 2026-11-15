@@ -100,6 +100,18 @@ export function clearParseCache(modelKey) {
   }
 }
 
+/** Preserve document-keyed parse results until the provisional model is committed. */
+export function beginParseCacheReplacement() {
+  const previous = new Map(parseCache);
+  parseCache.clear();
+  return {
+    rollback() {
+      parseCache.clear();
+      for (const [key, value] of previous) parseCache.set(key, value);
+    },
+  };
+}
+
 // ============================================
 // 編集反映用インプレース更新API
 // 全再パース（大規模モデルで秒単位）を避け、キャッシュ済みパース結果へ

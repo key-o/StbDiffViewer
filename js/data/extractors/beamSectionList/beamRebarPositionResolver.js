@@ -165,6 +165,73 @@ function outerInSlotOrder(slotCount) {
 }
 
 /**
+ * STPの外周脚・中子筋を1段筋のslotへ割り当て、2段筋の優先候補を返す。
+ * 中子筋の本数がslot数を超える場合は、実際の主筋と対応しないため外周脚のみを候補とする。
+ */
+export function resolveBeamStirrupPreferredPositions(firstLayerPositions, stirrupCount) {
+  const slots = [...(firstLayerPositions || [])].filter(Number.isFinite).sort((a, b) => a - b);
+  if (!slots.length || !(Number(stirrupCount) >= 2)) return [];
+  const innerCount = Math.max(0, Math.trunc(Number(stirrupCount)) - 2);
+  const anchors = [slots[0], slots[slots.length - 1]];
+  if (slots.length < innerCount + 2) return anchors;
+  const lastIndex = slots.length - 1;
+  for (let i = 1; i <= innerCount; i += 1) {
+    const targetIndex = Math.round((lastIndex * i) / (innerCount + 1));
+    const index = Math.max(i, Math.min(lastIndex - (innerCount - i) - 1, targetIndex));
+    anchors.push(slots[index]);
+  }
+  return anchors;
+}
+
+/**
+ * 2段目以降の筋を、1段目から間引いたslotに配置する。
+ * STP脚のslotを優先しつつ、左右端と全体の均等性を保つ。
+ * 上段より本数が多い場合はslotを間引けないためnullを返し、従来の均等割付へ戻す。
+ */
+export function selectBeamLayerXPositions(count, firstLayerPositions, preferredPositions = []) {
+  const slots = [...(firstLayerPositions || [])];
+  const required = Math.trunc(Number(count));
+  if (!Number.isFinite(required) || required <= 0) return [];
+  if (!slots.length || required > slots.length) return null;
+  // 2段筋が1本だけの場合は中央へ寄せず、左側外周STPに沿う1段筋の左端slotを使用する。
+  // 1段筋のslotはX座標の昇順で生成されるため、先頭が左側の配置位置となる。
+  if (required === 1) return [slots[0]];
+  if (required === slots.length) return slots;
+
+  // 断面図におけるslotの均等配置と、STP脚に対応するslotの優先配置を
+  // 動的計画法で両立させる。必要本数は変えず、同じslotを二度選ばない。
+  const n = slots.length;
+  const preferred = slots.map((x) =>
+    preferredPositions.some((anchor) => Number.isFinite(anchor) && Math.abs(anchor - x) < 1e-6),
+  );
+  let previous = new Map([[-1, { cost: 0, indices: [] }]]);
+  for (let position = 0; position < required; position += 1) {
+    const next = new Map();
+    const ideal = ((n - 1) * position) / (required - 1);
+    for (let index = position; index <= n - (required - position); index += 1) {
+      // 2本以上は左右端を保持し、段筋が片側へ偏らないようにする。
+      if (required > 1 && position === 0 && index !== 0) continue;
+      if (required > 1 && position === required - 1 && index !== n - 1) continue;
+      const placementCost = (index - ideal) ** 2 + (preferred[index] ? 0 : 1.25);
+      for (const [last, candidate] of previous) {
+        if (last >= index) continue;
+        const cost = candidate.cost + placementCost;
+        const current = next.get(index);
+        if (!current || cost < current.cost - 1e-9) {
+          next.set(index, { cost, indices: [...candidate.indices, index] });
+        }
+      }
+    }
+    previous = next;
+  }
+  const optimal = [...previous.values()].reduce(
+    (best, current) => (!best || current.cost < best.cost ? current : best),
+    null,
+  );
+  return optimal ? optimal.indices.map((index) => slots[index]) : null;
+}
+
+/**
  * 1段内に異径groupがある場合、外側から内側へslotを割り当てる。
  * @param {Object} layer normalized layer
  * @param {number[]} positions 断面幅方向座標

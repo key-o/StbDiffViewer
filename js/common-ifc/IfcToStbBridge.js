@@ -56,7 +56,7 @@ export async function convertIfcToStbDocument(file, options = {}) {
 
   try {
     await converter.init();
-    const { xml, schema } = await converter.convert(arrayBuffer);
+    const { xml, schema, summary } = await converter.convert(arrayBuffer);
 
     if (onProgress)
       onProgress({ stage: IMPORT_STAGES.LOADING, progress: 90, message: 'XMLを構築中...' });
@@ -75,6 +75,7 @@ export async function convertIfcToStbDocument(file, options = {}) {
       document,
       metadata: createImportMetadata(SOURCE_TYPES.IFC, {
         ifcSchema: schema || null,
+        ifcDiagnostics: summary.restorationDiagnostics,
       }),
     };
   } finally {

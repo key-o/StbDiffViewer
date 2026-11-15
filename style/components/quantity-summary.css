@@ -163,6 +163,20 @@
   text-align: center;
 }
 
+/* RC取り合い診断は数量表の補足情報。未診断・staleも小さく表示する。 */
+.quantity-summary-join-audit {
+  margin: 0 10px 6px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: var(--bg-secondary, #f8f9fa);
+  color: var(--text-secondary, #6b7280);
+  font-size: var(--font-size-xs);
+}
+
+.quantity-summary-join-audit[hidden] {
+  display: none !important;
+}
+
 .quantity-summary-footer {
   padding: 5px 10px;
   border-top: 1px solid #e5e7eb;
@@ -209,7 +223,6 @@
   }
 }
 
-
 .quantity-summary-group-row,
 .quantity-summary-fact-row {
   cursor: pointer;
@@ -230,7 +243,6 @@
 .quantity-summary-delta {
   font-weight: var(--font-weight-semibold, 600);
 }
-
 
 .quantity-summary-drilldown:empty {
   display: none;

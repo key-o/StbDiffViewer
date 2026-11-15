@@ -50,7 +50,11 @@ export function compileDrawingProjectSheet({
     throw new TypeError('DrawingProject compileにはDrawingModel v1(mm)が必要です。');
 
   const revision = sourceRevision(normalized, document);
-  if (String(drawing.source?.modelRevision || '').toLowerCase() !== revision.sha256)
+  if (
+    ![revision.id.toLowerCase(), revision.sha256.toLowerCase()].includes(
+      String(drawing.source?.modelRevision || '').toLowerCase(),
+    )
+  )
     throw new Error('DrawingModelのsource revisionがDrawingProjectと一致しません。');
   if (!samePlanView(document.view, drawing.view))
     throw new Error('DrawingModelのviewがDrawingDocumentと一致しません。');

@@ -31,6 +31,7 @@ import { clearSectionTree } from '../panels/sectionTreeView.js';
 import { showContextMenu, initializeContextMenu } from '../common/contextMenu.js';
 import {
   displayElementInfo,
+  displayGlbElementInfo,
   displayMultiSelectionSummary,
 } from '../panels/element-info/ElementInfoDisplay.js';
 import { displayRebarInfo } from '../panels/element-info/RebarElementInfo.js';
@@ -79,6 +80,11 @@ export function setupAppEventBridge() {
       mountCadOperationPanel();
     },
   );
+
+  eventBus.on(InteractionEvents.DISPLAY_GLB_ELEMENT_INFO, (info = {}) => {
+    displayGlbElementInfo(info);
+    floatingWindowManager.showWindow('component-info');
+  });
 
   eventBus.on(InteractionEvents.DISPLAY_REBAR_INFO, (rebarInfo = {}) => {
     displayElementInfo(null, null, null);

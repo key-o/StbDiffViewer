@@ -9,7 +9,7 @@
  * - StbJointArrangement を対象部材へ配置する
  */
 
-import { getState } from '../../../data/state/globalState.js';
+import editDocumentProvider from '../../../app/editing/editDocumentProvider.js';
 import { showError } from '../../common/toast.js';
 import { buildTemplateNode } from '../../../common-stb/import/section/sectionTemplateModel.js';
 import {
@@ -182,7 +182,7 @@ function endpointSuffix202(family, endpoint) {
 
 function openJointAssignment202(created) {
   return new Promise((resolve) => {
-    const doc = getState('models.documentA');
+    const doc = editDocumentProvider.getActiveEditDocument();
     const family = jointFamily202(created?.tagName);
     if (!doc || !family || !created?.id) {
       resolve(created || null);
@@ -410,7 +410,7 @@ function openJointAssignment202(created) {
 
 function openJointArrangementBuilder() {
   return new Promise((resolve) => {
-    const doc = getState('models.documentA');
+    const doc = editDocumentProvider.getActiveEditDocument();
     if (!doc) {
       showError('モデルAが読み込まれていません');
       resolve(null);
@@ -600,7 +600,7 @@ async function openJointDefinitionBuilder202() {
 
 /** 継手ビルダーをモデルのST-Bridgeバージョンに応じて開く。 */
 export function openJointBuilder() {
-  const doc = getState('models.documentA');
+  const doc = editDocumentProvider.getActiveEditDocument();
   const version = doc ? detectStbVersion(doc) : 'unknown';
   if (String(version).startsWith('2.1')) return openJointArrangementBuilder();
   return openJointDefinitionBuilder202();

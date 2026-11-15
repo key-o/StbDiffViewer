@@ -23,9 +23,10 @@ import {
   getBatchElementCenter,
   getRebarDisplayManager,
   clippingStateManager,
+  getGlbModel,
 } from '../../viewer/index.js';
 import { getState } from '../../data/state/globalState.js';
-import { eventBus, InteractionEvents, ToastEvents } from '../../data/events/index.js';
+import { eventBus, InteractionEvents, SceneEvents, ToastEvents } from '../../data/events/index.js';
 import { CAMERA_CONTROLS, SELECTION_PICKING } from '../../config/renderingConstants.js';
 import {
   createOrUpdateOrbitCenterHelper,
@@ -195,6 +196,10 @@ const selectionService = createSelectionService({
   logger: {
     warn: (message, error) => logger.warn(`${WarnCategory.UI} ${message}`, error),
   },
+});
+
+eventBus.on(SceneEvents.GLB_CLEARED, () => {
+  selectionService.deselectMatchingObjects((object) => object?.userData?.isGlbElement === true);
 });
 
 export const getSelectedCenter = () => selectionService.getSelectedCenter();
@@ -523,9 +528,14 @@ function performRaycast(event) {
   raycaster.setFromCamera(mouse, activeCamera);
 
   const elementTargets = selectionRaycastTargets.getTargets();
-  const targets = isRebarSelectionModeActive()
-    ? [...elementTargets, ...(getRebarDisplayManager()?.getVisibleGroups?.() || [])]
-    : elementTargets;
+  const glbTarget = getGlbModel();
+  const rebarTargets = isRebarSelectionModeActive()
+    ? getRebarDisplayManager()?.getVisibleGroups?.() || []
+    : [];
+  const targets =
+    glbTarget || rebarTargets.length > 0
+      ? [...elementTargets, ...(glbTarget ? [glbTarget] : []), ...rebarTargets]
+      : elementTargets;
   return raycaster.intersectObjects(targets, true);
 }
 
@@ -585,13 +595,14 @@ export function collectSelectionCandidates(intersects, options = {}) {
     // 選択候補には入れない。Raycaster自体は透明度を考慮しないため候補段階で明示的に除外する。
     if (rebarOnly) continue;
 
+    const isGlbElement = userData?.isGlbElement === true;
     const elementType = userData?.elementType || userData?.stbNodeType;
     const groupVisible = elementType ? elementGroups[elementType]?.visible : false;
 
     if (
       !obj ||
-      !elementType ||
-      !groupVisible ||
+      (!elementType && !isGlbElement) ||
+      (!isGlbElement && !groupVisible) ||
       !obj.visible ||
       isPointClipped(intersect?.point, obj)
     ) {
@@ -612,7 +623,11 @@ export function collectSelectionCandidates(intersects, options = {}) {
 
     if (obj instanceof THREE.Line) {
       lineCandidates.push(obj);
-    } else if (obj instanceof THREE.Mesh || obj instanceof THREE.Sprite) {
+    } else if (
+      obj instanceof THREE.Mesh ||
+      obj instanceof THREE.Sprite ||
+      (isGlbElement && obj instanceof THREE.Points)
+    ) {
       meshOrSpriteCandidates.push(obj);
     }
   }
@@ -737,7 +752,10 @@ function processElementSelection(event, scheduleRender) {
     const elementType = userData.elementType || userData.stbNodeType;
 
     // Axis と Story 以外の場合のみハイライト処理を実行
-    if (elementType && elementType !== 'Axis' && elementType !== 'Story') {
+    if (
+      userData.isGlbElement ||
+      (elementType && elementType !== 'Axis' && elementType !== 'Story')
+    ) {
       if (isMultiSelectMode) {
         selectionService.toggleObject(objectToSelect);
       } else {

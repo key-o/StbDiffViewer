@@ -9,6 +9,7 @@ import {
   findNearestReferenceDrawingSegment,
 } from '../../../app/pdfOverlay/planMeasurement.js';
 import { showInfo, showWarning } from '../../common/toast.js';
+import { resolveSheetCssOverlay } from './sheetCssOverlay.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SNAP_TOLERANCE_PX = 14;
@@ -241,25 +242,7 @@ export class PdfOverlayMeasurementController {
 
   resolveVisualRoot(svg) {
     if (this.panel.viewportMode() !== 'sheet') return svg;
-    let overlay = svg.querySelector?.('.pdf-overlay-measurement-viewport') || null;
-    if (overlay) return overlay;
-
-    const width = Number(this.panel.sheetLayout?.previewWidthPx);
-    const height = Number(this.panel.sheetLayout?.previewHeightPx);
-    if (!(width > 0) || !(height > 0)) return svg;
-
-    const previewViewBox = this.panel.sheetLayout?.previewViewBox;
-    overlay = createSvg('svg', {
-      x: Number.isFinite(previewViewBox?.minX) ? previewViewBox.minX : 0,
-      y: Number.isFinite(previewViewBox?.minY) ? previewViewBox.minY : 0,
-      width: Number.isFinite(previewViewBox?.widthMm) ? previewViewBox.widthMm : '100%',
-      height: Number.isFinite(previewViewBox?.heightMm) ? previewViewBox.heightMm : '100%',
-      viewBox: `0 0 ${width} ${height}`,
-      preserveAspectRatio: 'none',
-      class: 'pdf-overlay-measurement-viewport',
-    });
-    svg.append(overlay);
-    return overlay;
+    return resolveSheetCssOverlay(svg, this.panel.sheetLayout, 'pdf-overlay-measurement-viewport');
   }
 
   handleStagePointerMove(event) {

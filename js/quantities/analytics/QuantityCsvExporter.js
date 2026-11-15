@@ -66,6 +66,7 @@ const FACT_COLUMNS = Object.freeze([
   'structural_steel_volume_m3',
   'warning_count',
   'warnings',
+  'inter_member_overlap_verification',
 ]);
 
 function normalizeCsvValue(value) {
@@ -191,6 +192,8 @@ export function serializeQuantitySummaryCsv(rows, state = {}) {
     }
     appendStatusColumns(columns);
   }
+  // All volume figures are member sums, not a verified building-wide solid union.
+  if (measure.endsWith('VolumeMm3')) columns.push('inter_member_overlap_verification');
 
   const csvRows = (rows || []).map((row) => {
     const output = {};
@@ -201,6 +204,10 @@ export function serializeQuantitySummaryCsv(rows, state = {}) {
       output.story_name_b = row?.storyNameB ?? '';
       const height = toFiniteNumber(row?.storyHeightMm);
       output.story_height_m = height === null ? '' : height / 1_000;
+    }
+
+    if (measure.endsWith('VolumeMm3')) {
+      output.inter_member_overlap_verification = 'not_verified';
     }
 
     if (isComparison) {
@@ -316,6 +323,7 @@ function factRow(fact, decimalDigits = null) {
     ),
     warning_count: Array.isArray(fact?.warnings) ? fact.warnings.length : 0,
     warnings: Array.isArray(fact?.warnings) ? fact.warnings.join(' | ') : '',
+    inter_member_overlap_verification: 'not_verified',
   };
 }
 

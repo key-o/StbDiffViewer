@@ -27,19 +27,25 @@
   display: flex;
 }
 
+/* 上部リボンの占有領域は js/ui/common/ribbonInset.js が body の CSS 変数へ公開する */
+#component-info.component-info-resizable:not(.docked-left) {
+  top: calc(var(--top-ribbon-bottom, 0px) + 10px);
+  max-height: calc(100vh - var(--top-ribbon-bottom, 0px) - 20px);
+}
+
 /* ========================================
    要素情報パネル: 左ドッキング
    ======================================== */
 
 /* 左端に固定。高さ・位置はドラッグのインラインスタイルを上書きするため !important */
 #component-info.docked-left {
-  top: 0 !important;
+  top: var(--top-ribbon-docked-offset, 0px) !important;
   left: 0 !important;
   right: auto !important;
   bottom: auto !important;
   transform: none !important;
-  height: 100vh !important;
-  max-height: 100vh !important;
+  height: calc(100vh - var(--top-ribbon-docked-offset, 0px)) !important;
+  max-height: calc(100vh - var(--top-ribbon-docked-offset, 0px)) !important;
   max-width: 70vw;
   border-top: none;
   border-bottom: none;
@@ -60,6 +66,15 @@
 /* ドッキング中はパネル幅ぶんキャンバス側に余白を作りキャンバスを縮める */
 body.has-docked-element-info {
   padding-left: var(--docked-element-info-width, 30vw);
+}
+
+/* 簡易CADでもリボンは全幅とし、ドッキングパネルはリボンの下に置く。余白は作図領域側だけに作る。 */
+body.workspace-view-active.has-docked-element-info {
+  padding-left: 0;
+}
+
+body.workspace-view-active.has-docked-element-info .workspace-view .workspace-body {
+  margin-left: var(--docked-element-info-width, 30vw);
 }
 
 #component-info #component-info-content-wrapper {
@@ -848,17 +863,6 @@ body.has-docked-element-info {
   overflow-wrap: anywhere;
 }
 
-/* 前提条件の案内は、本体のtoast/情報表示に合わせた左アクセント付きの情報帯にする */
-#pdf-overlay-feature-prerequisites {
-  border-width: 0 0 var(--border-width);
-  border-left: 3px solid var(--color-info);
-  border-radius: 0;
-  border-bottom-color: var(--border-color);
-  background: color-mix(in srgb, var(--color-info) 8%, var(--bg-panel));
-  color: var(--text-secondary);
-  font-size: var(--font-size-xs);
-}
-
 .workspace-main {
   position: relative;
   flex: 1 1 0;
@@ -1564,4 +1568,44 @@ body.workspace-view-active #legendPanel {
 .pdf-overlay-dxf-layer-list {
   max-height: 10rem;
   overflow: auto;
+}
+
+/* CAD views and their sheet placements use the shared element information panel. */
+.cad-element-info-readonly {
+  color: var(--text-muted, #666);
+  font-size: var(--font-size-sm, 0.85rem);
+}
+.cad-element-info-section {
+  margin-block: 0.75rem 1rem;
+}
+.cad-element-info-section h4 {
+  margin-bottom: 0.5rem;
+}
+.cad-element-info-properties {
+  display: grid;
+  grid-template-columns: minmax(7rem, 42%) minmax(0, 1fr);
+  column-gap: 0.5rem;
+  row-gap: 0;
+  margin: 0;
+  border-top: 1px solid var(--border-color, #ddd);
+}
+.cad-element-info-properties dt,
+.cad-element-info-properties dd {
+  margin: 0;
+  padding: 0.4rem 0.25rem;
+  border-bottom: 1px solid var(--border-color, #ddd);
+  overflow-wrap: anywhere;
+}
+.cad-element-info-properties dt {
+  font-weight: 600;
+}
+
+.cad-element-info-section > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 0.35rem 0;
+}
+.cad-element-info-section > summary:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }

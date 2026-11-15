@@ -5,27 +5,58 @@
  * タブ切替の配線だけを持つ。業務ロジックや状態は持たない。見た目は style/components/ribbon.css。
  */
 
-/** 24x24 viewBox の線画アイコン。キーは用途名。 */
+/**
+ * 24x24 viewBox の線画アイコン。キーは用途名。
+ * 図形の重複や、1つのリボン内での別コマンドへの使い回しは ribbonIcons.test.js で検出する。
+ */
 const ICON_PATHS = Object.freeze({
-  // 共通操作
-  cursor: '<path d="M5 3l14 8-6 2-2 6z"/>',
-  pan: '<path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/>',
-  align: '<circle cx="12" cy="12" r="3"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>',
-  copy: '<rect x="8" y="8" width="12" height="12" rx="1"/><path d="M4 16V4h12"/>',
-  add: '<path d="M12 5v14M5 12h14"/>',
-  clear: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
+  // 編集履歴・モデル登録・配置基準
   undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12H9"/>',
   redo: '<path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 000 12h5"/>',
+  modelA: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 17l4-10 4 10M9.6 13h4.8"/>',
+  modelB:
+    '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 7h3.5a2.5 2.5 0 010 5H9zM9 12h4a2.5 2.5 0 010 5H9z"/>',
+  pickBasis:
+    '<rect x="3" y="3" width="11" height="11" stroke-dasharray="2 2"/><path d="M12 12l8 3-3.5 1.5L15 20z"/>',
+  // 修正
   edit: '<path d="M4 20l4-1 11-11-3-3L5 16z"/><path d="M14 6l3 3"/>',
-  // 簡易CAD
-  build: '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 9h18M9 9v11"/>',
-  paper: '<path d="M3 17L17 3l4 4L7 21z"/><path d="M7 13l2 2M10 10l2 2M13 7l2 2"/>',
+  move: '<path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/>',
+  copy: '<rect x="8" y="8" width="12" height="12" rx="1"/><path d="M4 16V4h12"/>',
+  cancel: '<circle cx="12" cy="12" r="9"/><path d="M8 8l8 8M16 8l-8 8"/>',
+  alignAxis: '<path d="M4 3v18" stroke-dasharray="2 2"/><path d="M4 7h14M4 12h9M4 17h16"/>',
+  alignPoints:
+    '<circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M7.5 16.5l9-9M13 7h4v4"/>',
+  followNodes:
+    '<circle cx="5" cy="17" r="2"/><circle cx="19" cy="17" r="2"/><path d="M7 17h10M5 13V5M19 13V5M3 7l2-2 2 2M17 7l2-2 2 2"/>',
+  joinOffset: '<path d="M4 21V3h6v10h11v8z"/><path d="M10 13l-3 3M13 13v3"/>',
+  // 簡易CAD: ビュー・シート
+  view: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  planCut:
+    '<rect x="3" y="3" width="18" height="18"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18" stroke-dasharray="1 2"/><rect x="7" y="7" width="10" height="10"/>',
+  elevationCut: '<path d="M3 21h18M5 21V4M12 21V4M19 21V4M5 4h14M5 12h14"/>',
+  sheetList:
+    '<path d="M7 3h14v14"/><rect x="3" y="7" width="14" height="14" rx="1"/><path d="M10 21v-4h7"/>',
+  sheetNew: '<rect x="3" y="5" width="18" height="14" rx="1"/><path d="M12 9v6M9 12h6"/>',
+  sheetInfo: '<rect x="4" y="3" width="16" height="18" rx="1"/><path d="M12 10.5V17M12 7v.5"/>',
+  placeView:
+    '<rect x="3" y="4" width="18" height="16" rx="1"/><rect x="6" y="7" width="8" height="7"/><path d="M16 8h2M16 11h2"/>',
+  placeList:
+    '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M6 8h12M6 12h12M6 16h12M10 8v8"/>',
+  sheetExport: '<path d="M13 3H4v18h16v-8"/><path d="M12 12l9-9M15 3h6v6"/>',
+  // 簡易CAD: タグ・レビュー
   tag: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.3"/>',
   tagType: '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M7 9h6M7 13h10M7 16h4"/>',
   review: '<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>',
   note: '<path d="M4 4h16v12H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
-  dxf: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 13h6M9 17h6"/>',
+  // 簡易CAD: 参照・出力
+  dxfAdd: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M12 10v7M8.5 13.5h7"/>',
+  dxfLayers: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 12l9 5 9-5M3 16l9 5 9-5"/>',
+  dxfSave: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M12 10v7M9 14l3 3 3-3"/>',
+  stbExport: '<path d="M13 21H6V3h8l4 4v5"/><path d="M14 3v4h4M14 17h7M18 14l3 3-3 3"/>',
+  clear: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
   pdf: '<rect x="3" y="3" width="12" height="15" rx="1"/><rect x="9" y="7" width="12" height="14" rx="1"/>',
+  print:
+    '<path d="M7 8V3h10v5"/><rect x="3" y="8" width="18" height="9" rx="1"/><path d="M7 14h10v7H7z"/>',
   project: '<path d="M4 5h6l2 2h8v12H4z"/>',
   diag: '<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.5"/>',
   // 部材・通り芯

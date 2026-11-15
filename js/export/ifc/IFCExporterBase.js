@@ -7,6 +7,8 @@
 
 import { StepWriter, generateIfcGuid } from './StepWriter.js';
 import { resolveProfileType } from '../../constants/profileTypeAliases.js';
+import { encodeStoryMetadata } from '../../common-ifc/pipeline/StbStoryMetadata.js';
+import { encodeSteelProfileMetadata } from '../../common-ifc/pipeline/StbSteelProfileMetadata.js';
 import { downloadBlob } from '../../utils/downloadHelper.js';
 import { eventBus, ExportEvents } from '../../data/events/index.js';
 import {
@@ -89,7 +91,12 @@ export class IFCExporterBase {
     // 階データがある場合は複数階を作成
     if (this._storiesData.length > 0) {
       for (const story of this._storiesData) {
-        const storeyId = this._createSingleStorey(w, story.name, story.height);
+        const storeyId = this._createSingleStorey(
+          w,
+          story.name,
+          story.height,
+          story.kind == null ? null : encodeStoryMetadata(story),
+        );
         this._storeyMap.set(story.id, storeyId);
         this._storeyElements.set(storeyId, []);
         storeyIds.push(`#${storeyId}`);
@@ -124,8 +131,14 @@ export class IFCExporterBase {
    * @returns {number} 階エンティティID
    * @protected
    */
-  _createSingleStorey(w, name, elevation) {
-    const { storeyId, storeyPlacement } = createSingleStoreyEntity(w, name, elevation, this._refs);
+  _createSingleStorey(w, name, elevation, description = null) {
+    const { storeyId, storeyPlacement } = createSingleStoreyEntity(
+      w,
+      name,
+      elevation,
+      this._refs,
+      description,
+    );
 
     // 最初の階の配置をデフォルトとして保持
     if (!this._refs.storeyPlacement) {
@@ -252,7 +265,9 @@ export class IFCExporterBase {
    */
   _createProfileId(profile, useSimple = false) {
     const canonical = resolveProfileType(profile.type);
-    const p = profile.params || {};
+    const p = { ...(profile.params || {}) };
+    const sourceName = encodeSteelProfileMetadata(profile.sourceSteelSection, canonical, p);
+    if (sourceName) p.profileName = sourceName;
     const opts = { simple: useSimple };
 
     switch (canonical) {

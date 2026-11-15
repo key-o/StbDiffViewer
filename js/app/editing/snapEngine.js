@@ -13,6 +13,7 @@ export const SNAP_TYPES = Object.freeze({
   NODE: 'node',
   ENDPOINT: 'endpoint',
   MIDPOINT: 'midpoint',
+  INTERSECTION: 'intersection',
   MEMBER_AXIS: 'memberAxis',
   GRID: 'grid',
 });
@@ -20,6 +21,7 @@ export const SNAP_TYPES = Object.freeze({
 export const SNAP_PRIORITY = Object.freeze({
   [SNAP_TYPES.NODE]: 10,
   [SNAP_TYPES.ENDPOINT]: 20,
+  [SNAP_TYPES.INTERSECTION]: 25,
   [SNAP_TYPES.MIDPOINT]: 30,
   [SNAP_TYPES.MEMBER_AXIS]: 40,
   [SNAP_TYPES.GRID]: 50,

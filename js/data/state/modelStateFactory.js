@@ -57,6 +57,7 @@ export function createInitialEditingState() {
     workingNodeMap: new Map(),
     workingRevision: 0,
     moveFollowRelatedNodes: true,
+    moveGizmoAnchorMode: 'node',
     dirty: false,
     untrackedDirty: false,
     history: [],
@@ -86,6 +87,8 @@ export function createInitialModelState() {
     workingQuantitySessionId: null,
     workingQuantityRevision: null,
     workingQuantityError: null,
+    // 明示的なRC取り合い診断の派生結果。revisionが一致する時だけ有効。
+    workingJoinAudit: null,
     // DerivedQuantityStore を集計向けに正規化した派生キャッシュ（STB正本ではない）
     quantityFactsA: null,
     quantityFactsB: null,
@@ -95,6 +98,8 @@ export function createInitialModelState() {
     stbVersionB: null,
     activeXsdVersion: null,
     versionInfo: null,
+    ifcDiagnosticsA: null,
+    ifcDiagnosticsB: null,
     stories: [],
     axesData: { xAxes: [], yAxes: [] },
     modelBounds: null,

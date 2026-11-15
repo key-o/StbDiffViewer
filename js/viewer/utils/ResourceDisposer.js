@@ -14,13 +14,13 @@ const log = createLogger('viewer:ResourceDisposer');
  * マテリアルを解放
  * @param {THREE.Material} material
  */
-export function disposeMaterial(material) {
-  if (!material) return;
+export function disposeMaterial(material, preserved = new Set()) {
+  if (!material || preserved.has(material)) return;
 
   // テクスチャを解放
   for (const key of Object.keys(material)) {
     const value = material[key];
-    if (value && value.isTexture) {
+    if (value && value.isTexture && !preserved.has(value)) {
       value.dispose();
     }
   }
@@ -45,6 +45,7 @@ export function disposeRecursive(object, options = {}) {
     removeFromParent = true,
     disposeGeometry = true,
     disposeMaterial: shouldDisposeMaterial = true,
+    preservedResources = new Set(),
   } = options;
 
   let disposedCount = 0;
@@ -56,11 +57,12 @@ export function disposeRecursive(object, options = {}) {
       removeFromParent: true,
       disposeGeometry,
       disposeMaterial: shouldDisposeMaterial,
+      preservedResources,
     });
   }
 
   // ジオメトリ解放
-  if (disposeGeometry && object.geometry) {
+  if (disposeGeometry && object.geometry && !preservedResources.has(object.geometry)) {
     object.geometry.dispose();
     disposedCount++;
   }
@@ -68,9 +70,9 @@ export function disposeRecursive(object, options = {}) {
   // マテリアル解放
   if (shouldDisposeMaterial && object.material) {
     if (Array.isArray(object.material)) {
-      object.material.forEach((mat) => disposeMaterial(mat));
+      object.material.forEach((mat) => disposeMaterial(mat, preservedResources));
     } else {
-      disposeMaterial(object.material);
+      disposeMaterial(object.material, preservedResources);
     }
     disposedCount++;
   }

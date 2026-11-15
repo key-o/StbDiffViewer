@@ -97,13 +97,13 @@ function resolveStoryDrawingSource() {
       canExport: false,
       reason: source?.reason || 'STB原本Documentが読み込まれていません。',
       source: null,
-      // provider未初期化時は従来のscene-based batchを壊さない。
-      // providerが明示したhard blockはallowLegacyFallback=falseのまま維持する。
-      allowLegacyFallback: source == null || source?.allowLegacyFallback === true,
+      // provider未初期化時のみlegacy互換を許す。
+      // 明示された曖昧/不正sourceはlegacyで迂回させない。
+      allowLegacyFallback: source == null,
     };
   }
-  if (!['A', 'B'].includes(source.modelKey)) {
-    return { canExport: false, reason: '全階DXFのモデル識別子が不正です。', source: null };
+  if (source.modelKey !== 'A') {
+    return { canExport: false, reason: '全階DXFの出力元はSTB-Aに限定されています。', source: null };
   }
   if (
     source.document?.nodeType !== 9 ||
@@ -178,6 +178,13 @@ export function canExportAllStoriesToDxf(selectedElementTypes = null) {
     const selection = canCompileStoryBatchSelection(selectedElementTypes);
     if (!selection.canCompile) {
       const reason = [sourceFallbackReason, selection.reason].filter(Boolean).join(' / ');
+      if (resolved.source?.referenceModelBPresent) {
+        return {
+          canExport: false,
+          reason: `参照用STB-Bが存在するため旧scene経路は使用できません: ${reason}`,
+          route: 'none',
+        };
+      }
       return legacyStoryBatchPreflight(reason);
     }
   }
@@ -312,9 +319,15 @@ export async function exportAllStoriesToDxf(selectedElementTypes, options = {}) 
     // Levelは未移行なのでlegacyを維持する。ただし編集セッション等のhard blockだけは
     // route選択より先に評価し、legacy経路で迂回できないようにする。
     const resolved = resolveStoryDrawingSource();
-    if (!resolved.canExport && !resolved.allowLegacyFallback) {
+    if (
+      (!resolved.canExport && !resolved.allowLegacyFallback) ||
+      resolved.source?.referenceModelBPresent
+    ) {
+      const reason = resolved.source?.referenceModelBPresent
+        ? '参照用STB-Bが存在するため、未移行のLevel出力を旧scene経路で実行できません。'
+        : resolved.reason;
       eventBus.emit(ToastEvents.SHOW_WARNING, {
-        message: `エクスポートできません: ${resolved.reason}`,
+        message: `エクスポートできません: ${reason}`,
       });
       return false;
     }
@@ -438,6 +451,17 @@ export async function exportAlongAllAxesToDxf(
   options = {},
 ) {
   const batchOptions = /** @type {any} */ (options);
+  const resolved = resolveStoryDrawingSource();
+  if (
+    (!resolved.canExport && !resolved.allowLegacyFallback) ||
+    resolved.source?.referenceModelBPresent
+  ) {
+    const reason = resolved.source?.referenceModelBPresent
+      ? '参照用STB-Bが存在するため、未移行の通り芯立面を旧scene経路で出力できません。'
+      : resolved.reason;
+    eventBus.emit(ToastEvents.SHOW_WARNING, { message: `エクスポートできません: ${reason}` });
+    return false;
+  }
   const axesData = getCurrentAxesDataInternal();
   if (!axesData) {
     eventBus.emit(ToastEvents.SHOW_WARNING, { message: '通り芯データがありません' });

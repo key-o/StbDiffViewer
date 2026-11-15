@@ -17,8 +17,7 @@ export function buildPdfOverlayReviewSections() {
         </fieldset>
     `,
     tagPlacement: `
-        <fieldset><legend title="通常選択とタグ移動を分離します。編集モードON時に図面タグをドラッグすると、部材アンカーと移動量をSTB model-mm基準で保存します。PDFは表示への写像だけに使用し、PDF変更やページ変更ではタグ配置を変えません。向きはSTBモデルXY基準の時計回りです。">部材タグ配置 <span class="workspace-tip" aria-hidden="true">ⓘ</span></legend>
-          <label><input id="pdf-overlay-tag-edit-mode" type="checkbox">タグ編集モード</label>
+        <fieldset><legend title="タグ配置ウィンドウを開いている間、図面タグをドラッグすると、部材アンカーと移動量をSTB model-mm基準で保存します。PDFは表示への写像だけに使用し、PDF変更やページ変更ではタグ配置を変えません。向きはSTBモデルXY基準の時計回りです。">部材タグ配置 <span class="workspace-tip" aria-hidden="true">ⓘ</span></legend>
           <label>向き <select id="pdf-overlay-tag-rotation" class="form-control" disabled><option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select></label>
           <label title="既定はオフです。オンにすると部材本体の中心からタグへ引出線を表示します"><input id="pdf-overlay-tag-leader" type="checkbox" disabled>引出線を表示</label>
           <div class="workspace-actions"><button type="button" id="pdf-overlay-reset-tag-placement" class="btn btn-secondary btn-sm" disabled>配置をリセット</button></div>
@@ -49,8 +48,13 @@ export function buildPdfOverlayReviewSections() {
     `,
     project: `
         <fieldset><legend title="部材レビュー・自由メモ・タグ配置をDrawingProjectとして保存します。PDFは不要です。読込時は現在表示中のSTB改訂と階に完全一致する場合だけ適用します。">Drawing Workspace JSON <span class="workspace-tip" aria-hidden="true">ⓘ</span></legend>
-          <div class="workspace-actions"><button type="button" id="pdf-overlay-export-drawing-project" class="btn btn-secondary btn-sm" disabled>プロジェクトJSONを書き出す</button><button type="button" id="pdf-overlay-import-drawing-project-trigger" class="btn btn-secondary btn-sm">プロジェクトJSONを読み込む</button></div>
+          <div class="workspace-actions"><button type="button" id="pdf-overlay-new-drawing-project" class="btn btn-secondary btn-sm">新規プロジェクトを開く</button><button type="button" id="pdf-overlay-export-drawing-project" class="btn btn-secondary btn-sm" disabled>プロジェクトJSONを書き出す</button><button type="button" id="pdf-overlay-import-drawing-project-trigger" class="btn btn-secondary btn-sm">プロジェクトJSONを読み込む</button></div>
           <input id="pdf-overlay-import-drawing-project" type="file" accept="application/json,.json" hidden>
+          <div class="workspace-actions"><button type="button" id="pdf-overlay-export-drawing-project-zip" class="btn btn-secondary btn-sm" disabled>プロジェクトZIPを書き出す</button><button type="button" id="pdf-overlay-import-drawing-project-zip-trigger" class="btn btn-secondary btn-sm">プロジェクトZIPを読み込む</button></div>
+          <input id="pdf-overlay-import-drawing-project-zip" type="file" accept=".zip,application/zip" hidden>
+          <div class="workspace-actions"><button type="button" id="pdf-overlay-unload-drawing-project" class="btn btn-secondary btn-sm" disabled title="図面プロジェクトを保存してから、モデル差替えのために登録状態を解除します">保存後にプロジェクトを解除</button></div>
+          <p class="help-text text-xs">通常のモデルA/B差替えではZIP等で保存し「プロジェクトを解除」してください。全登録ビューの改訂対応が検証済みの場合のみ、下記の新STB-A一括改訂で登録を保ったまま置換できます。簡易CADを閉じるだけでは登録は解除されません。</p>
+          <p class="help-text text-xs">ZIP保存には全STB改訂の原本が必要です。STB-A/Bが未読込ならZIP内のSTB原本から図面を復元します。STB読込済みの場合は、同じSTBの図面を開いてから読み込んでください。</p>
           <div id="pdf-overlay-drawing-project-status" class="workspace-result">プロジェクト未保存</div>
         </fieldset>
         <fieldset><legend title="読み込んだDrawingProjectを新しいSTB原本へ差し替えます。対応は一意GUIDのみ自動確定し、GUIDなし・再採番・重複は手動承認してから一括commitします。">STB改訂差替え <span class="workspace-tip" aria-hidden="true">ⓘ</span></legend>
@@ -59,7 +63,15 @@ export function buildPdfOverlayReviewSections() {
           <div id="pdf-overlay-rebind-status" class="workspace-result">Drawing Workspace JSONを読み込むとSTB改訂差替えを開始できます。</div>
           <ol id="pdf-overlay-rebind-mapping-list" class="pdf-overlay-memo-list"></ol>
           <div class="workspace-actions"><button type="button" id="pdf-overlay-rebind-reevaluate" class="btn btn-secondary btn-sm" disabled>選択対応で再評価</button><button type="button" id="pdf-overlay-rebind-commit" class="btn btn-primary btn-sm" disabled>改訂を確定してJSON保存</button></div>
+          <div class="workspace-actions"><button type="button" id="pdf-overlay-rebind-export-prepared-zip" class="btn btn-secondary btn-sm" disabled title="複数伏図の改訂をZIPへ事前保存します。現在のSTB-Aと作図画面は変更しません。">新改訂をZIPへ保存（未適用）</button></div>
+          <p class="help-text text-xs">未適用ZIPの保存は現行モデルに影響しません。全登録ビューの対応確認後は「新STB-Aを読込・全ビュー改訂確定」で正式STB-Aローダーにより一括適用できます（実行前に確認あり）。一括適用後のプロジェクトZIP/JSONは別途保存してください。</p>
         </fieldset>
+        <fieldset><legend title="STB改訂差替えで対応先がなくなり、孤児として保持されたタグ・寸法の作図意図です。削除は明示操作で行い、レビュー・注記など過去改訂の履歴は残ります。削除後はプロジェクトJSONを書き出し直してください。">孤児化した作図意図 <span class="workspace-tip" aria-hidden="true">ⓘ</span></legend>
+          <ol id="pdf-overlay-orphan-list" class="pdf-overlay-memo-list"></ol>
+        </fieldset>
+    `,
+    // PDF照合はDrawingProjectそのものではないため、プロジェクト保存から独立させる。
+    pdfSession: `
         <fieldset><legend title="現行互換のPDF照合セッションです。書き出しにはPDFが必要です。Drawing Workspace全体の永続化はDrawingProjectへ段階的に移行します。">PDF照合セッションJSON <span class="workspace-tip" aria-hidden="true">ⓘ</span></legend>
           <div class="workspace-actions"><button type="button" id="pdf-overlay-export-session" class="btn btn-secondary btn-sm" disabled>JSONを書き出す</button><button type="button" id="pdf-overlay-import-session-trigger" class="btn btn-secondary btn-sm">JSONを読み込む</button></div>
           <input id="pdf-overlay-import-session" type="file" accept="application/json,.json" hidden>

@@ -30,6 +30,11 @@ export function assertDrawingProjectWorkspaceEditSafe(input) {
     );
   const slot = project.modelSlots[0];
   const document = project.drawingDocuments[0];
+  // The legacy workspace editor is plan-only. Never overwrite an elevation ViewSpec.
+  if (document.view.type !== 'plan')
+    throw new Error(
+      '軸組図ビューのworkspace編集は未対応です。ビュー定義を保護するため保存を中止します。',
+    );
   if (document.modelSlotId !== slot.id || document.sourceRevisionId !== slot.currentRevisionId)
     throw new Error('DrawingProject の現在改訂が一致しません。');
   uniqueIndex(
@@ -37,7 +42,7 @@ export function assertDrawingProjectWorkspaceEditSafe(input) {
       const current = binding.revisions.find(
         (r) => r.sourceRevisionId === document.sourceRevisionId,
       );
-      return current ? [{ ...current.sourceRef, entityId: binding.entityId }] : [];
+      return current?.sourceRef ? [{ ...current.sourceRef, entityId: binding.entityId }] : [];
     }),
     (ref) => JSON.stringify([ref.elementType, ref.elementId]),
     'sourceRef',
@@ -82,6 +87,16 @@ function retainIds(previous, edited, key) {
   });
 }
 
+/**
+ * ビュー登録で作られた保存済みplan viewにはstoryBindingが無く、runtime snapshotだけが
+ * Story bindingを付与する。保存側が未設定の場合に限り、その付与を同一viewの補完として扱う。
+ */
+function viewWithoutAdoptableStoryBinding(stored, edited) {
+  return stored.storyBinding == null && edited.storyBinding != null
+    ? { ...stored, storyBinding: edited.storyBinding }
+    : stored;
+}
+
 /** Merge runtime edits into a clone; never rebuild the revision registry from runtime. */
 export function mergeDrawingProjectWorkspaceSnapshot({ project: input, snapshot: editedInput }) {
   const project = assertDrawingProjectWorkspaceEditSafe(input);
@@ -97,7 +112,7 @@ export function mergeDrawingProjectWorkspaceSnapshot({ project: input, snapshot:
     slot.id !== editedSlot.id ||
     document.id !== next.id ||
     document.sourceRevisionId !== next.sourceRevisionId ||
-    !equal(document.view, next.view) ||
+    !equal(viewWithoutAdoptableStoryBinding(document.view, next.view), next.view) ||
     current.sha256 !== nextCurrent.sha256
   )
     throw new Error('DrawingProject の編集 context が変化しています。');
@@ -117,6 +132,12 @@ export function mergeDrawingProjectWorkspaceSnapshot({ project: input, snapshot:
       (r) => r.sourceRevisionId === next.sourceRevisionId,
     )?.sourceRef;
     if (
+      !oldRef &&
+      !newRef &&
+      original.revisions.some((r) => r.sourceRevisionId === document.sourceRevisionId && r.orphaned)
+    )
+      continue;
+    if (
       !oldRef ||
       !newRef ||
       oldRef.elementType !== newRef.elementType ||
@@ -125,6 +146,8 @@ export function mergeDrawingProjectWorkspaceSnapshot({ project: input, snapshot:
     )
       throw new Error('DrawingProject の現在 binding が変化しています。rebind が必要です。');
   }
+
+  document.view = viewWithoutAdoptableStoryBinding(document.view, next.view);
 
   const revisionId = document.sourceRevisionId;
   const reviews = document.memberReviews.filter(
@@ -150,7 +173,21 @@ export function mergeDrawingProjectWorkspaceSnapshot({ project: input, snapshot:
       return original ? { ...item, context: original.context } : item;
     }),
   ];
-  document.tagIntents = retainIds(document.tagIntents, next.tagIntents, tagKey);
+  // 孤児化したentityのtag intentはruntime配置に現れないため、削除せず保持する(再関連付け/削除は明示操作)。
+  const orphanedEntityIds = new Set(
+    project.bindings
+      .filter((binding) =>
+        binding.revisions.some((r) => r.sourceRevisionId === revisionId && r.orphaned),
+      )
+      .map((binding) => binding.entityId),
+  );
+  const orphanedTags = document.tagIntents.filter((item) =>
+    orphanedEntityIds.has(item.binding.entityId),
+  );
+  document.tagIntents = [
+    ...retainIds(document.tagIntents, next.tagIntents, tagKey),
+    ...orphanedTags,
+  ];
   // Workspace has no dimension-intent editor. Keep imported dimensions verbatim,
   // including ones absent from the runtime's generated defaults.
   document.sheet = next.sheet;

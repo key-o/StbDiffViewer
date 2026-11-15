@@ -101,7 +101,7 @@ export function createSelectionService(dependencies = {}) {
     if (!obj || !userData) return false;
     const elementType = userData.elementType || userData.stbNodeType;
     return Boolean(
-      (userData.isRebarInstanceSelection || elementType) &&
+      (userData.isRebarInstanceSelection || userData.isGlbElement || elementType) &&
       elementType !== 'Axis' &&
       elementType !== 'Story',
     );
@@ -233,6 +233,24 @@ export function createSelectionService(dependencies = {}) {
     return true;
   }
 
+  function deselectMatchingObjects(predicate, scheduleRender = render) {
+    if (typeof predicate !== 'function') return 0;
+    const removedObjects = selectedObjects.filter(predicate);
+    if (removedObjects.length === 0) return 0;
+
+    for (const obj of removedObjects) deselectObject(obj);
+    if (selectedObjects.length === 0) {
+      clearElementInfoPanel();
+      eventBus.emit(SelectionEvents.SELECTION_CLEARED, { timestamp: clock() });
+      hideOrbitCenterHelper();
+    } else {
+      showElementInfo();
+      updateOrbitCenter();
+    }
+    requestRender(scheduleRender);
+    return removedObjects.length;
+  }
+
   function toggleObject(obj) {
     if (obj?.userData?.isRebarInstanceSelection) {
       const identity = createSemanticSelectionIdentity(obj.userData);
@@ -285,6 +303,11 @@ export function createSelectionService(dependencies = {}) {
 
     if (selectedObjects.length === 1) {
       const userData = selectedObjects[0].userData || {};
+      if (userData.isGlbElement) {
+        eventBus.emit(InteractionEvents.DISPLAY_GLB_ELEMENT_INFO, userData.glbElementInfo || {});
+        return;
+      }
+
       if (userData.isRebarInstanceSelection) {
         eventBus.emit(InteractionEvents.DISPLAY_REBAR_INFO, {
           rebarKind: userData.rebarKind,
@@ -344,9 +367,13 @@ export function createSelectionService(dependencies = {}) {
     eventBus.emit(SelectionEvents.MULTI_SELECT, {
       selectedElements: selectedObjects.map((obj) => {
         const userData = obj.userData || {};
+        const { idA, idB } = getElementIds(userData);
         return {
           elementType: normalizeSelectedElementType(userData),
-          elementId: userData.elementId || userData.elementIdA || userData.elementIdB,
+          elementId: userData.elementId || idA || idB,
+          // A matched mesh represents two model-specific elements. Preserve both
+          // IDs so Document Control can enforce A/B authorization independently.
+          ...(userData.modelSource === 'matched' ? { elementIdA: idA, elementIdB: idB } : {}),
           modelSource: userData.modelSource,
         };
       }),
@@ -491,6 +518,7 @@ export function createSelectionService(dependencies = {}) {
     highlightObject,
     refreshSelectedMaterials,
     deselectObject,
+    deselectMatchingObjects,
     toggleObject,
     rebindSelectedObjects,
     updateOrbitCenter,

@@ -9,7 +9,7 @@
  */
 
 import { createLogger } from '../../../utils/logger.js';
-import { getState } from '../../../data/state/globalState.js';
+import editDocumentProvider from '../../../app/editing/editDocumentProvider.js';
 import { showError } from '../../common/toast.js';
 import { resolveNodePlacement } from '../modelEditPlacementContext.js';
 import { floatingWindowManager } from '../floatingWindowManager.js';
@@ -113,8 +113,8 @@ function createPlacementSummaryRow(placementContext) {
  * @param {{initialType?:string,lockType?:boolean,placementContext?:Object|null,title?:string}} [options]
  */
 export function openAddMemberForm(options = {}) {
-  if (!getState('models.documentA')) {
-    showError('モデルAが読み込まれていません');
+  if (!editDocumentProvider.getActiveEditDocument()) {
+    showError('モデルAが読み込まれていません。編集モードをONにすると新規モデルを作成できます');
     return;
   }
   if (windowEl) return;

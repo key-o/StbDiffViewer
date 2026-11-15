@@ -9,7 +9,20 @@
  */
 
 import { floatingWindowManager } from '../floatingWindowManager.js';
-import { exportToPdf } from './SectionListPdfExporter.js';
+import {
+  captureLayoutPages,
+  exportToPdf,
+  measureGridTable,
+  savePdfFromPages,
+} from './SectionListPdfExporter.js';
+import { openPdfSplitDialog } from './SectionListPdfSplitDialog.js';
+import { autoBreaks, buildSheetGrid } from './sectionListPageSplit.js';
+import { openSheetEditor } from './SectionListSheetEditor.js';
+import {
+  resolveSectionListDrawingProjectContext,
+  commitSectionListDrawingProjectLayout,
+  loadSectionListDrawingProjectLayout,
+} from './sectionListDrawingProjectWorkflow.js';
 import { getState } from '../../../data/state/globalState.js';
 import { showWarning, showError } from '../../common/toast.js';
 
@@ -51,6 +64,8 @@ export class BaseSectionListPanel {
     this.currentDoc = null;
     this.currentSource = 'A';
     this.isInitialized = false;
+    /** PDFシート分割の前回値（列・行の区切り / 用紙キー） */
+    this.pdfSplitState = { breaks: null, symbolOrder: null, paperKey: null };
   }
 
   /**
@@ -140,6 +155,12 @@ export class BaseSectionListPanel {
           <button class="float-window-btn section-list-export-btn" id="${idPrefix}-export-pdf-btn" title="PDF出力">
             PDF
           </button>
+          <button class="float-window-btn section-list-export-btn" id="${idPrefix}-export-pdf-split-btn" title="階×符号のマトリクスを区切ってシート化し、指定縮尺の実寸で複数ページのPDF出力">
+            PDF分割
+          </button>
+          <button class="float-window-btn section-list-export-btn" id="${idPrefix}-open-stored-sheet-btn" title="共通DrawingProjectに保存したA3梁・柱リストを再編集">
+            保存シート編集
+          </button>
           <button class="float-window-btn section-list-export-btn" id="${idPrefix}-export-dxf-btn" title="DXF出力">
             DXF
           </button>
@@ -204,6 +225,14 @@ export class BaseSectionListPanel {
       exportPdfBtn.addEventListener('click', () => this.handleExportPdf());
     }
 
+    const exportPdfSplitBtn = document.getElementById(`${idPrefix}-export-pdf-split-btn`);
+    if (exportPdfSplitBtn) {
+      exportPdfSplitBtn.addEventListener('click', () => this.handleExportPdfSplit());
+    }
+
+    document
+      .getElementById(`${idPrefix}-open-stored-sheet-btn`)
+      ?.addEventListener('click', () => this.handleEditStoredSheet());
     const exportDxfBtn = document.getElementById(`${idPrefix}-export-dxf-btn`);
     if (exportDxfBtn) {
       exportDxfBtn.addEventListener('click', () => this.handleExportDxf());
@@ -341,39 +370,242 @@ export class BaseSectionListPanel {
   }
 
   /**
+   * PDF出力対象のテーブル要素を取得
+   * @returns {HTMLElement|null}
+   */
+  findExportTable() {
+    const { idPrefix, tableSelectors } = this.config;
+    const tableContainer = document.getElementById(`${idPrefix}-table-container`);
+    for (const selector of tableSelectors) {
+      const table = tableContainer?.querySelector(selector);
+      if (table) return table;
+    }
+    return null;
+  }
+
+  /**
    * PDF出力を処理
    */
   async handleExportPdf() {
-    const { idPrefix, tableSelectors, exportBaseName } = this.config;
-    const tableContainer = document.getElementById(`${idPrefix}-table-container`);
-    let table = null;
-    for (const selector of tableSelectors) {
-      table = tableContainer?.querySelector(selector);
-      if (table) break;
+    await this.runPdfExport();
+  }
+
+  /**
+   * 階×符号のマトリクスで区切り、簡易CADビューで用紙へ配置・調整してPDF出力する
+   * （区切りマトリクス → 簡易CADビュー → PDF）
+   */
+  async handleExportPdfSplit({ initialLayout = null } = {}) {
+    const sourceAtOpen = this.currentDoc;
+    const dataAtOpen = this.currentData;
+    const sourceSlotAtOpen = this.currentSource;
+    const { symbols, stories, grid } = this.currentData || {};
+    if (!this.findExportTable() || !symbols?.length || !stories?.length) {
+      showWarning('出力するテーブルがありません。');
+      return;
     }
+
+    const { exportBaseName, idPrefix } = this.config;
+    const storyIds = stories.map((story) => story.id);
+    const hasCell = (storyId, symbol) =>
+      Boolean(this.renderer.getGridCellData(grid, storyId, symbol));
+
+    for (;;) {
+      const table = this.findExportTable();
+      if (!table) return;
+      const metrics = measureGridTable(table, storyIds, { compactColumns: true });
+      const result = initialLayout
+        ? {
+            sheets: [],
+            symbolOrder: symbols,
+            paperKey: initialLayout.paperKey,
+          }
+        : await openPdfSplitDialog({
+            symbols,
+            stories,
+            metrics,
+            scaleLabel: `1/${this.renderSettings.scaleDenominator}`,
+            hasCell,
+            initialBreaks: this.pdfSplitState.breaks,
+            initialSymbolOrder: this.pdfSplitState.symbolOrder,
+            initialPaperKey: this.pdfSplitState.paperKey,
+          });
+      if (!result) return;
+
+      if (!initialLayout) {
+        this.pdfSplitState = {
+          breaks: { colBreakAfter: result.colBreakAfter, rowBreakAfter: result.rowBreakAfter },
+          symbolOrder: result.symbolOrder,
+          paperKey: result.paperKey,
+        };
+      }
+
+      const scaleSelect = document.getElementById(`${idPrefix}-scale-select`);
+      const layout = await openSheetEditor({
+        sheets: result.sheets,
+        symbols: result.symbolOrder,
+        stories,
+        initialLayout,
+        paperKey: result.paperKey,
+        scaleDenominator: this.renderSettings.scaleDenominator,
+        scaleOptions: [...(scaleSelect?.options || [])].map((o) => Number(o.value)),
+        getTable: () => this.findExportTable(),
+        setScale: (denominator) => {
+          if (scaleSelect) scaleSelect.value = String(denominator);
+          this.updateRenderSettingsFromControls();
+          this.rerenderCurrentData();
+        },
+        autoSplit: (paperKey, options) => {
+          const current = this.findExportTable();
+          const nextMetrics = measureGridTable(current, storyIds, options);
+          const breaks = autoBreaks({
+            symbols: result.symbolOrder,
+            storyIds,
+            metrics: nextMetrics,
+            paperKey,
+          });
+          return buildSheetGrid({
+            symbols: result.symbolOrder,
+            storyIds,
+            ...breaks,
+            hasCell,
+          }).sheets;
+        },
+        hasCell,
+      });
+      if (!layout) return;
+      if (layout.action === 'back') {
+        if (initialLayout) return;
+        continue;
+      }
+
+      this.pdfSplitState.paperKey = layout.paperKey;
+      if (layout.action === 'save-project') {
+        try {
+          if (
+            this.currentDoc !== sourceAtOpen ||
+            this.currentData !== dataAtOpen ||
+            this.currentSource !== sourceSlotAtOpen
+          )
+            throw new Error('編集途中で梁・柱リストの入力モデルが変更されました。');
+          const context = await resolveSectionListDrawingProjectContext({
+            source: this.currentSource,
+            xmlDocument: this.currentDoc,
+          });
+          await commitSectionListDrawingProjectLayout({
+            context,
+            listType: this.config.sectionListType,
+            layout,
+          });
+          this.log.info('Section list pages saved into shared DrawingProject');
+        } catch (error) {
+          this.log.error('Shared section-list sheet save failed:', error);
+          showError('共通シート保存に失敗しました: ' + error.message);
+        }
+        return;
+      }
+      try {
+        await this.withPdfButtonsBusy(async () => {
+          const images = await captureLayoutPages({
+            tableElement: this.findExportTable(),
+            pages: layout.pages,
+            allStoryIds: storyIds,
+            paperKey: layout.paperKey,
+            compactColumns: layout.compactColumns,
+            onProgress: (done, total) => {
+              const btn = document.getElementById(`${idPrefix}-export-pdf-split-btn`);
+              if (btn) btn.textContent = `${done}/${total}`;
+            },
+          });
+          savePdfFromPages(images, layout.paperKey, `${exportBaseName}.pdf`);
+        });
+        this.log.info('PDF exported successfully');
+      } catch (error) {
+        this.log.error('PDF export failed:', error);
+        showError(`PDF出力に失敗しました: ${error.message}`);
+      }
+      return;
+    }
+  }
+
+  /** Reopen typed A3 list pages from the live DrawingProject, never stale B. */
+  async handleEditStoredSheet() {
+    try {
+      const { layout } = await loadSectionListDrawingProjectLayout({
+        source: this.currentSource,
+        xmlDocument: this.currentDoc,
+        listType: this.config.sectionListType,
+      });
+      const { symbols, stories } = this.currentData || {};
+      if (!this.findExportTable() || !symbols?.length || !stories?.length)
+        throw new Error('現在の断面リストを先に生成してください。');
+      const validSymbols = new Set(symbols);
+      const validStories = new Set(stories.map((story) => String(story.id)));
+      for (const page of layout.pages) {
+        for (const region of page.regions) {
+          if (
+            region.symbols.some((symbol) => !validSymbols.has(symbol)) ||
+            region.storyIds.some((id) => !validStories.has(String(id)))
+          )
+            throw new Error('保存済みレイアウトに現在のSTB-Aに存在しない階・符号があります。');
+        }
+      }
+      const select = document.getElementById(`${this.config.idPrefix}-scale-select`);
+      if (!select || ![...select.options].some((o) => Number(o.value) === layout.scaleDenominator))
+        throw new Error('保存済みレイアウトの縮尺が現在の選択肢にありません。');
+      select.value = String(layout.scaleDenominator);
+      this.updateRenderSettingsFromControls();
+      this.rerenderCurrentData();
+      await this.handleExportPdfSplit({ initialLayout: layout });
+    } catch (error) {
+      this.log.error('Stored section-list sheet edit failed:', error);
+      showError('保存シート編集に失敗しました: ' + error.message);
+    }
+  }
+
+  /**
+   * PDFボタンを処理中表示にして非同期処理を実行する
+   * @template T
+   * @param {() => Promise<T>} task
+   * @returns {Promise<T>}
+   */
+  async withPdfButtonsBusy(task) {
+    const { idPrefix } = this.config;
+    const buttons = [`${idPrefix}-export-pdf-btn`, `${idPrefix}-export-pdf-split-btn`]
+      .map((id) => document.getElementById(id))
+      .filter(Boolean);
+    const labels = buttons.map((btn) => btn.textContent);
+    buttons.forEach((btn) => {
+      btn.disabled = true;
+      btn.textContent = '...';
+    });
+    try {
+      return await task();
+    } finally {
+      buttons.forEach((btn, i) => {
+        btn.disabled = false;
+        btn.textContent = labels[i];
+      });
+    }
+  }
+
+  /**
+   * PDF出力の実行（全体を1枚へ縮小フィット。ボタン状態管理・エラー表示つき）
+   */
+  async runPdfExport() {
+    const { exportBaseName } = this.config;
+    const table = this.findExportTable();
 
     if (!table) {
       showWarning('出力するテーブルがありません。');
       return;
     }
 
-    const exportBtn = document.getElementById(`${idPrefix}-export-pdf-btn`);
-    if (exportBtn) {
-      exportBtn.disabled = true;
-      exportBtn.textContent = '...';
-    }
-
     try {
-      await exportToPdf(table, `${exportBaseName}.pdf`);
+      await this.withPdfButtonsBusy(() => exportToPdf(table, `${exportBaseName}.pdf`));
       this.log.info('PDF exported successfully');
     } catch (error) {
       this.log.error('PDF export failed:', error);
       showError(`PDF出力に失敗しました: ${error.message}`);
-    } finally {
-      if (exportBtn) {
-        exportBtn.disabled = false;
-        exportBtn.textContent = 'PDF';
-      }
     }
   }
 

@@ -11,11 +11,7 @@ import * as THREE from 'three';
 import { createExtrudeGeometry, applyPlacementToMesh } from './ThreeJSConverter.js';
 import { colorManager } from '../../rendering/colorManager.js';
 import { createSectionProfile } from './SectionProfileFactory.js';
-import {
-  toFiniteNumber,
-  resolveHDimensions,
-  resolveSteelDimsByName,
-} from './ProfileSectionResolvers.js';
+import { describeCrossHSteelComponents, describeShapeTSteelComponents } from './SrcSteelComponentDescriptors.js';
 
 /**
  * ベースプレート（柱脚プレート）のメッシュを生成
@@ -208,26 +204,8 @@ export function createCrossHSteelMeshes(params) {
 
   if (!crossDimensions) return null;
 
-  const shapeX = crossDimensions.crossH_shapeX || null;
-  const shapeY = crossDimensions.crossH_shapeY || shapeX;
-  if (!shapeX) return null;
-
-  const fallbackX = {
-    H: crossDimensions.overallDepthX || crossDimensions['H_x'] || crossDimensions.H,
-    B: crossDimensions.overallWidthX || crossDimensions['B_x'] || crossDimensions.B,
-  };
-  const fallbackY = {
-    H: crossDimensions.overallDepthY || crossDimensions['H_y'] || fallbackX.H,
-    B: crossDimensions.overallWidthY || crossDimensions['B_y'] || fallbackX.B,
-  };
-
-  const dimsX = resolveHDimensions(shapeX, steelSections, fallbackX);
-  const dimsY = resolveHDimensions(shapeY, steelSections, { ...dimsX, ...fallbackY });
-
-  const armDefs = [
-    { arm: 'X', shapeName: shapeX, dimensions: dimsX, angle: 0 },
-    { arm: 'Y', shapeName: shapeY, dimensions: dimsY, angle: Math.PI / 2 },
-  ];
+  const armDefs = describeCrossHSteelComponents(crossDimensions, steelSections);
+  if (!armDefs.length) return null;
 
   const meshes = [];
   for (const armDef of armDefs) {
@@ -313,15 +291,20 @@ export function createShapeTSteelMeshes(params) {
     steelColor = null,
   } = params;
 
-  const dims = shapeTDimensions || {};
-  const shapeH = dims.shapeT_shapeH;
-  const shapeT = dims.shapeT_shapeT;
-  if (!shapeH || !shapeT) return null;
-
-  const direction = String(dims.shapeT_direction || 'T1').toUpperCase();
-  const offsetHX = toFiniteNumber(dims.shapeT_offsetHX, 0);
-  const offsetHY = toFiniteNumber(dims.shapeT_offsetHY, 0);
-  const offsetT = toFiniteNumber(dims.shapeT_offsetT, 0);
+  const parts = describeShapeTSteelComponents(shapeTDimensions, steelSections);
+  if (!parts.length) return null;
+  const [hPart, tPart] = parts;
+  const shapeH = hPart.shapeName;
+  const shapeT = tPart.shapeName;
+  const hDims = hPart.dimensions;
+  const tDims = tPart.dimensions;
+  const offsetHX = hPart.x;
+  const offsetHY = hPart.y;
+  const cfg = {
+    hAngle: hPart.angle,
+    tAngle: tPart.angle,
+    tCenter: { x: tPart.x, y: tPart.y },
+  };
 
   const meshes = [];
   const matOptions = () => {
@@ -329,38 +312,6 @@ export function createShapeTSteelMeshes(params) {
     if (steelColor) o.overrideColor = steelColor;
     return o;
   };
-
-  // 寸法解決（T形鋼のせい/2 = halfT を配置計算に使う）
-  const hDims = resolveHDimensions(shapeH, steelSections);
-  const tDims = resolveSteelDimsByName(shapeT, steelSections);
-  const tDepth = toFiniteNumber(tDims.overall_depth ?? tDims.H ?? tDims.height ?? tDims.A, 350);
-  const halfT = tDepth / 2;
-
-  // direction_type ごとの向き・配置（STB仕様 ver.2.0.2 図「T1/T2の例」準拠）
-  //   T形鋼はH形鋼と「直交」し、ウェブの自由端をH形鋼のウェブ線へ接合、フランジは外側を向く。
-  //   offset_T = H形鋼ウェブ中心からT形鋼ウェブまでの距離（H形ウェブ方向に沿う）。
-  //   hAngle : H形鋼のZ回り回転（T1/T3=ウェブ水平、T2/T4=ウェブ鉛直）
-  //   tAngle : T形鋼のZ回り回転（基準プロファイルはフランジ下・ウェブ上）
-  //   tCenter: T形鋼の幾何中心。ウェブ自由端（基準+Y側, 中心から halfT）をH形ウェブ線へ合わせる。
-  const DIR = {
-    // T1(⊤): H水平・T下（フランジ下, ステム上）, offset_TはX方向
-    T1: { hAngle: Math.PI / 2, tAngle: 0, tCenter: { x: offsetHX + offsetT, y: offsetHY - halfT } },
-    // T3(⊥): H水平・T上（フランジ上, ステム下）, offset_TはX方向
-    T3: {
-      hAngle: Math.PI / 2,
-      tAngle: Math.PI,
-      tCenter: { x: offsetHX + offsetT, y: offsetHY + halfT },
-    },
-    // T2(⊣): H鉛直・T左（フランジ左, ステム右）, offset_TはY方向
-    T2: {
-      hAngle: 0,
-      tAngle: -Math.PI / 2,
-      tCenter: { x: offsetHX - halfT, y: offsetHY + offsetT },
-    },
-    // T4(⊢): H鉛直・T右（フランジ右, ステム左）, offset_TはY方向
-    T4: { hAngle: 0, tAngle: Math.PI / 2, tCenter: { x: offsetHX + halfT, y: offsetHY + offsetT } },
-  };
-  const cfg = DIR[direction] || DIR.T1;
 
   // --- H形鋼（図心を (offset_HX, offset_HY) に配置） ---
   const hSectionData = { section_type: 'H', dimensions: hDims };

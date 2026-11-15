@@ -1,0 +1,47 @@
+/* Issue #485: local-only document read permission UI. */
+.document-control-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.document-control-help,
+.document-control-status,
+.document-control-documents {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.document-control-help {
+  opacity: 0.85;
+}
+.document-control-status {
+  font-weight: 600;
+}
+.document-control-documents {
+  opacity: 0.8;
+}
+.document-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.document-control-actions button {
+  flex: 1 1 auto;
+  min-width: 7rem;
+}
+.document-control-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* #557: AI連携はフローティングウィンドウ内に表示する。 */
+#document-control-float {
+  min-width: 360px;
+  max-width: 560px;
+  max-height: 85vh;
+  width: 420px;
+}
+#document-control-float .float-window-content {
+  overflow-y: auto;
+}

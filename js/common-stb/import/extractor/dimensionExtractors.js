@@ -618,6 +618,11 @@ export function extractPileProductDimensions(element, _config) {
       D: D,
       t: t,
       tagName: seg.tagName || seg.localName,
+      ...Object.fromEntries(
+        ['kind', 'D1', 'D2', 'tc', 'ts', 't1', 't2', 'product_code', 'release_time']
+          .filter((key) => seg.hasAttribute(key))
+          .map((key) => [key, seg.getAttribute(key)]),
+      ),
     });
   }
 

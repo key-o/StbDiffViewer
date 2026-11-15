@@ -157,6 +157,9 @@ function renderPlanDimensionAnnotations(dimensions) {
       return Object.freeze({
         ...primitive,
         ...(dimension.measurementId ? { measurementId: String(dimension.measurementId) } : {}),
+        ...(dimension.id?.startsWith('project-dimension:') && dimension.intentId
+          ? { persistedDimensionId: dimension.intentId }
+          : {}),
         layerId: dimension.layerId,
         visibilitySource: dimension.visibilitySource,
         visible: dimension.visible !== false,
@@ -214,6 +217,7 @@ export function renderDrawingSvg({
   tagOffsetToCss = null,
   tagOrientationMode = DEFAULT_DRAWING_TAG_ORIENTATION_MODE,
   onTagPointerDown = null,
+  onPersistedDimensionSelect = null,
   onReferenceSelect = null,
   paperMmToCss = null,
 } = {}) {
@@ -430,6 +434,24 @@ export function renderDrawingSvg({
     ...(sharedPlan ? sharedPlan.annotations : drawing.annotations || []),
     ...renderPlanDimensionAnnotations(compiledDimensions),
   ];
+  const editableDimensionLayer = create('g', { class: 'stb-drawing-editable-dimensions' });
+  const bindPersistedDimensionClick = (node, annotation) => {
+    if (typeof onPersistedDimensionSelect !== 'function' || !annotation.persistedDimensionId)
+      return false;
+    node.setAttribute('data-persisted-dimension-id', annotation.persistedDimensionId);
+    node.setAttribute('pointer-events', 'visiblePainted');
+    node.style.cursor = 'pointer';
+    node.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onPersistedDimensionSelect(event, { intentId: annotation.persistedDimensionId });
+    });
+    return true;
+  };
+  const appendAnnotationNode = (parent, node, annotation) => {
+    if (bindPersistedDimensionClick(node, annotation)) editableDimensionLayer.append(node);
+    else parent.append(node);
+  };
   for (const annotation of sourceAnnotations) {
     if (sharedPlan ? annotation.visible === false : !annotationVisible(annotation, displaySettings))
       continue;
@@ -474,17 +496,16 @@ export function renderDrawingSvg({
       if (!Array.isArray(sourcePoints) || sourcePoints.length < 2)
         throw new TypeError('注記polylineの点列が不正です。');
       const points = sourcePoints.map((point) => transformPoint(annotationToCss, point));
-      annotationParent.append(
-        create(annotation.closed === true ? 'polygon' : 'polyline', {
-          points: points.map((point) => point.join(',')).join(' '),
-          fill: annotation.filled === true ? style.fill || style.stroke || '#616161' : 'none',
-          stroke: style.stroke || '#616161',
-          'stroke-width': style.width || 0.25,
-          ...(annotation.paperStyle === true ? {} : { 'vector-effect': 'non-scaling-stroke' }),
-          'pointer-events': 'none',
-          'data-drawing-layer': layerId,
-        }),
-      );
+      const node = create(annotation.closed === true ? 'polygon' : 'polyline', {
+        points: points.map((point) => point.join(',')).join(' '),
+        fill: annotation.filled === true ? style.fill || style.stroke || '#616161' : 'none',
+        stroke: style.stroke || '#616161',
+        'stroke-width': style.width || 0.25,
+        ...(annotation.paperStyle === true ? {} : { 'vector-effect': 'non-scaling-stroke' }),
+        'pointer-events': 'none',
+        'data-drawing-layer': layerId,
+      });
+      appendAnnotationNode(annotationParent, node, annotation);
       continue;
     }
     if (annotation.kind === 'line') {
@@ -515,7 +536,7 @@ export function renderDrawingSvg({
         node.style.strokeWidth = String(style.width);
         node.style.strokeDasharray = style.dash || 'none';
       }
-      annotationParent.append(node);
+      appendAnnotationNode(annotationParent, node, annotation);
       continue;
     }
     if (annotation.kind === 'circle') {
@@ -586,7 +607,7 @@ export function renderDrawingSvg({
         node.style.stroke = 'white';
         node.style.strokeWidth = '0.6';
       }
-      annotationParent.append(node);
+      appendAnnotationNode(annotationParent, node, annotation);
       continue;
     }
     throw new TypeError(`未対応の注記図形です: ${annotation.kind}`);
@@ -627,14 +648,14 @@ export function renderDrawingSvg({
         role: 'button',
         'aria-label': `${record.ref.elementType} ${record.ref.elementId} ${record.mark}`,
       });
-      const select = () => {
-        if (onSelect) onSelect({ ...record.ref });
+      const select = (event) => {
+        if (onSelect) onSelect({ ...record.ref }, event);
       };
       group.addEventListener('click', select);
       group.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          select();
+          select(event);
         }
       });
       entry = {
@@ -995,6 +1016,11 @@ export function renderDrawingSvg({
         entry.group.append(...tagNodes);
       }
     }
+  }
+  if (editableDimensionLayer.childNodes.length) {
+    // Keep selectable dimension labels above model shapes but below draggable member tags.
+    if (editableTagLayer) svg.insertBefore(editableDimensionLayer, editableTagLayer);
+    else svg.append(editableDimensionLayer);
   }
   if (measurementLayer.childNodes.length) svg.append(measurementLayer);
   return svg;

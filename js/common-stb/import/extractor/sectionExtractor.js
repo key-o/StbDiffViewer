@@ -301,6 +301,21 @@ function extractSectionData(element, config) {
       extractShapeName(element, config),
   };
 
+  // RCスラブの均一厚さは図形の子要素（2.0.2 / 2.1.x）に記録される。
+  // 汎用コンクリート寸法抽出が読まないため、従来はSlabGeneratorで
+  // 実厚と無関係に150mmの既定値へ落ちていた。変断面や複数図形は除外する。
+  if (element.tagName === 'StbSecSlab_RC') {
+    const slabFigures = Array.from(element.getElementsByTagName('*')).filter((node) =>
+      /^StbSecSlab_RC_(?:Conventional)?(?:Straight|Taper|Haunch|Hollow|Waffle)$/u.test(
+        node.tagName,
+      ),
+    );
+    if (slabFigures.length === 1 && /Straight$/u.test(slabFigures[0].tagName)) {
+      const depth = Number(slabFigures[0].getAttribute('depth'));
+      if (Number.isFinite(depth) && depth > 0) sectionData.depth = depth;
+    }
+  }
+
   // 断面GUID（断面一致基準=GUID で対応キーに使用。無い場合は付与しない）
   if (guid !== null && guid !== '') sectionData.guid = guid;
 

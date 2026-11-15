@@ -6,6 +6,7 @@
  */
 
 import { generateIfcGuid } from '../StepWriter.js';
+import { encodeBeamMetadata } from '../../../common-ifc/pipeline/StbBeamMetadata.js';
 import { calculateBeamBasis } from '../../../data/geometry/vectorMath.js';
 import { createLogger } from '../../../utils/logger.js';
 
@@ -235,8 +236,8 @@ export function createTaperedBeamEntities(w, beamData, { bodyContext, createProf
     generateIfcGuid(),
     null,
     name,
-    null,
-    null,
+    encodeBeamMetadata(beamData),
+    beamData.kindStructure || null,
     `#${beamLocalPlacement}`,
     `#${productShape}`,
     null,

@@ -20,6 +20,8 @@ import {
   normalizeBeamRebarLayers,
   resolveBeamFirstLayerFaces,
   resolveBeamLayerCenterSpacingMm,
+  resolveBeamStirrupPreferredPositions,
+  selectBeamLayerXPositions,
 } from '../beamSectionList/beamRebarPositionResolver.js';
 import { extractRcBeamSectionDetail } from '../beamSectionList/sectionDetail.js';
 import { querySelectorAll } from '../sectionListUtils.js';
@@ -121,6 +123,7 @@ function buildResolvedSideBars(bar, side, context) {
   const unresolved = [];
   let previousLayer = null;
   let previousY = null;
+  let firstLayerPositions = null;
 
   for (let index = 0; index < layers.length; index += 1) {
     const layer = layers[index];
@@ -155,7 +158,11 @@ function buildResolvedSideBars(bar, side, context) {
       break;
     }
 
-    const xPositions = evenlySpaced(xStart, xEnd, count);
+    const xPositions =
+      (index > 0 &&
+        selectBeamLayerXPositions(count, firstLayerPositions, context.preferredStirrupPositions)) ||
+      evenlySpaced(xStart, xEnd, count);
+    if (index === 0) firstLayerPositions = xPositions;
     const assignments = assignBeamLayerGroupsToPositions(layer, xPositions);
     const placements = assignments.map((assignment) =>
       createMainBarFact({
@@ -266,9 +273,23 @@ function buildPositionBars(position, fallbackCover, options, renderDepth, positi
     allowFallbackWhenNotApplicable: false,
   });
 
+  const maxFirstLayerCount = Math.max(
+    Number(normalizeBeamRebarLayers(position.topBar)[0]?.count) || 0,
+    Number(normalizeBeamRebarLayers(position.bottomBar)[0]?.count) || 0,
+  );
+  const horizontalStart = Number(positionResolution.faces.left);
+  const horizontalEnd = width - Number(positionResolution.faces.right);
+  const preferredStirrupPositions =
+    Number.isFinite(horizontalStart) && Number.isFinite(horizontalEnd)
+      ? resolveBeamStirrupPreferredPositions(
+          evenlySpaced(horizontalStart, horizontalEnd, maxFirstLayerCount),
+          position.stirrup?.count,
+        )
+      : [];
   const mainContext = {
     width,
     positionDepth,
+    preferredStirrupPositions,
     renderDepth,
     positionZone,
     positionResolution,

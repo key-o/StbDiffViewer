@@ -128,6 +128,15 @@ export class TagFamilyManagerController {
     const state = this.state();
     const families = listTagFamiliesForCategory(category, state);
     select.replaceChildren();
+    // A category with only one family (notably RC column section figures) would
+    // otherwise show that family as selected even when nothing is applied.
+    // With no alternative option, selecting it cannot fire a change event.
+    if (families.length === 1) {
+      const unset = this.root.ownerDocument.createElement('option');
+      unset.value = '';
+      unset.textContent = '未適用（図面タグ設定に従う）';
+      select.appendChild(unset);
+    }
     for (const family of families) {
       const option = this.root.ownerDocument.createElement('option');
       option.value = family.id;
@@ -137,6 +146,7 @@ export class TagFamilyManagerController {
     const selectedId = state.selections?.[category] || null;
     if (selectedId && families.some((family) => family.id === selectedId))
       select.value = selectedId;
+    else if (families.length === 1) select.value = '';
     else if (families.some((family) => family.id === previous)) select.value = previous;
     this.refreshDetails();
   }
@@ -145,7 +155,17 @@ export class TagFamilyManagerController {
   applySelectedFamily() {
     try {
       const family = this.selectedFamily();
-      if (!family) return this.refreshDetails();
+      if (!family) {
+        // The explicit "not applied" option switches back to the ordinary
+        // drawing tag mode and clears a previously selected built-in family.
+        if (this.e('pdf-overlay-tag-family')?.value === '') {
+          const state = selectTagFamily(this.state(), this.category(), null, {
+            builtIns: BUILTIN_TAG_FAMILIES,
+          });
+          this.applyState(state);
+        }
+        return this.refreshDetails();
+      }
       const state = selectTagFamily(this.state(), family.category, family.id, {
         builtIns: BUILTIN_TAG_FAMILIES,
       });
@@ -173,7 +193,11 @@ export class TagFamilyManagerController {
       if (remove) remove.disabled = true;
       if (save) save.disabled = true;
       if (editLayout) editLayout.disabled = true;
-      this.status('このカテゴリのタグタイプはありません。');
+      this.status(
+        listTagFamiliesForCategory(this.category(), this.state()).length
+          ? 'タグタイプ未適用です。豆図を選択すると現在のビューへ適用されます。'
+          : 'このカテゴリのタグタイプはありません。',
+      );
       return;
     }
 

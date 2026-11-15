@@ -47,6 +47,21 @@ function getElementIds(userData) {
  * HashMapを使用して要素を管理し、高速な検索を提供
  */
 class ElementRegistry {
+  /** Isolate candidate registrations without mutating the displayed model's indexes. */
+  beginReplacement() {
+    const previous = {
+      byCompositeKey: this.byCompositeKey,
+      byType: this.byType,
+      byModelSource: this.byModelSource,
+      count: this.count,
+    };
+    this.byCompositeKey = new Map();
+    this.byType = new Map();
+    this.byModelSource = new Map();
+    this.count = 0;
+    return { rollback: () => Object.assign(this, previous) };
+  }
+
   constructor() {
     /** @type {Map<string, THREE.Object3D>} ID+Source → 要素 */
     this.byCompositeKey = new Map();

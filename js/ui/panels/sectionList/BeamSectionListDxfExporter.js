@@ -101,16 +101,15 @@ function drawBeamSectionEntities(lines2D, circles2D, positionData, cx, cy, optio
   });
 }
 
-export async function exportBeamSectionListToDxf(
-  gridData,
-  filename = 'rc-beam-section-list',
-  stbName = '',
-  options = {},
-) {
+/**
+ * 断面リストの図形（モデル座標のlines/circles/texts）を生成する。DXF出力とシート配置で共有する。
+ * @returns {{bounds,lines2D,circles2D,texts2D,stories,symbols,scheduleProfile}|null}
+ */
+export function buildBeamSectionListEntities(gridData, stbName = '', options = {}) {
   const { stories, symbols, grid } = gridData;
   if (!stories?.length || !symbols?.length) {
     log.warn('梁断面データが空のためDXFを出力できません');
-    return;
+    return null;
   }
 
   const scheduleProfile = resolveRcScheduleProfile(options.scheduleProfile || {});
@@ -226,17 +225,22 @@ export async function exportBeamSectionListToDxf(
     });
   });
 
+  return { bounds, lines2D, circles2D, texts2D, stories, symbols, scheduleProfile };
+}
+
+export async function exportBeamSectionListToDxf(
+  gridData,
+  filename = 'rc-beam-section-list',
+  stbName = '',
+  options = {},
+) {
+  const built = buildBeamSectionListEntities(gridData, stbName, options);
+  if (!built) return;
   await finalizeSectionListDxf({
-    bounds,
-    lines2D,
-    circles2D,
-    texts2D,
+    ...built,
     filename,
     logLabel: '梁断面リストDXF生成',
-    stories,
-    symbols,
     stbName,
-    scheduleProfile,
     dxfProfile: options.dxfProfile,
   });
 }

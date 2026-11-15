@@ -9,6 +9,8 @@
 import { applyMoveNodeCommand } from './moveNodeCommand.js';
 import { applySetAttributeCommand } from './setAttributeCommand.js';
 import { applySetMemberOffsetCommand } from './setMemberOffsetCommand.js';
+import { applySetWallNodeOffsetsCommand } from './setWallNodeOffsetsCommand.js';
+import { applySetSlabNodeOffsetsCommand } from './setSlabNodeOffsetsCommand.js';
 import { applyTranslateMemberCommand } from './translateMemberCommand.js';
 import { applyChangeSectionCommand } from './changeSectionCommand.js';
 import { applyRenumberIdCommand } from './renumberIdCommand.js';
@@ -42,6 +44,10 @@ function applyLeafCommand(document, nodeMap, command, direction) {
       return applySetAttributeCommand(document, nodeMap, command, direction);
     case 'setMemberOffset':
       return applySetMemberOffsetCommand(document, nodeMap, command, direction);
+    case 'setWallNodeOffsets':
+      return applySetWallNodeOffsetsCommand(document, nodeMap, command, direction);
+    case 'setSlabNodeOffsets':
+      return applySetSlabNodeOffsetsCommand(document, nodeMap, command, direction);
     case 'translateMember':
       return applyTranslateMemberCommand(document, nodeMap, command, direction);
     case 'changeSection':

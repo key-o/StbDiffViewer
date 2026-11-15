@@ -13,6 +13,9 @@ import {
   scene,
   elementGroups,
   axesHelper,
+  camera,
+  orthographicCamera,
+  activeCamera,
   setXRSessionActive,
   setXRFrameHandler,
   updateViewportSize,
@@ -23,7 +26,10 @@ import {
   cloneClippingPlanes,
   transformClippingPlanes,
   setElementGroupsClippingPlanes,
+  captureElementGroupsMaterialClipping,
+  restoreElementGroupsMaterialClipping,
 } from './arClipping.js';
+import { configureCamerasForAr } from './arCameraState.js';
 import { pickElementAtScreenPoint } from './arElementPicker.js';
 
 const log = createLogger('viewer/ar/arSessionManager');
@@ -79,6 +85,9 @@ export class ArSessionManager {
     this._lastHitResult = null;
     /** @type {XRAnchor|null} 配置点を安定化するアンカー（FR-6.5、対応端末のみ） */
     this._anchor = null;
+    this._anchorGeneration = 0;
+    this._restoreArCameras = null;
+    this._savedMaterialClipping = null;
   }
 
   /**
@@ -86,17 +95,33 @@ export class ArSessionManager {
    * @returns {Promise<boolean>}
    */
   async checkSupport() {
+    // ARボタンを非表示にした理由を、AndroidリモートDevToolsから調査できるようにする。
+    // URL全体（認証情報やクエリ文字列）は記録しない。
+    const context = {
+      secureContext: globalThis.isSecureContext ?? null,
+      origin: globalThis.location?.origin ?? 'unknown',
+    };
     if (!navigator.xr) {
-      log.info('WebXR APIが利用できません');
+      log.warn(
+        '[Config] WebXR APIが利用できません。HTTPSまたはlocalhostを確認してください',
+        context,
+      );
       this._isSupported = false;
       return false;
     }
     try {
       this._isSupported = await navigator.xr.isSessionSupported('immersive-ar');
-      log.info(`WebXR AR対応: ${this._isSupported}`);
+      if (!this._isSupported) {
+        log.warn(
+          '[Config] immersive-arセッションが非対応です。ARCore・Chrome・エミュレータ設定を確認してください',
+          context,
+        );
+      } else {
+        log.info('WebXR AR対応: true', context);
+      }
       return this._isSupported;
     } catch (e) {
-      log.warn('WebXR ARサポートチェックに失敗:', e);
+      log.warn('[Config] WebXR ARサポートチェックに失敗:', context, e);
       this._isSupported = false;
       return false;
     }
@@ -164,11 +189,17 @@ export class ArSessionManager {
       this._onStateChange = typeof onStateChange === 'function' ? onStateChange : null;
       this._lastNotifiedState = null;
 
-      // レンダラーにセッションを設定
+      // 先に参照空間を決定してWebXRManagerと同じ種類にする。
+      // setSession()は内部で参照空間を要求するため、後から指定すると失敗し得る。
+      const { type } = await this._requestReferenceSpaceWithFallback(session);
+      renderer.xr.setReferenceSpaceType(type);
+      this._restoreArCameras = configureCamerasForAr(
+        [camera, orthographicCamera, activeCamera],
+        controls,
+      );
       await renderer.xr.setSession(session);
-
-      // 参照空間の取得（local-floor 非対応端末では local にフォールバック）
-      this._refSpace = await this._requestReferenceSpaceWithFallback(session);
+      this._refSpace = renderer.xr.getReferenceSpace();
+      if (!this._refSpace) throw new Error('XR参照空間が初期化されませんでした');
 
       // ヒットテストソースの初期化
       const viewerSpace = await session.requestReferenceSpace('viewer');
@@ -222,12 +253,12 @@ export class ArSessionManager {
           log.warn('失敗したARセッションの終了処理でエラーが発生しました:', endError);
         }
       }
+      this._restoreModelGroupsFromArRoot();
       if (this._arRoot) {
         this._placement.dispose();
         scene.remove(this._arRoot);
         this._arRoot = null;
       }
-      this._restoreModelGroupsFromArRoot();
       this._restoreSceneHelpersAfterAr();
       this._restoreClippingAfterAr();
       if (this._originalBackground !== undefined) {
@@ -238,6 +269,7 @@ export class ArSessionManager {
       }
       setXRSessionActive(false);
       setXRFrameHandler(null);
+      this._restoreDesktopCameraState();
       if (this._hitTestSource) {
         this._hitTestSource.cancel();
         this._hitTestSource = null;
@@ -250,6 +282,7 @@ export class ArSessionManager {
       this._onStateChange = null;
       this._originalBackground = undefined;
       this._controlsWasEnabled = undefined;
+      updateViewportSize();
       return false;
     }
   }
@@ -258,15 +291,22 @@ export class ArSessionManager {
    * 参照空間を local-floor → local の順で取得
    * @private
    * @param {XRSession} session
-   * @returns {Promise<XRReferenceSpace>}
+   * @returns {Promise<{type: 'local-floor'|'local', space: XRReferenceSpace}>}
    */
   async _requestReferenceSpaceWithFallback(session) {
     try {
-      return await session.requestReferenceSpace('local-floor');
+      return { type: 'local-floor', space: await session.requestReferenceSpace('local-floor') };
     } catch (e) {
       log.warn('local-floor 参照空間が利用できないため local にフォールバックします:', e);
-      return await session.requestReferenceSpace('local');
+      return { type: 'local', space: await session.requestReferenceSpace('local') };
     }
+  }
+
+  /** 終了時または開始失敗時の通常カメラ状態復元。二重呼び出し可能。 */
+  _restoreDesktopCameraState() {
+    this._restoreArCameras?.();
+    this._restoreArCameras = null;
+    renderer?.xr?.setReferenceSpaceType?.('local-floor');
   }
 
   /**
@@ -288,16 +328,18 @@ export class ArSessionManager {
     if (!this._session || !this._hitTestSource || !this._refSpace) return;
 
     const hitTestResults = frame.getHitTestResults(this._hitTestSource);
-    if (hitTestResults.length > 0) {
-      const hit = hitTestResults[0];
-      const pose = hit.getPose(this._refSpace);
-      if (pose) {
-        this._placement.updateReticle(pose.transform);
-        this._lastHitResult = hit;
+    let validHit = false;
+    if (!this._placement.isPlaced) {
+      for (const hit of hitTestResults) {
+        const pose = hit.getPose(this._refSpace);
+        if (pose && this._placement.updateReticle(pose.transform)) {
+          this._lastHitResult = hit;
+          validHit = true;
+          break;
+        }
       }
-    } else {
-      this._placement.clearReticle();
-      if (!this._placement.isPlaced) {
+      if (!validHit) {
+        this._placement.clearReticle();
         this._lastHitResult = null;
       }
     }
@@ -350,11 +392,18 @@ export class ArSessionManager {
     this._releaseAnchor();
     const hit = this._lastHitResult;
     if (!hit || typeof hit.createAnchor !== 'function') return;
+    const generation = this._anchorGeneration;
+    const session = this._session;
     hit
       .createAnchor()
       .then((anchor) => {
         // 作成完了前に再配置・終了された場合は破棄する
-        if (!this._session || !this._placement.isPlaced || this._anchor) {
+        if (
+          this._session !== session ||
+          this._anchorGeneration !== generation ||
+          !this._placement.isPlaced ||
+          this._anchor
+        ) {
           anchor?.delete?.();
           return;
         }
@@ -371,6 +420,8 @@ export class ArSessionManager {
    * @private
    */
   _releaseAnchor() {
+    // 未解決のcreateAnchor()も無効化する（旧配置アンカーの遅着防止）。
+    this._anchorGeneration++;
     if (this._anchor) {
       try {
         this._anchor.delete?.();
@@ -504,6 +555,7 @@ export class ArSessionManager {
     // XRセッション状態を通知
     setXRSessionActive(false);
     setXRFrameHandler(null);
+    this._restoreDesktopCameraState();
 
     // AR中に発生したリサイズはスキップされているため、ここで再同期する
     updateViewportSize();
@@ -577,6 +629,7 @@ export class ArSessionManager {
     }
     this._arClipSourcePlanes = cloneClippingPlanes(this._savedClippingPlanes);
     this._arClipWorkingPlanes = cloneClippingPlanes(this._savedClippingPlanes);
+    this._savedMaterialClipping = captureElementGroupsMaterialClipping(elementGroups);
     renderer.clippingPlanes = [];
     renderer.localClippingEnabled = true;
     setElementGroupsClippingPlanes(elementGroups, this._arClipWorkingPlanes);
@@ -601,8 +654,9 @@ export class ArSessionManager {
    * @private
    */
   _restoreClippingAfterAr() {
-    if (this._arClipWorkingPlanes) {
-      setElementGroupsClippingPlanes(elementGroups, null);
+    if (this._savedMaterialClipping) {
+      restoreElementGroupsMaterialClipping(this._savedMaterialClipping);
+      this._savedMaterialClipping = null;
     }
     if (this._savedClippingPlanes !== undefined) {
       renderer.clippingPlanes = this._savedClippingPlanes;

@@ -53,8 +53,11 @@ export function createDxfEntitySourceRef(
   });
 }
 
+export const REFERENCE_SOURCE_KIND_SECTION_LIST = 'section-list';
+const REFERENCE_SOURCE_REF_KINDS = new Set(['dxf-entity', 'section-list-entity']);
+
 export function referenceSourceRefKey(ref) {
-  if (ref?.kind !== 'dxf-entity') throw new TypeError('DXF sourceRefが必要です。');
+  if (!REFERENCE_SOURCE_REF_KINDS.has(ref?.kind)) throw new TypeError('DXF sourceRefが必要です。');
   return JSON.stringify([
     ref.kind,
     requiredString(ref.documentId, 'DXF documentId'),

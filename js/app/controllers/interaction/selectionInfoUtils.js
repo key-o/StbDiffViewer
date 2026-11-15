@@ -13,9 +13,11 @@
 export function findSelectableAncestor(obj) {
   let cur = obj;
   while (cur) {
-    if (cur.userData && cur.userData.elementType) {
+    if (cur.userData && (cur.userData.elementType || cur.userData.isGlbElement)) {
       const et = cur.userData.elementType || cur.userData.stbNodeType;
-      if (et && et !== 'Axis' && et !== 'Story') return cur;
+      if ((cur.userData.isGlbElement || et) && et !== 'Axis' && et !== 'Story') {
+        return cur;
+      }
     }
     cur = cur.parent;
   }
@@ -53,6 +55,7 @@ export function getElementIds(userData) {
  * @returns {string|null}
  */
 export function normalizeSelectedElementType(userData) {
+  if (userData?.isGlbElement) return 'GLB';
   const elementType = userData?.elementType || userData?.stbNodeType || null;
   return elementType === 'Column (fallback line)' ? 'Column' : elementType;
 }

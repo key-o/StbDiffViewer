@@ -67,6 +67,20 @@ function bindingByEntityId(project, document) {
   return result;
 }
 
+function orphanedEntityIds(project, document) {
+  const result = new Set();
+  for (const binding of project.bindings) {
+    if (binding.modelSlotId !== document.modelSlotId) continue;
+    if (
+      binding.revisions.some(
+        (item) => item.sourceRevisionId === document.sourceRevisionId && item.orphaned,
+      )
+    )
+      result.add(binding.entityId);
+  }
+  return result;
+}
+
 function drawingDimensionReferenceBySourceRef(drawing) {
   const result = new Map();
   for (const [index, reference] of (drawing?.dimensionReferences || []).entries()) {
@@ -195,12 +209,16 @@ export function compileDrawingProjectDimensions({
     return Object.freeze([]);
 
   const bindings = bindingByEntityId(normalized, document);
+  const orphans = orphanedEntityIds(normalized, document);
   const currentReferences = drawingDimensionReferenceBySourceRef(drawing);
   const resolveReference = createDrawingDimensionReferenceResolver(drawing);
   const visible = displaySettings?.visibility?.Axis !== false;
 
   return Object.freeze(
-    document.dimensionIntents.map((persistent) => {
+    document.dimensionIntents.flatMap((persistent) => {
+      // 孤児化した参照を持つ寸法は作図意図として保持するが、現行改訂では描画しない。
+      if (persistent.references.some((reference) => orphans.has(reference.binding.entityId)))
+        return [];
       const runtimeReferences = persistent.references.map((reference, index) => {
         const mapped = bindings.get(reference.binding.entityId);
         if (!mapped)
@@ -236,15 +254,17 @@ export function compileDrawingProjectDimensions({
         modelToPaper,
         resolveReference,
       });
-      return Object.freeze({
-        id: `dimension:project:${compiled.intent.id}`,
-        intentId: compiled.intent.id,
-        familyId: compiled.familyId,
-        layerId: 'Annotation',
-        visibilitySource: 'Axis',
-        visible,
-        primitives: compiled.primitives,
-      });
+      return [
+        Object.freeze({
+          id: `dimension:project:${compiled.intent.id}`,
+          intentId: compiled.intent.id,
+          familyId: compiled.familyId,
+          layerId: 'Annotation',
+          visibilitySource: 'Axis',
+          visible,
+          primitives: compiled.primitives,
+        }),
+      ];
     }),
   );
 }

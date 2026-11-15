@@ -14,6 +14,7 @@ third-party components remain governed by their own licenses.
 | encoding-japanese      | 2.2.0   | MIT     | Japanese character encoding conversion |
 | html2canvas            | 1.4.1   | MIT     | DOM capture for reports/PDF output     |
 | jspdf                  | 4.2.x   | MIT     | PDF generation                         |
+| svg2pdf.js (vendored)  | 2.7.0   | MIT     | Offline vector SVG to PDF rendering    |
 | ajv                    | 8.17.x  | MIT     | JSON Schema validation                 |
 | ajv-formats            | 3.0.x   | MIT     | JSON Schema format validation          |
 | web-ifc / web-ifc.wasm | 0.0.74  | MPL-2.0 | IFC parsing and conversion             |
@@ -27,6 +28,31 @@ third-party components remain governed by their own licenses.
 | fast-png       | 6.4.x   | MIT                   | jspdf   |
 | fflate         | 0.8.x   | MIT                   | jspdf   |
 | @babel/runtime | 7.29.x  | MIT                   | jspdf   |
+| cssesc         | ^3.0.0  | MIT                   | svg2pdf.js bundled build |
+| svgpath        | ^2.3.0  | MIT                   | svg2pdf.js bundled build |
+| specificity    | ^0.4.1  | MIT                   | svg2pdf.js bundled build |
+| font-family-papandreou | ^0.2.0-patch1 | MIT       | svg2pdf.js bundled build |
+
+## Offline vector-PDF packaging (Issue #493)
+
+- The browser renderer is pinned to the **svg2pdf.js v2.7.0 UMD release**
+  at `StbDiffViewer/vendor/svg2pdf-v2.7.0.mjs` (an ESM wrapper around
+  the original distribution, with no npm dependency or CDN request).
+- The original and bundled-components' MIT permission/copyright statements
+  are distributed in `vendor/licenses/*.txt`. The npm manifest remains
+  unchanged; the package versions shown with `^` are the upstream
+  **release manifest ranges**, not a separately audited npm install tree.
+- The bundled renderer imports the existing `jspdf` 4.2.x dependency;
+  no independent copy of jsPDF is included.
+- Japanese PDF fonts are **not bundled** and are **not downloaded**. The
+  user may explicitly select a static TTF whose licensing permits PDF
+  embedding (e.g. an appropriately licensed SIL OFL font). TTF contents are
+  embedded only into the generated PDF, not stored in the source tree.
+  The app cannot verify the font's grant of rights. Windows system-font
+  redistribution/embedding permission must not be presumed.
+- Before release, verify all `vendor/licenses/*.txt` notices correspond to
+  the exact code in the upstream v2.7.0 prebundled artifact, and verify
+  Web, Vite/Tauri and MSIX package notice inclusion.
 
 ## License Obligations
 
@@ -48,6 +74,11 @@ third-party components remain governed by their own licenses.
 - encoding-japanese: https://github.com/polygonplanet/encoding.js
 - html2canvas: https://github.com/niklasvh/html2canvas
 - jsPDF: https://github.com/parallax/jsPDF
+- svg2pdf.js: https://github.com/yWorks/svg2pdf.js/tree/v2.7.0
+- cssesc: https://github.com/mathiasbynens/cssesc
+- svgpath: https://github.com/fontello/svgpath
+- specificity: https://github.com/keeganstreet/specificity
+- font-family-papandreou: https://github.com/papandreou/font-family
 - Ajv: https://github.com/ajv-validator/ajv
 - web-ifc: https://github.com/ThatOpen/engine_web-ifc
 - DOMPurify: https://github.com/cure53/DOMPurify

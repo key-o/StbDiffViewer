@@ -23,6 +23,18 @@ export const MAX_SCALE_FACTOR = 1;
 /** アンカー追従で配置点を更新する際の最小移動量（m）。微小なポーズ揺れは無視する */
 export const ANCHOR_UPDATE_EPSILON_M = 0.0005;
 
+/** 水平面からの最大傾き（法線と鉛直軸の内積の絶対値）。約30°まで許容 */
+export const MIN_HORIZONTAL_NORMAL_Y = Math.cos(Math.PI / 6);
+
+/** XRヒットの姿勢行列が水平面（床・机）を示すか判定する */
+export function isHorizontalHitTransform(transform) {
+  if (!transform?.matrix || transform.matrix.length !== 16) return false;
+  const m = transform.matrix;
+  // 姿勢行列の第2列は、ヒット面のローカルY（面法線）のワールド方向。
+  const length = Math.hypot(m[4], m[5], m[6]);
+  return length > 0 && Math.abs(m[5] / length) >= MIN_HORIZONTAL_NORMAL_Y;
+}
+
 /** ビューアのZ-up座標をWebXRのY-up座標へ変換する回転 */
 const Z_UP_TO_Y_UP = new THREE.Quaternion().setFromAxisAngle(
   new THREE.Vector3(1, 0, 0),
@@ -68,6 +80,7 @@ export class ArPlacement {
     this._hasValidHit = false;
     this._lastHitMatrix.identity();
     this._rotationY = 0;
+    this._scaleFactor = DEFAULT_SCALE_FACTOR;
 
     // レティクル（配置位置インジケータ）を作成
     this._reticle = this._createReticle();
@@ -101,12 +114,17 @@ export class ArPlacement {
    * @param {XRRigidTransform} transform - ヒットテスト結果の変換
    */
   updateReticle(transform) {
-    if (!this._reticle || this._placed) return;
+    if (!this._reticle || this._placed) return false;
+    if (!isHorizontalHitTransform(transform)) {
+      this.clearReticle();
+      return false;
+    }
 
     this._reticle.visible = true;
     this._lastHitMatrix.fromArray(transform.matrix);
     this._reticle.matrix.copy(this._lastHitMatrix);
     this._hasValidHit = true;
+    return true;
   }
 
   /**

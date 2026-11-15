@@ -50,6 +50,7 @@ export function updateVersionPanel(versionInfo) {
     versionInfo.sourceTypeA,
     versionInfo.ifcSchemaA,
     versionInfo.hasModelA !== false,
+    versionInfo.ifcDiagnosticsA,
   );
   updateInlineVersionBadge(
     'versionB-inline',
@@ -57,6 +58,7 @@ export function updateVersionPanel(versionInfo) {
     versionInfo.sourceTypeB,
     versionInfo.ifcSchemaB,
     versionInfo.hasModelB !== false,
+    versionInfo.ifcDiagnosticsB,
   );
 }
 
@@ -68,17 +70,30 @@ export function updateVersionPanel(versionInfo) {
  * @param {string} [ifcSchema] - IFCスキーマ文字列
  * @param {boolean} [hasModel=true] - 対象スロットにモデルが存在するか
  */
-function updateInlineVersionBadge(elementId, version, sourceType, ifcSchema, hasModel = true) {
+function updateInlineVersionBadge(
+  elementId,
+  version,
+  sourceType,
+  ifcSchema,
+  hasModel = true,
+  ifcDiagnostics = null,
+) {
   const el = document.getElementById(elementId);
   if (!el) return;
 
   if (!hasModel) {
     el.textContent = '';
     el.className = 'version-badge-inline';
+    el.removeAttribute('title');
     return;
   }
 
-  el.textContent = formatSourceLabel(version, sourceType, ifcSchema);
+  el.textContent = `${formatSourceLabel(version, sourceType, ifcSchema)}${ifcDiagnostics ? ' ⚠' : ''}`;
+  if (ifcDiagnostics) {
+    el.title = `IFC復元は完全性未検証：分類${ifcDiagnostics.classifiedElementCount}件、STB要素未生成${ifcDiagnostics.unconvertedClassifiedCount}件（未対応IFCクラスは未集計）`;
+  } else {
+    el.removeAttribute('title');
+  }
   el.className = 'version-badge-inline ' + getVersionClass(version, sourceType);
 }
 
@@ -152,10 +167,12 @@ export function clearVersionPanel() {
   if (versionAEl) {
     versionAEl.textContent = '';
     versionAEl.className = 'version-badge-inline';
+    versionAEl.removeAttribute('title');
   }
   if (versionBEl) {
     versionBEl.textContent = '';
     versionBEl.className = 'version-badge-inline';
+    versionBEl.removeAttribute('title');
   }
 }
 

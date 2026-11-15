@@ -8,6 +8,9 @@
  */
 
 import * as WebIFC from 'web-ifc';
+import { decodeSurfaceMetadata } from './StbSurfaceMetadata.js';
+import { decodeBeamMetadata } from './StbBeamMetadata.js';
+import { decodeLinearOffsetMetadata } from './StbLinearOffsetMetadata.js';
 import {
   IFC_TO_STB_TYPE,
   STRUCTURAL_IFC_TYPES,
@@ -33,6 +36,7 @@ export class ElementClassifier {
    */
   classify() {
     const materialMap = this._buildMaterialMap();
+    const typeMap = this._buildPredefinedTypeMap();
     const elements = [];
 
     for (const ifcType of STRUCTURAL_IFC_TYPES) {
@@ -46,7 +50,11 @@ export class ElementClassifier {
       for (let i = 0; i < ids.size(); i++) {
         const expressID = ids.get(i);
         const line = this.api.GetLine(this.modelID, expressID);
-        const mapping = IFC_TO_STB_TYPE.get(ifcType);
+        const predefinedType = this._predefinedType(line, typeMap.get(expressID));
+        // IFC2x3 already distinguishes a footing beam from a pad/strip footing.
+        // Route its measured axis through the beam pipeline, never the pad pipeline.
+        const footingBeam = ifcType === WebIFC.IFCFOOTING && predefinedType === 'FOOTING_BEAM';
+        const mapping = IFC_TO_STB_TYPE.get(footingBeam ? WebIFC.IFCBEAM : ifcType);
         if (!mapping) continue;
 
         const objectType = line.ObjectType?.value || null;
@@ -72,11 +80,70 @@ export class ElementClassifier {
           representationRef: line.Representation?.value ?? line.Representation ?? null,
         };
 
+        const surfaceKind =
+          mapping.stbCategory === 'slab' || mapping.stbCategory === 'wall'
+            ? mapping.stbCategory
+            : null;
+        const source = surfaceKind ? decodeSurfaceMetadata(element.description, surfaceKind) : null;
+        if (source) {
+          element.surfaceMetadata = source;
+          if (source.kindLayout) element.kindLayout = source.kindLayout;
+          if (source.kindStructure) element.kindStructure = source.kindStructure;
+        }
+        if (mapping.stbCategory === 'beam') {
+          const beamMetadata = decodeBeamMetadata(element.description);
+          if (beamMetadata) {
+            if (typeof beamMetadata.isFoundation === 'boolean')
+              element.isFoundation = beamMetadata.isFoundation;
+            if (beamMetadata.offsets) element.sourceBeamOffsets = beamMetadata.offsets;
+          }
+          if (footingBeam) {
+            if (element.isFoundation === false)
+              throw new Error(`IFC #${expressID}: FOOTING_BEAM conflicts with foundation metadata`);
+            element.isFoundation = true;
+          }
+        } else if (mapping.stbCategory === 'column' || mapping.stbCategory === 'brace') {
+          const offsets = decodeLinearOffsetMetadata(element.description, mapping.stbCategory);
+          if (offsets) element.sourceLinearOffsets = offsets;
+        }
+        if (mapping.stbCategory === 'slab' && predefinedType === 'BASESLAB') {
+          if (element.surfaceMetadata?.isFoundation === false)
+            throw new Error(`IFC #${expressID}: BASESLAB conflicts with foundation metadata`);
+          // BASESLAB proves foundation use, not STB NORMAL/CANTI or wall support.
+          element.surfaceMetadata = { ...element.surfaceMetadata, isFoundation: true };
+        }
         elements.push(element);
       }
     }
 
     return elements;
+  }
+
+  _predefinedType(line, inherited = new Set()) {
+    const value = line?.PredefinedType?.value;
+    const explicit = typeof value === 'string' ? value.replace(/^\.|\.$/g, '') : null;
+    if (explicit && explicit !== 'NOTDEFINED') return explicit;
+    if (inherited.size > 1) throw new Error('Conflicting IFC type-level PredefinedType values');
+    return inherited.values().next().value || null;
+  }
+
+  _buildPredefinedTypeMap() {
+    const result = new Map();
+    const ids = this.api.GetLineIDsWithType(this.modelID, WebIFC.IFCRELDEFINESBYTYPE);
+    for (let i = 0; i < ids.size(); i++) {
+      const rel = this.api.GetLine(this.modelID, ids.get(i));
+      const typeId = rel?.RelatingType?.value;
+      if (!typeId) continue;
+      const value = this._predefinedType(this.api.GetLine(this.modelID, typeId));
+      if (!value) continue;
+      for (const ref of rel.RelatedObjects || []) {
+        const id = ref?.value;
+        if (!id) continue;
+        if (!result.has(id)) result.set(id, new Set());
+        result.get(id).add(value);
+      }
+    }
+    return result;
   }
 
   /**

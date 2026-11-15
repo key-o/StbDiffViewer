@@ -1,4 +1,9 @@
 import { BUILTIN_TAG_FAMILIES } from './tags/tagFamilyRegistry.js';
+import { normalizeSlabListState } from '../extractors/slabList/slabListResolver.js';
+import { normalizeDrawingSheets } from './drawingSheetCollection.js';
+import { normalizeCutBoundsMm } from './drawingSheetCutRegion.js';
+import { normalizeDxfLayerSettings } from './drawingDxfLayerSettings.js';
+import { normalizePrintSettings } from './drawingPrintSettings.js';
 import { createEmptyTagFamilyState, normalizeTagFamilyState } from './tags/tagFamilyStore.js';
 import { resolveDimensionFamily } from './dimensions/dimensionFamilyRegistry.js';
 
@@ -99,11 +104,25 @@ function unique(items, keyOf, path, code) {
 
 function sourceRevision(value, path) {
   record(value, path);
-  keys(value, new Set(['id', 'sha256']), path);
+  keys(value, new Set(['id', 'sha256', 'originalSha256']), path);
   const sha256 = id(value.sha256, path + '.sha256').toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(sha256))
     fail('INVALID_SHA256', path + '.sha256', 'SHA-256 must be 64 hexadecimal digits.');
-  return { id: id(value.id, path + '.id'), sha256 };
+  const originalSha256 =
+    value.originalSha256 == null
+      ? null
+      : id(value.originalSha256, path + '.originalSha256').toLowerCase();
+  if (originalSha256 != null && !/^[0-9a-f]{64}$/.test(originalSha256))
+    fail(
+      'INVALID_SHA256',
+      path + '.originalSha256',
+      'Original SHA-256 must be 64 hexadecimal digits.',
+    );
+  return {
+    id: id(value.id, path + '.id'),
+    sha256,
+    ...(originalSha256 == null ? {} : { originalSha256 }),
+  };
 }
 
 function modelSlot(value, index) {
@@ -149,7 +168,23 @@ function binding(value, index) {
   const revisions = value.revisions.map((item, i) => {
     const itemPath = path + '.revisions[' + i + ']';
     record(item, itemPath);
-    keys(item, new Set(['sourceRevisionId', 'sourceRef']), itemPath);
+    keys(item, new Set(['sourceRevisionId', 'sourceRef', 'orphaned']), itemPath);
+    // orphaned=true は「この改訂に対応先がない」ことを明示承認した記録。sourceRefはnullで保持する。
+    if (item.orphaned != null && item.orphaned !== true)
+      fail('INVALID_BINDING_REVISION', itemPath + '.orphaned', 'orphaned must be true when set.');
+    if (item.orphaned === true) {
+      if (item.sourceRef != null)
+        fail(
+          'INVALID_BINDING_REVISION',
+          itemPath + '.sourceRef',
+          'An orphaned revision mapping must not have a sourceRef.',
+        );
+      return {
+        sourceRevisionId: id(item.sourceRevisionId, itemPath + '.sourceRevisionId'),
+        sourceRef: null,
+        orphaned: true,
+      };
+    }
     return {
       sourceRevisionId: id(item.sourceRevisionId, itemPath + '.sourceRevisionId'),
       sourceRef: sourceRef(item.sourceRef, itemPath + '.sourceRef'),
@@ -161,6 +196,13 @@ function binding(value, index) {
     path + '.revisions',
     'DUPLICATE_BINDING_REVISION',
   );
+  // 孤児mappingだけのbindingは再関連付けの起点(最後の対応sourceRef)を持てないため受け付けない。
+  if (!revisions.some((item) => item.sourceRef))
+    fail(
+      'INVALID_BINDING_REVISIONS',
+      path + '.revisions',
+      'At least one non-orphaned revision mapping is required.',
+    );
   return {
     entityId: id(value.entityId, path + '.entityId'),
     modelSlotId: id(value.modelSlotId, path + '.modelSlotId'),
@@ -170,7 +212,7 @@ function binding(value, index) {
 
 function planView(value, path) {
   record(value, path);
-  keys(value, new Set(['type', 'storyId', 'storyBinding']), path);
+  keys(value, new Set(['type', 'storyId', 'storyBinding', 'cutBoundsMm']), path);
   if (value.type !== 'plan')
     fail('INVALID_VIEW', path + '.type', 'DrawingProject v1 supports plan view only.');
   let storyBinding = null;
@@ -185,6 +227,43 @@ function planView(value, path) {
     type: 'plan',
     storyId: id(value.storyId, path + '.storyId'),
     ...(storyBinding ? { storyBinding } : {}),
+    ...(value.cutBoundsMm != null ? { cutBoundsMm: normalizeCutBoundsMm(value.cutBoundsMm) } : {}),
+  };
+}
+
+/**
+ * #510: persistent view intent, not resolved projection geometry.
+ * The revision and model slot are stored on the DrawingDocument; a stored
+ * axisId is meaningful only within that exact source revision.
+ */
+function drawingView(value, path) {
+  if (value?.type === 'plan') return planView(value, path);
+  record(value, path);
+  keys(
+    value,
+    new Set(['type', 'axisDirection', 'axisId', 'depth', 'axisBinding', 'cutBoundsMm']),
+    path,
+  );
+  if (value.type !== 'elevation')
+    fail('INVALID_VIEW', path + '.type', 'Supported drawing views are plan and elevation.');
+  if (!['X', 'Y'].includes(value.axisDirection))
+    fail('INVALID_AXIS_DIRECTION', path + '.axisDirection', 'Axis direction must be X or Y.');
+  const depth = finite(value.depth == null ? 2000 : value.depth, path + '.depth');
+  if (depth <= 0)
+    fail('INVALID_ELEVATION_DEPTH', path + '.depth', 'Axis elevation depth must be positive.');
+  let axisBinding;
+  if (value.axisBinding != null) {
+    record(value.axisBinding, path + '.axisBinding');
+    keys(value.axisBinding, new Set(['entityId']), path + '.axisBinding');
+    axisBinding = { entityId: id(value.axisBinding.entityId, path + '.axisBinding.entityId') };
+  }
+  return {
+    type: 'elevation',
+    axisDirection: value.axisDirection,
+    axisId: id(value.axisId, path + '.axisId'),
+    depth,
+    ...(axisBinding ? { axisBinding } : {}),
+    ...(value.cutBoundsMm != null ? { cutBoundsMm: normalizeCutBoundsMm(value.cutBoundsMm) } : {}),
   };
 }
 
@@ -462,7 +541,7 @@ function reviewContext(value, path) {
   keys(value, new Set(['sourceRevisionId', 'view']), path);
   return {
     sourceRevisionId: id(value.sourceRevisionId, path + '.sourceRevisionId'),
-    view: planView(value.view, path + '.view'),
+    view: drawingView(value.view, path + '.view'),
   };
 }
 
@@ -487,11 +566,12 @@ function memberReview(value, index, prefix) {
 }
 
 function memberReviewContextKey(review) {
+  const view = review.context.view;
   return JSON.stringify([
     review.binding.entityId,
     review.context.sourceRevisionId,
-    review.context.view.type,
-    review.context.view.storyId,
+    view.type,
+    ...(view.type === 'plan' ? [view.storyId] : [view.axisDirection, view.axisId, view.depth]),
   ]);
 }
 
@@ -592,6 +672,7 @@ function drawingDocument(value, index) {
       'id',
       'modelSlotId',
       'sourceRevisionId',
+      'name',
       'view',
       'sheet',
       'display',
@@ -643,7 +724,8 @@ function drawingDocument(value, index) {
     id: id(value.id, path + '.id'),
     modelSlotId: id(value.modelSlotId, path + '.modelSlotId'),
     sourceRevisionId: id(value.sourceRevisionId, path + '.sourceRevisionId'),
-    view: planView(value.view, path + '.view'),
+    ...(value.name == null ? {} : { name: id(value.name, path + '.name') }),
+    view: drawingView(value.view, path + '.view'),
     sheet: sheet(value.sheet, path + '.sheet'),
     display: drawingDisplay(value.display, path + '.display'),
     tagIntents,
@@ -690,6 +772,43 @@ function validateReferences(project) {
         'drawingDocuments[' + i + '].sourceRevisionId',
         'Drawing revision must belong to its model slot.',
       );
+    if (drawing.view.type === 'elevation' && drawing.view.axisBinding) {
+      const axisPath = 'drawingDocuments[' + i + '].view.axisBinding.entityId';
+      const item = bindings.get(drawing.view.axisBinding.entityId);
+      if (!item)
+        fail(
+          'UNKNOWN_ENTITY_BINDING',
+          axisPath,
+          'Axis entityId is not defined in BindingRegistry.',
+        );
+      if (item.modelSlotId !== drawing.modelSlotId)
+        fail(
+          'BINDING_MODEL_SLOT_MISMATCH',
+          axisPath,
+          'Axis binding must belong to the drawing model slot.',
+        );
+      const revision = item.revisions.find(
+        (candidate) => candidate.sourceRevisionId === drawing.sourceRevisionId,
+      );
+      if (!revision)
+        fail(
+          'UNBOUND_DRAWING_REVISION',
+          axisPath,
+          'Axis binding has no mapping for the drawing revision.',
+        );
+      if (!revision.sourceRef || revision.sourceRef.elementType !== 'ParallelAxis')
+        fail(
+          'INVALID_AXIS_REFERENCE_BINDING',
+          axisPath,
+          'Elevation axis binding must reference a parallel axis.',
+        );
+      if (String(revision.sourceRef.elementId) !== drawing.view.axisId)
+        fail(
+          'AXIS_BINDING_ID_MISMATCH',
+          axisPath,
+          'Elevation axisId must match the bound source revision.',
+        );
+    }
     if (drawing.view.storyBinding) {
       const storyPath = 'drawingDocuments[' + i + '].view.storyBinding.entityId';
       const item = bindings.get(drawing.view.storyBinding.entityId);
@@ -714,7 +833,7 @@ function validateReferences(project) {
           storyPath,
           'Story binding is not mapped for the drawing source revision.',
         );
-      if (revision.sourceRef.elementType !== 'Story')
+      if (!revision.sourceRef || revision.sourceRef.elementType !== 'Story')
         fail(
           'INVALID_STORY_REFERENCE_BINDING',
           storyPath,
@@ -779,7 +898,7 @@ function validateReferences(project) {
             dimensionPath,
             'Dimension binding is not mapped for the drawing source revision.',
           );
-        if (revision.sourceRef.elementType !== 'ParallelAxis')
+        if (!revision.orphaned && revision.sourceRef.elementType !== 'ParallelAxis')
           fail(
             'INVALID_DIMENSION_REFERENCE_BINDING',
             dimensionPath,
@@ -854,7 +973,11 @@ export function normalizeDrawingProject(value) {
       'modelSlots',
       'bindings',
       'drawingDocuments',
+      'drawingSheets',
       'definitions',
+      'slabListState',
+      'dxfLayerSettings',
+      'printSettings',
     ]),
     '$',
   );
@@ -870,11 +993,39 @@ export function normalizeDrawingProject(value) {
   keys(value.units, new Set(['model', 'paper']), '$.units');
   if (value.units.model !== 'mm' || value.units.paper !== 'mm')
     fail('INVALID_UNITS', '$.units', 'DrawingProject v1 requires model mm and paper mm.');
-  if (!Array.isArray(value.modelSlots) || value.modelSlots.length === 0)
+  // #565: permit a paper-only project before the first STB import. Require
+  // at least one sheet, and disallow orphaned model-bound metadata.
+  const blankSheetProject =
+    Array.isArray(value.modelSlots) &&
+    value.modelSlots.length === 0 &&
+    Array.isArray(value.drawingDocuments) &&
+    value.drawingDocuments.length === 0 &&
+    Array.isArray(value.bindings) &&
+    value.bindings.length === 0 &&
+    Array.isArray(value.drawingSheets) &&
+    value.drawingSheets.length > 0 &&
+    value.slabListState === undefined;
+  // A sheet can contain STB-bound lists before any plan/elevation view is registered.
+  // Its source revision must still be backed by an actual model slot.
+  const listOnlyProject =
+    Array.isArray(value.modelSlots) &&
+    value.modelSlots.length > 0 &&
+    Array.isArray(value.drawingDocuments) &&
+    value.drawingDocuments.length === 0 &&
+    Array.isArray(value.bindings) &&
+    value.bindings.length === 0 &&
+    Array.isArray(value.drawingSheets) &&
+    value.drawingSheets.some(
+      (sheet) => sheet.kind !== 'section-list' && sheet.listPlacements?.length,
+    );
+  if (!Array.isArray(value.modelSlots) || (!value.modelSlots.length && !blankSheetProject))
     fail('INVALID_MODEL_SLOTS', '$.modelSlots', 'At least one model slot is required.');
   if (!Array.isArray(value.bindings))
     fail('INVALID_BINDINGS', '$.bindings', 'bindings must be an array.');
-  if (!Array.isArray(value.drawingDocuments) || value.drawingDocuments.length === 0)
+  if (
+    !Array.isArray(value.drawingDocuments) ||
+    (!value.drawingDocuments.length && !blankSheetProject && !listOnlyProject)
+  )
     fail(
       'INVALID_DRAWING_DOCUMENTS',
       '$.drawingDocuments',
@@ -900,6 +1051,36 @@ export function normalizeDrawingProject(value) {
     'DUPLICATE_DRAWING_DOCUMENT',
   );
   validateReferences(project);
+  if (value.drawingSheets !== undefined)
+    project.drawingSheets = normalizeDrawingSheets(
+      value.drawingSheets,
+      project.drawingDocuments,
+      project.modelSlots,
+    );
+  // Optional v1 extension: older projects remain valid and byte-for-byte STB sources are untouched.
+  if (value.slabListState !== undefined) {
+    try {
+      project.slabListState = normalizeSlabListState(value.slabListState);
+    } catch (error) {
+      fail('INVALID_SLAB_LIST_STATE', '$.slabListState', error.message);
+    }
+  }
+  if (value.dxfLayerSettings !== undefined) {
+    try {
+      const settings = normalizeDxfLayerSettings(value.dxfLayerSettings, '$.dxfLayerSettings');
+      if (settings) project.dxfLayerSettings = settings;
+    } catch (error) {
+      fail('INVALID_DXF_LAYER_SETTINGS', error.path ?? '$.dxfLayerSettings', error.message);
+    }
+  }
+  if (value.printSettings !== undefined) {
+    try {
+      const settings = normalizePrintSettings(value.printSettings, '$.printSettings');
+      if (settings) project.printSettings = settings;
+    } catch (error) {
+      fail('INVALID_PRINT_SETTINGS', error.path ?? '$.printSettings', error.message);
+    }
+  }
   return project;
 }
 

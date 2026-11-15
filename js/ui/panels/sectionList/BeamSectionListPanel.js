@@ -24,6 +24,7 @@ export class BeamSectionListPanel extends BaseSectionListPanel {
     super({
       windowId: 'beam-section-list-window',
       idPrefix: 'beam-section-list',
+      sectionListType: 'beam',
       title: 'RC梁断面リスト',
       windowClass: 'beam-section-list-window',
       toggleButtonId: 'showBeamSectionListBtn',

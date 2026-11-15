@@ -26,11 +26,7 @@ import {
 } from './dxfFileLoader.js';
 import { showWarning } from '../dxfLoaderHelpers.js';
 import { updateExportLayerUI, clearSelectedExportLayers, initExportUI } from '../dxfExportUI.js';
-import {
-  updateStbExportStatus,
-  setStbExportPanelVisibility,
-  initStbExportUI,
-} from '../stbExportUI.js';
+import { updateStbExportStatus, setStbExportPanelVisibility } from '../stbExportUI.js';
 import { getCurrentStories, getCurrentAxesData } from '../dxfLoaderHelpers.js';
 
 const log = createLogger('DXFLoader');
@@ -152,9 +148,6 @@ export function initDxfLoaderUI() {
 
   // エクスポートUIを初期化
   initExportUI();
-
-  // STBエクスポートUIを初期化
-  initStbExportUI();
 
   // 位置調整モードトグルボタン
   const toggleEditModeBtn = document.getElementById('toggleDxfEditMode');

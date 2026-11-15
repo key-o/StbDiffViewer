@@ -60,6 +60,8 @@ export class IFCBeamExporter extends IFCExporterBase {
       isSRC = false,
       steelProfile = null,
       kindStructure = 'S',
+      isFoundation,
+      sourceBeamOffsets,
       stbType = STB_TAG_NAMES.GIRDER,
     } = beamData;
 
@@ -102,6 +104,8 @@ export class IFCBeamExporter extends IFCExporterBase {
       placementMode,
       sectionHeight,
       kindStructure,
+      isFoundation,
+      sourceBeamOffsets,
       stbType,
       profileId,
       bodyContext: this._refs.bodyContext,
@@ -182,6 +186,7 @@ export class IFCBeamExporter extends IFCExporterBase {
       isSRC = false,
       steelProfile = null,
       kindStructure = 'S',
+      sourceLinearOffsets,
     } = columnData;
 
     // Validate isReferenceDirection
@@ -207,6 +212,7 @@ export class IFCBeamExporter extends IFCExporterBase {
       rotation,
       isReferenceDirection,
       kindStructure,
+      sourceLinearOffsets,
       profileId,
       bodyContext: this._refs.bodyContext,
       // SRC造の鉄骨プロファイルはコンクリート押出の後に生成する（エンティティ順を維持）
@@ -247,7 +253,12 @@ export class IFCBeamExporter extends IFCExporterBase {
       return null;
     }
 
-    const { name = 'Post', isReferenceDirection = true, kindStructure = 'S' } = postData;
+    const {
+      name = 'Post',
+      isReferenceDirection = true,
+      kindStructure = 'S',
+      sourceLinearOffsets,
+    } = postData;
 
     const { point1: bottomPoint, profile, length, rotation } = validation;
 
@@ -267,6 +278,7 @@ export class IFCBeamExporter extends IFCExporterBase {
       rotation,
       isReferenceDirection,
       kindStructure,
+      sourceLinearOffsets,
       profileId,
       bodyContext: this._refs.bodyContext,
     });
@@ -302,7 +314,7 @@ export class IFCBeamExporter extends IFCExporterBase {
       return null;
     }
 
-    const { name = 'Brace', kindStructure = 'S' } = braceData;
+    const { name = 'Brace', kindStructure = 'S', sourceLinearOffsets } = braceData;
 
     const { point1: startPoint, point2: endPoint, profile, length, rotation } = validation;
 
@@ -322,6 +334,7 @@ export class IFCBeamExporter extends IFCExporterBase {
       length,
       rotation,
       kindStructure,
+      sourceLinearOffsets,
       profileId,
       bodyContext: this._refs.bodyContext,
     });

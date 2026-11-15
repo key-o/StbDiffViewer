@@ -12,6 +12,7 @@
 
 import {
   getAttributeInfo,
+  initializeJsonSchemas,
   isSchemaLoaded,
   validateAttributeValue,
 } from '../../../../common-stb/import/parser/jsonSchemaLoader.js';
@@ -60,6 +61,8 @@ function startWorkingSessionIfNeeded() {
   if (isWorkingSessionActive()) return true;
   try {
     editingSession.start();
+    // モデル未読込でも新規作成フォームがスキーマを使えるよう、先読みを開始する。
+    if (!isSchemaLoaded()) void initializeJsonSchemas();
     return true;
   } catch (error) {
     showError(

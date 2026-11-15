@@ -19,6 +19,7 @@ let providers = {
   getLoadedFilename: null,
   getPlanDrawingSource: null,
   compileStoryDrawingRenderPlan: null,
+  compileLevelElevationRenderPlan: null,
 };
 
 /**
@@ -99,6 +100,13 @@ export async function compileStoryDrawingRenderPlanInternal(options) {
     throw new Error('全階用DrawingRenderPlan compilerが初期化されていません。');
   }
   return providers.compileStoryDrawingRenderPlan(options);
+}
+
+export function compileLevelElevationRenderPlanInternal(options) {
+  if (typeof providers.compileLevelElevationRenderPlan !== 'function') {
+    throw new Error('Level立面用DrawingRenderPlan compilerが初期化されていません。');
+  }
+  return providers.compileLevelElevationRenderPlan(options);
 }
 
 export {

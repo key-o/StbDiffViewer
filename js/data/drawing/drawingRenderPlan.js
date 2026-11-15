@@ -102,6 +102,7 @@ function annotationLayerId(annotation) {
   // 現行SVG互換: 通り芯だけをAxisレイヤ、寸法はAnnotationレイヤに置く。
   // 寸法専用レイヤをUIへ公開するときは別PRで表示設定と同時に移行する。
   if (role === 'grid' || role === 'grid-label' || role === 'grid-bubble') return 'Axis';
+  if (role === 'level-label') return 'Level';
   return 'Annotation';
 }
 
@@ -793,6 +794,7 @@ export function compileDrawingRenderPlan({
   profile = {},
   displaySettings = {},
   tagOptions = null,
+  formatDimensionValue = undefined,
 } = {}) {
   const normalizedReferences = normalizeReferenceDrawings(referenceDrawings);
   if (drawing == null && normalizedReferences.length === 0)
@@ -878,6 +880,7 @@ export function compileDrawingRenderPlan({
           drawing: sourceDrawing,
           modelToPaper,
           displaySettings,
+          formatDimensionValue,
         });
   const dimensions = Object.freeze([
     ...sourceDimensions,

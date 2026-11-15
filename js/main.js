@@ -44,6 +44,7 @@ import {
 } from './app/initialization/systemInitializer.js';
 import { initializeEnvironment } from './app/initialization/environmentInitializer.js';
 import { initializeCompareFileInputs } from './app/initialization/fileInputInitializer.js';
+import { initializeDocumentControlUi } from './app/documentControl/documentControlUi.js';
 import { initializeGlobalErrorHandling } from './app/initialization/globalErrorHandler.js';
 import { setupDevelopmentTools } from './app/initialization/devToolsInitializer.js';
 import { initArButton } from './ui/ar/arButton.js';
@@ -76,11 +77,16 @@ function scheduleRender() {
 
 // --- グローバル関数の登録 ---
 // モデル比較ハンドラーをグローバルに登録
-window.handleCompareModelsClick = async function () {
-  await handleCompareModelsClick(scheduleRender, {
+window.handleCompareModelsClick = async function ({
+  requireCompleteRendering = false,
+  drawingProjectLoadHandoff = null,
+} = {}) {
+  return handleCompareModelsClick(scheduleRender, {
     rendererInitialized,
     camera,
     controls,
+    requireCompleteRendering,
+    drawingProjectLoadHandoff,
   });
 };
 
@@ -130,6 +136,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Phase 4: UIコンポーネントの初期化
     initializeUIComponents(scheduleRender, elementGroups);
     log.info('✓ Phase 4: UIコンポーネントの初期化が完了しました');
+
+    // #485: User click only; no gateway, network connection or global API export.
+    initializeDocumentControlUi();
 
     // Phase 5: ボタンイベントリスナーの設定
     setupButtonEventListeners();

@@ -9,6 +9,14 @@
 
 import * as WebIFC from 'web-ifc';
 
+/** Unknown radii stay absent; explicit IFC fillet/edge radii retain their values. */
+function readCornerRadii(profile) {
+  return {
+    ...(profile.FilletRadius == null ? {} : { r1: val(profile.FilletRadius) }),
+    ...(profile.EdgeRadius == null ? {} : { r2: val(profile.EdgeRadius) }),
+  };
+}
+
 /**
  * IFCプロファイルエンティティからSTB断面情報を抽出
  * @param {Object} api - web-ifc IfcAPI
@@ -82,6 +90,7 @@ export function extractStbSectionFromProfile(api, modelID, profileEntity, contex
           B: val(profileEntity.Width),
           t1: val(profileEntity.Thickness),
           t2: val(profileEntity.Thickness),
+          ...readCornerRadii(profileEntity),
         },
         name:
           profileName ||
@@ -100,6 +109,7 @@ export function extractStbSectionFromProfile(api, modelID, profileEntity, contex
           B: val(profileEntity.FlangeWidth),
           t1: val(profileEntity.WebThickness),
           t2: val(profileEntity.FlangeThickness),
+          ...(profileEntity.FilletRadius == null ? {} : { r: val(profileEntity.FilletRadius) }),
         },
         name:
           profileName ||
@@ -119,6 +129,7 @@ export function extractStbSectionFromProfile(api, modelID, profileEntity, contex
           B: val(profileEntity.FlangeWidth),
           t1: val(profileEntity.WebThickness),
           t2: val(profileEntity.FlangeThickness),
+          ...readCornerRadii(profileEntity),
         },
         name:
           profileName ||

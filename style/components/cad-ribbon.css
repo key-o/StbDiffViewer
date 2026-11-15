@@ -15,6 +15,23 @@
   container-type: inline-size;
 }
 
+/* Blank startup CAD surface occupies the entire available drawing viewport.
+   Once a view, sheet, or PDF is rendered, restore the normal paper dimensions,
+   padding, scrollbar and zoom behavior instead of stretching the actual drawing. */
+#pdf-overlay-scroll.cad-empty-surface {
+  padding: 0;
+  overflow: hidden;
+  background: var(--bg-elevated);
+}
+
+#pdf-overlay-scroll.cad-empty-surface #pdf-overlay-stage {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  box-shadow: none;
+}
+
 /* 詳細機能: 項目ごとのフローティングウィンドウ（既存の fieldset 等の体裁は .workspace-sidebar を流用） */
 .cad-float-window {
   width: 380px;
@@ -28,4 +45,193 @@
   min-width: 0;
   border: 0;
   background: transparent;
+}
+
+/* ビュー・シート一覧はほかの編集パネルと同じフローティングウィンドウに置く。 */
+.cad-view-browser { display: flex; flex-direction: column; gap: 8px; position: relative; }
+.cad-view-context-menu {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  padding: 4px;
+  background: var(--panel-bg, var(--background-color, #fff));
+  border: 1px solid var(--border-color, #aaa);
+  border-radius: 4px;
+  box-shadow: 0 3px 12px #0003;
+}
+.cad-view-context-menu[hidden], .cad-view-name-editor[hidden] { display: none; }
+.cad-view-context-menu button { padding: 6px 12px; border: 0; text-align: left; background: transparent; color: inherit; cursor: pointer; }
+.cad-view-context-menu button:hover, .cad-view-context-menu button:focus { background: var(--hover-bg, #e6e9ef); }
+.cad-view-name-editor { display: flex; flex-direction: column; gap: 5px; }
+.cad-view-name-editor input { width: 100%; box-sizing: border-box; }
+.cad-view-name-editor .workspace-actions { display: flex; gap: 4px; }
+
+.cad-view-browser label { font-size: var(--font-size-xs); }
+.cad-view-browser select { width: 100%; min-height: 180px; }
+.cad-view-browser .workspace-result { overflow-wrap: anywhere; font-size: var(--font-size-xs); }
+.cad-sheet-browser { display: flex; flex-direction: column; gap: 7px; }
+.cad-sheet-browser > select { min-height: 85px; }
+.cad-sheet-browser > hr { width: 100%; border: none; border-top: 1px solid var(--border-color); }
+.cad-sheet-browser .workspace-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.cad-sheet-placement-edit { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.cad-sheet-placement-edit label { min-width: 0; }
+.cad-sheet-placement-edit button { grid-column: 1 / -1; }
+#pdf-overlay-sheet-preview { width: 100%; overflow: hidden; }
+#pdf-overlay-sheet-preview svg { display: block; max-height: 160px; }
+
+/* #559(b): 左パネルから移したビュー・シート管理ウィンドウ。 */
+.cad-float-content .cad-sheet-browser select { width: 100%; min-height: 0; }
+.cad-float-content .cad-sheet-browser select[size] { min-height: 85px; }
+.cad-float-content .cad-sheet-browser input:not([type='checkbox']):not([type='file']) { width: 100%; box-sizing: border-box; }
+.cad-float-content .cad-sheet-browser label { font-size: var(--font-size-xs); }
+
+/* #607: ビュー・シート一覧は、フローティングウィンドウの手動リサイズに追随させる。
+   他の詳細ウィンドウの高さやレイアウトには影響を与えない。 */
+#pdf-overlay-win-sheetCatalog {
+  height: min(420px, calc(100vh - 32px));
+  min-height: min(230px, calc(100vh - 20px));
+  min-width: min(320px, calc(100vw - 20px));
+  max-width: calc(100vw - 20px);
+  max-height: calc(100vh - 20px);
+  overflow: hidden;
+}
+
+#pdf-overlay-win-sheetCatalog > .cad-float-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+#pdf-overlay-win-sheetCatalog .cad-sheet-browser {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+}
+
+#pdf-overlay-win-sheetCatalog .cad-catalog-tree {
+  box-sizing: border-box;
+  flex: 1 1 100px;
+  min-height: 85px;
+  overflow: auto;
+  font-size: var(--font-size-xs);
+}
+.cad-catalog-tree ul { list-style: none; margin: 0; padding: 0 0 0 14px; }
+.cad-catalog-tree > ul { padding-left: 0; }
+.cad-catalog-tree li { position: relative; margin: 0; padding-left: 12px; border-left: 1px dotted var(--text-muted, #888); }
+.cad-catalog-tree li:last-child { border-left-color: transparent; }
+.cad-catalog-tree li::before { content: ''; position: absolute; left: 0; top: 0; width: 12px; height: 0.8em; border-left: 1px dotted var(--text-muted, #888); border-bottom: 1px dotted var(--text-muted, #888); }
+.cad-catalog-tree li:last-child::before { border-left: 1px dotted var(--text-muted, #888); }
+.cad-catalog-tree .cad-tree-node { background: none; border: 0; padding: 1px 4px; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.cad-catalog-tree .cad-tree-group { font-weight: 600; cursor: default; }
+.cad-catalog-tree .cad-tree-node:hover:not(.cad-tree-group) { background: rgba(128, 128, 128, 0.18); }
+.cad-catalog-tree .cad-tree-node.selected { background: var(--accent-color, #0a64c8); color: #fff; }
+
+#pdf-overlay-sheet-section-list-summary { display: flex; flex-direction: column; gap: 4px; font-size: var(--font-size-xs); }
+.cad-sheet-browser .cad-sheet-hint { margin: 0; font-size: var(--font-size-xs); color: var(--text-muted, #666); }
+.cad-sheet-browser .cad-sheet-target { font-weight: 600; }
+.cad-sheet-browser .cad-sheet-list-region > summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
+
+/* #559: タブ間で内容量が異なっても、CADの作図領域が上下しない固定リボン。 */
+.workspace-view .ribbon[aria-label='簡易CADリボン'] .ribbon-tabbar {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.workspace-view .ribbon[aria-label='簡易CADリボン'] .ribbon-body {
+  box-sizing: border-box;
+  height: 116px;
+  min-height: 116px;
+  max-height: 116px;
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+/* CAD edit ribbon: hide node-only fields for member selection, including when ribbon-stack is flex. */
+#cad-edit-node-properties[hidden] { display: none; }
+#cad-edit-node-properties { gap: 4px; }
+#cad-edit-property-title { max-width: 210px; overflow-wrap: anywhere; }
+
+/* CAD: 出力操作は全リボンタブから利用可能。細かなPDF設定は別ウィンドウで扱う。 */
+.workspace-view .cad-global-export-actions {
+  flex: 0 0 auto;
+}
+.workspace-view .cad-global-export-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.workspace-view .cad-global-export-button .ribbon-icon {
+  width: 16px;
+  height: 16px;
+}
+.workspace-view .cad-global-export-button .ribbon-cmd-label {
+  font-size: var(--font-size-xs);
+}
+.workspace-view .cad-global-export-button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.workspace-view .cad-global-export-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.workspace-view .cad-global-export-target {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 5px;
+  margin-right: 4px;
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+.workspace-view .cad-global-export-target select {
+  box-sizing: border-box;
+  width: clamp(160px, 19vw, 240px);
+  min-width: 0;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cad-pdf-export-settings-panel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 2px;
+}
+.cad-pdf-export-settings-panel label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  white-space: normal;
+}
+.cad-pdf-export-settings-panel .form-control {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+.cad-pdf-export-settings-panel select {
+  width: 100%;
+}
+.cad-pdf-export-settings-panel input[type='file'] {
+  width: 100%;
+  min-width: 0;
+}
+.cad-pdf-export-font-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
 }

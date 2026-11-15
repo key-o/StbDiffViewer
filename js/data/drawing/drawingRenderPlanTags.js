@@ -366,6 +366,7 @@ export function compileDrawingRenderTags({
   tagFamilyState = null,
   resolveTagFacts = null,
   resolveTagPlacement = null,
+  resolveTagSelection = null,
   tagOrientationMode = DEFAULT_DRAWING_TAG_ORIENTATION_MODE,
   genericTextHeightPaperMm = 3.5,
   genericStrokeWidthPaperMm = 0.8,
@@ -400,9 +401,12 @@ export function compileDrawingRenderTags({
     if (!layer || layer.visible === false) continue;
     const record = sourceRecord(drawing, element.key);
     const displayType = element.renderType || record.ref.elementType;
-    const selection = showLabels
-      ? (displaySettings?.tagModes?.[displayType] ?? 'mark')
-      : TAG_MODE_HIDDEN;
+    const selection =
+      typeof resolveTagSelection === 'function'
+        ? resolveTagSelection(record)
+        : showLabels
+          ? (displaySettings?.tagModes?.[displayType] ?? 'mark')
+          : TAG_MODE_HIDDEN;
     if (selection === TAG_MODE_HIDDEN) continue;
 
     const selectedPlan = buildSelectedDrawingTagPlan({

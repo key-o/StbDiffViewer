@@ -56,7 +56,10 @@ function resolveMoveTargets(document, nodeMap, identities) {
     const position = finitePosition(grip.position);
     if (!position) continue;
     const nodeId = String(grip.target.elementId);
-    if (!targets.has(nodeId)) targets.set(nodeId, { nodeId, position });
+    if (!targets.has(nodeId)) {
+      const anchor = finitePosition(grip.anchorPosition);
+      targets.set(nodeId, anchor ? { nodeId, position, anchor } : { nodeId, position });
+    }
   }
   return [...targets.values()];
 }
@@ -65,15 +68,26 @@ function centroid(targets) {
   if (!targets.length) return null;
   const sum = targets.reduce(
     (value, target) => {
-      value.x += target.position.x;
-      value.y += target.position.y;
-      value.z += target.position.z;
+      const point = target.anchor || target.position;
+      value.x += point.x;
+      value.y += point.y;
+      value.z += point.z;
       return value;
     },
     { x: 0, y: 0, z: 0 },
   );
   const count = targets.length;
   return new THREE.Vector3(sum.x / count, sum.y / count, sum.z / count);
+}
+
+function geometryCenter(objects) {
+  const box = new THREE.Box3();
+  for (const object of Array.isArray(objects) ? objects : []) {
+    if (!object) continue;
+    object.updateWorldMatrix?.(true, true);
+    box.expandByObject(object);
+  }
+  return box.isEmpty() ? null : box.getCenter(new THREE.Vector3());
 }
 
 function worldUnitsPerPixel(camera, point, canvas) {
@@ -106,6 +120,7 @@ export function createSemanticMoveGizmoController(dependencies = {}) {
     getCamera,
     getCanvas,
     getSelectedIdentities,
+    getSelectedObjects: getSelectedObjectsFn = () => [],
     editingSession: session,
     cadOperationService: providedCadOperationService,
     getControls = () => null,
@@ -182,10 +197,15 @@ export function createSemanticMoveGizmoController(dependencies = {}) {
     });
   }
 
+  function anchorMode() {
+    return session?.getMoveGizmoAnchorMode?.() === 'geometry' ? 'geometry' : 'node';
+  }
+
   function selectionSignature(state, identities) {
     return JSON.stringify([
       state?.sessionId || null,
       Number(state?.workingRevision || 0),
+      anchorMode(),
       identities.map(semanticSelectionIdentityKey),
     ]);
   }
@@ -316,7 +336,10 @@ export function createSemanticMoveGizmoController(dependencies = {}) {
     lastSignature = signature;
     clearPreview();
 
-    const anchor = centroid(targets);
+    const anchor =
+      (targets.length && anchorMode() === 'geometry'
+        ? geometryCenter(getSelectedObjectsFn())
+        : null) || centroid(targets);
     if (!anchor) {
       setVisible(false);
       requestRender();
@@ -536,6 +559,7 @@ export function initSemanticMoveGizmoInteraction() {
     getCamera: () => getActiveCamera(),
     getCanvas: () => runtimeCanvas,
     getSelectedIdentities: runtimeSelectedIdentities,
+    getSelectedObjects,
     editingSession,
     getControls: () => controls,
     requestRender: scheduleRender,
@@ -575,6 +599,7 @@ export function initSemanticMoveGizmoInteraction() {
     eventBus.on(SelectionEvents.SELECTION_CLEARED, refresh),
     eventBus.on(EditEvents.WORKING_DOCUMENT_CHANGED, refresh),
     eventBus.on(EditEvents.MODE_TOGGLED, refresh),
+    eventBus.on(EditEvents.GIZMO_ANCHOR_MODE_CHANGED, refresh),
     eventBus.on(RenderableLifecycleEvents.RENDERABLES_REPLACED, refresh),
   ].filter((remove) => typeof remove === 'function');
 

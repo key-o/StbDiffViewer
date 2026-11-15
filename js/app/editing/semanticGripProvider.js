@@ -77,15 +77,31 @@ function getNodePosition(document, nodeMap, nodeId) {
   });
 }
 
-function createNodeGrip(document, nodeMap, ownerIdentity, nodeId, role) {
+function wallOffsetFor(element, nodeId) {
+  const targetId = String(nodeId);
+  for (const offset of element?.getElementsByTagName('StbWallOffset') || []) {
+    if (String(offset.getAttribute('id_node')) !== targetId) continue;
+    const read = (name) => Number(offset.getAttribute(name) || 0) || 0;
+    return { x: read('offset_X'), y: read('offset_Y'), z: read('offset_Z') };
+  }
+  return null;
+}
+
+function createNodeGrip(document, nodeMap, ownerIdentity, nodeId, role, ownerElement = null) {
   const position = getNodePosition(document, nodeMap, nodeId);
   if (!position) return null;
+  // 壁は StbWallOffset 適用後の位置が描画ジオメトリなので、表示・gizmo 中心にはこちらを使う。
+  const offset = ownerIdentity.elementType === 'Wall' ? wallOffsetFor(ownerElement, nodeId) : null;
+  const anchorPosition = offset
+    ? { x: position.x + offset.x, y: position.y + offset.y, z: position.z + offset.z }
+    : position;
   const normalizedNodeId = String(nodeId);
   const ownerType = String(ownerIdentity.elementType);
   const ownerId = String(ownerIdentity.elementId);
   return Object.freeze({
     id: `${ownerType}:${ownerId}:node:${role}:${normalizedNodeId}`,
     position,
+    ...(offset ? { anchorPosition } : {}),
     target: Object.freeze({
       elementType: 'Node',
       elementId: normalizedNodeId,
@@ -125,7 +141,7 @@ function gripsForLineElement(document, nodeMap, identity, element) {
 function gripsForPanel(document, nodeMap, identity, element) {
   return orderedPanelNodeIds(element)
     .map((nodeId, index) =>
-      createNodeGrip(document, nodeMap, identity, nodeId, `vertex-${index + 1}`),
+      createNodeGrip(document, nodeMap, identity, nodeId, `vertex-${index + 1}`, element),
     )
     .filter(Boolean);
 }

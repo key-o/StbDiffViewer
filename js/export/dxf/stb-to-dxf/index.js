@@ -23,6 +23,7 @@ export {
   getAvailableStories,
   getAvailableAxes,
 } from './DxfBatchExporter.js';
+export { exportLevelElevationsToDxf } from './LevelElevationBatchExporter.js';
 
 // ジオメトリ収集機能（必要に応じて使用）
 export {
@@ -64,6 +65,8 @@ import {
   getAvailableAxes,
 } from './DxfBatchExporter.js';
 
+import { exportLevelElevationsToDxf } from './LevelElevationBatchExporter.js';
+
 // グローバルに登録
 if (typeof window !== 'undefined') {
   window.canExportStbToDxf = canExportStbToDxf;
@@ -73,6 +76,7 @@ if (typeof window !== 'undefined') {
   window.exportAllStoriesToDxf = exportAllStoriesToDxf;
   window.exportAlongAllAxesToDxf = exportAlongAllAxesToDxf;
   window.exportAlongAllAxesBothDirections = exportAlongAllAxesBothDirections;
+  window.exportLevelElevationsToDxf = exportLevelElevationsToDxf;
   window.getAvailableStories = getAvailableStories;
   window.getAvailableAxes = getAvailableAxes;
 }

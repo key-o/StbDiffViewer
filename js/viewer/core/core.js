@@ -340,7 +340,12 @@ let _xrFrameHandler = null;
  * @param {boolean} active - true でXRセッション中
  */
 export function setXRSessionActive(active) {
+  if (active && !_xrSessionActive && frustumCullingEnabled) {
+    // 通常カメラで非表示にしたメッシュだけ戻す。手動フィルタの非表示は維持する。
+    getFrustumCuller().restoreCulledVisibility();
+  }
   _xrSessionActive = !!active;
+  cullingFrameCounter = 0;
 }
 
 /**
@@ -379,7 +384,7 @@ function frameUpdate(_timestamp, xrFrame) {
   const renderScene = animationScene || scene;
   if (!renderCamera || !renderScene) return;
 
-  if (frustumCullingEnabled) {
+  if (frustumCullingEnabled && !_xrSessionActive) {
     cullingFrameCounter++;
     if (cullingFrameCounter >= CULLING_INTERVAL) {
       cullingFrameCounter = 0;
@@ -399,7 +404,7 @@ function frameUpdate(_timestamp, xrFrame) {
 
   if (!shouldRender) return;
 
-  if (labelVisibilityCullingProvider) {
+  if (!_xrSessionActive && labelVisibilityCullingProvider) {
     const labels = labelVisibilityCullingProvider.getLabels();
     getLabelVisibilityCuller().cullLabels(labels, renderCamera);
   }

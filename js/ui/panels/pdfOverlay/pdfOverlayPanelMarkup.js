@@ -1,5 +1,7 @@
 /** @fileoverview 簡易CADワークスペースのDOM markup。ツールは上部リボン、補助機能は項目別のフローティングウィンドウへ置き、PDF重ねは補助機能として扱う。 */
 import { make } from './pdfOverlayPanelHelpers.js';
+import './cadSheetBrowser.js';
+import './cadSectionListRibbon.js';
 import {
   PDF_OVERLAY_FLOAT_WINDOWS,
   buildPdfOverlayRibbonMarkup,
@@ -16,14 +18,13 @@ export function buildPdfOverlayPanelMarkup(windowId) {
   root.innerHTML = `
     <div class="workspace-shell">
     ${buildPdfOverlayRibbonMarkup()}
-    <div id="pdf-overlay-feature-prerequisites" class="workspace-result" role="status" aria-live="polite" title="SVG図面を生成すると部材レビュー・自由メモ・DXF保存をPDFなしで利用できます。PDF保存・領域選択・PDF照合セッションJSON書き出し・PDF基準点取得にはPDFの読み込みが必要です。">PDF未読込：SVG図面を生成するとレビュー・自由メモを利用できます</div>
     <div class="workspace-body">
       <main class="workspace-main">
         <div id="pdf-overlay-drop-overlay" class="pdf-overlay-drop-overlay" aria-hidden="true">
           <strong>PDF / DXFをここにドロップ</strong>
           <span>PDF重ね、または参照DXFとして読み込みます</span>
         </div>
-        <div id="pdf-overlay-scroll" class="pdf-overlay-scroll">
+        <div id="pdf-overlay-scroll" class="pdf-overlay-scroll cad-empty-surface">
           <div id="pdf-overlay-stage" class="pdf-overlay-stage">
             <div id="pdf-overlay-canvas-layer" class="pdf-overlay-layer"></div>
             <div id="pdf-overlay-svg-layer" class="pdf-overlay-layer pdf-overlay-svg-layer"></div>
@@ -120,20 +121,21 @@ function buildFloatWindows() {
       <div class="workspace-actions"><button id="pdf-overlay-clear-region" type="button" class="btn btn-secondary btn-sm" disabled>領域・対応を解除</button></div>
       <div id="pdf-overlay-region-status" class="workspace-result">領域未選択</div>
     </fieldset>
-    <h3>SVG配置</h3>
-    <fieldset><legend title="縮尺とSVG回転は上部ツールバーで指定します。ON_GRID節点と通り芯交点は別候補です。赤=X方向、緑=Y方向、中央をドラッグするとXY移動します。この配置は照合セッションに保存できます。">標準配置（縮尺 + 移動） <span class="workspace-tip" aria-hidden="true">ⓘ</span></legend>
+    <h3>図面配置</h3>
+    <fieldset><legend title="縮尺と図面回転は上部ツールバーで指定します。ON_GRID節点と通り芯交点は別候補です。赤=X方向、緑=Y方向、中央をドラッグするとXY移動します。この配置は照合セッションに保存できます。">標準配置（縮尺 + 移動） <span class="workspace-tip" aria-hidden="true">ⓘ</span></legend>
       <label><input id="pdf-overlay-gizmo-enabled" type="checkbox" checked>ギズモ表示</label>
       <label>起点候補 <select id="pdf-overlay-gizmo-candidate-type" class="form-control"><option value="all">すべて</option><option value="grid">通り芯交点</option><option value="node">節点（ON_GRID節点を含む）</option><option value="vertex">部材輪郭交点</option><option value="center">部材中心</option></select></label>
-      <div class="workspace-actions"><button id="pdf-overlay-gizmo-pick-origin" type="button" class="btn btn-secondary btn-sm" disabled>SVG上から起点選択</button><button id="pdf-overlay-gizmo-reset" type="button" class="btn btn-secondary btn-sm">移動リセット</button></div>
+      <div class="workspace-actions"><button id="pdf-overlay-gizmo-pick-origin" type="button" class="btn btn-secondary btn-sm" disabled>図面上から起点選択</button><button id="pdf-overlay-gizmo-reset" type="button" class="btn btn-secondary btn-sm">移動リセット</button></div>
       <div id="pdf-overlay-gizmo-origin-info" class="workspace-result">自動: 図面中央付近の通り交点</div>
     </fieldset>
     <details class="pdf-overlay-advanced-alignment">
-      <summary title="通常は縮尺・SVG回転・移動ギズモで調整します。必要な場合のみ、A/Bで平行移動・回転・均一縮尺を決定し、Cを独立確認点として使用します。STBはmm、PDFは未回転ページのuser-space単位です。PDF上の取得にはPDF、STB候補点の取得にはPDFとSVG図面が必要です。">詳細位置合わせ（A/B/C） <span class="pdf-overlay-option-tag">オプション</span></summary>
+      <summary title="通常は縮尺・図面回転・移動ギズモで調整します。必要な場合のみ、A/Bで平行移動・回転・均一縮尺を決定し、Cを独立確認点として使用します。STBはmm、PDFは未回転ページのuser-space単位です。PDF上の取得にはPDF、STB候補点の取得にはPDFと図面が必要です。">詳細位置合わせ（A/B/C） <span class="pdf-overlay-option-tag">オプション</span></summary>
       <div class="pdf-overlay-advanced-alignment-body">
-        ${['a', 'b', 'c'].map((k) => `<fieldset><legend>${k.toUpperCase()}点</legend><div class="pdf-overlay-grid4"><label>STB X (mm)<input id="pdf-overlay-${k}-mx" class="form-control" type="number" value="0"></label><label>STB Y (mm)<input id="pdf-overlay-${k}-my" class="form-control" type="number" value="0"></label><label>PDF X (user-space)<input id="pdf-overlay-${k}-px" class="form-control" type="number" value="0" step="any"></label><label>PDF Y (user-space)<input id="pdf-overlay-${k}-py" class="form-control" type="number" value="0" step="any"></label></div><div class="workspace-actions"><button id="pdf-overlay-pick-${k}" type="button" class="btn btn-secondary btn-sm" disabled>PDF上から${k.toUpperCase()}を取得</button><button id="pdf-overlay-pick-model-${k}" type="button" class="btn btn-secondary btn-sm" disabled>SVG候補点から${k.toUpperCase()}を取得</button></div></fieldset>`).join('')}
+        ${['a', 'b', 'c'].map((k) => `<fieldset><legend>${k.toUpperCase()}点</legend><div class="pdf-overlay-grid4"><label>STB X (mm)<input id="pdf-overlay-${k}-mx" class="form-control" type="number" value="0"></label><label>STB Y (mm)<input id="pdf-overlay-${k}-my" class="form-control" type="number" value="0"></label><label>PDF X (user-space)<input id="pdf-overlay-${k}-px" class="form-control" type="number" value="0" step="any"></label><label>PDF Y (user-space)<input id="pdf-overlay-${k}-py" class="form-control" type="number" value="0" step="any"></label></div><div class="workspace-actions"><button id="pdf-overlay-pick-${k}" type="button" class="btn btn-secondary btn-sm" disabled>PDF上から${k.toUpperCase()}を取得</button><button id="pdf-overlay-pick-model-${k}" type="button" class="btn btn-secondary btn-sm" disabled>図面上の候補点から${k.toUpperCase()}を取得</button></div></fieldset>`).join('')}
         <div class="workspace-actions"><button id="pdf-overlay-solve-btn" type="button" class="btn btn-primary btn-sm">A/Bで位置合わせ</button><button id="pdf-overlay-clear-registration-btn" type="button" class="btn btn-secondary btn-sm">解除</button></div>
       </div>
     </details>
+    ${review.pdfSession}
     </div>`,
     selection: review.selection,
     tagPlacement: review.tagPlacement,
@@ -144,9 +146,17 @@ function buildFloatWindows() {
   };
   return PDF_OVERLAY_FLOAT_WINDOWS.map((def, index) => {
     const offset = 24 * index;
-    return `<div id="${def.windowId}" class="floating-window cad-float-window" style="left:${96 + offset}px;top:${150 + offset}px" role="dialog" aria-label="${def.title}">
+    // FloatingWindowManager restores any saved user coordinates over these defaults.
+    const defaultPositions = {
+      sheetCatalog: { left: 24, top: 170 },
+    };
+    const { left, top } = defaultPositions[def.key] ?? {
+      left: 96 + offset,
+      top: 150 + offset,
+    };
+    return `<div id="${def.windowId}" class="floating-window cad-float-window" style="left:${left}px;top:${top}px" role="dialog" aria-label="${def.title}">
       <div id="${def.headerId}" class="float-window-header"><span class="float-window-title">${def.title}</span><div class="float-window-controls"><button type="button" id="${def.closeButtonId}" class="float-window-btn" aria-label="${def.title}を閉じる">✕</button></div></div>
-      <div class="float-window-content workspace-sidebar cad-float-content">${bodies[def.key]}</div>
+      <div class="float-window-content workspace-sidebar cad-float-content">${bodies[def.key] ?? def.body()}</div>
     </div>`;
   }).join('');
 }

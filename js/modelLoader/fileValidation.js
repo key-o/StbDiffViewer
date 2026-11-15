@@ -12,7 +12,7 @@
  * 保守性向上のため、巨大なcompareModels()関数から抽出されました。
  */
 
-import { getLoaderSetState, getLoaderNotify } from './loaderDependencies.js';
+import { getLoaderNotify } from './loaderDependencies.js';
 import { validateFileType } from '../config/fileTypeConfig.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -22,12 +22,11 @@ const log = createLogger('modelLoader:fileValidation');
  * Validate and retrieve files for comparison
  * @returns {Object} File validation result
  */
-export function validateAndGetFiles() {
+export function validateAndGetFiles({ fileAOverride = null } = {}) {
   const notify = getLoaderNotify();
-  const setState = getLoaderSetState();
   const fileAInput = document.getElementById('fileA');
   const fileBInput = document.getElementById('fileB');
-  const fileA = fileAInput?.files[0] || null;
+  const fileA = fileAOverride || fileAInput?.files[0] || null;
   const fileB = fileBInput?.files[0] || null;
 
   if (!fileA && !fileB) {
@@ -45,7 +44,6 @@ export function validateAndGetFiles() {
       return { isValid: false, fileA: null, fileB: null, fileTypes: {} };
     }
     fileTypes.fileA = validationA.fileType;
-    setState('files.originalFileA', fileA);
   }
 
   if (fileB) {
@@ -55,7 +53,6 @@ export function validateAndGetFiles() {
       return { isValid: false, fileA: null, fileB: null, fileTypes: {} };
     }
     fileTypes.fileB = validationB.fileType;
-    setState('files.originalFileB', fileB);
   }
 
   return { isValid: true, fileA, fileB, fileTypes };

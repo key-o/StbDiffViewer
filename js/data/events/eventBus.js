@@ -154,6 +154,10 @@ class EventBus {
    * @param {*} [data] - イベントデータ
    */
   emit(eventType, data = null) {
+    if (this._deferredEvents?.types.has(eventType)) {
+      this._deferredEvents.queue.push([eventType, data]);
+      return;
+    }
     // 履歴を追跡
     if (this._trackHistory) {
       this._addToHistory(eventType, data);
@@ -186,6 +190,27 @@ class EventBus {
         listeners.delete(listener);
       }
     }
+  }
+
+  /** Publish model lifecycle notifications only after a replacement has succeeded. */
+  deferEvents(eventTypes) {
+    if (this._deferredEvents) throw new Error('An event transaction is already active');
+    const pending = { types: new Set(eventTypes), queue: [] };
+    this._deferredEvents = pending;
+    const finish = (publish, mapEvent = null) => {
+      if (this._deferredEvents !== pending) return;
+      if (publish && mapEvent != null && typeof mapEvent !== 'function')
+        throw new TypeError('mapEvent must be a function');
+      this._deferredEvents = null;
+      if (publish)
+        for (const [type, data] of pending.queue)
+          this.emit(type, mapEvent ? mapEvent(type, data) : data);
+      pending.queue.length = 0;
+    };
+    return {
+      commit: ({ mapEvent } = {}) => finish(true, mapEvent),
+      rollback: () => finish(false),
+    };
   }
 
   /**

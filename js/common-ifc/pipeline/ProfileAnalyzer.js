@@ -8,10 +8,13 @@
  */
 
 import * as WebIFC from 'web-ifc';
+import { readIfcRectangularBrepLoft } from './BrepSectionReader.js';
+import { decodeSteelProfileMetadata } from './StbSteelProfileMetadata.js';
 import {
   extractStbSectionFromProfile,
   buildSectionKey,
 } from '../mapping/IfcProfileToStbSection.js';
+import { collectMappedItemLeaves, getUniformScale } from '../util/CoordinateHelper.js';
 
 export class ProfileAnalyzer {
   /**
@@ -40,16 +43,27 @@ export class ProfileAnalyzer {
     const productShape = this.api.GetLine(this.modelID, representationRef);
     if (!productShape) return null;
 
-    const representations = productShape.Representations || [];
+    const representations = (productShape.Representations || [])
+      .map((ref) => this.api.GetLine(this.modelID, ref?.value ?? ref))
+      .filter(Boolean);
+    const isBrepBody = (rep) =>
+      (rep.RepresentationIdentifier?.value ?? rep.RepresentationIdentifier) === 'Body' &&
+      (rep.RepresentationType?.value ?? rep.RepresentationType) === 'Brep';
 
-    for (const repRef of representations) {
-      const repId = repRef?.value ?? repRef;
-      const rep = this.api.GetLine(this.modelID, repId);
-      if (!rep) continue;
+    // A beam with an explicit BRep Body must be judged by that actual geometry.
+    // If it is unsupported, do not manufacture a seemingly valid STB section
+    // from a different, auxiliary SweptSolid representation.
+    const beamBrepBodies =
+      options.element?.stbCategory === 'beam' ? representations.filter(isBrepBody) : [];
+    const candidates = beamBrepBodies.length ? beamBrepBodies : representations;
 
+    for (const rep of candidates) {
       // Body表現を優先
-      const repType = rep.RepresentationType?.value || '';
-      const repId2 = rep.RepresentationIdentifier?.value || '';
+      const repType = rep.RepresentationType?.value ?? rep.RepresentationType ?? '';
+      const repId2 = rep.RepresentationIdentifier?.value ?? rep.RepresentationIdentifier ?? '';
+      // A BRep-shaped auxiliary representation is not the beam's physical Body.
+      if (options.element?.stbCategory === 'beam' && repType === 'Brep' && repId2 !== 'Body')
+        continue;
       if (
         repId2 !== 'Body' &&
         repType !== 'SweptSolid' &&
@@ -63,7 +77,11 @@ export class ProfileAnalyzer {
       const items = rep.Items || [];
       for (const itemRef of items) {
         const itemId = itemRef?.value ?? itemRef;
-        const result = this._extractFromItem(itemId, options);
+        const result = this._extractFromItem(itemId, {
+          ...options,
+          productShapeRef: representationRef,
+          brepOnly: beamBrepBodies.length > 0,
+        });
         if (result) return result;
       }
     }
@@ -77,41 +95,45 @@ export class ProfileAnalyzer {
    * @returns {{ sectionId: string, sectionInfo: Object, length: number } | null}
    */
   _extractFromItem(itemId, options = {}) {
-    const item = this.api.GetLine(this.modelID, itemId);
-    if (!item) return null;
-
-    // IFCEXTRUDEDAREASOLID
-    if (item.type === WebIFC.IFCEXTRUDEDAREASOLID) {
-      return this._handleExtrudedAreaSolid(item, options);
-    }
-
-    // IFCMAPPEDITEM → MappingSource → MappedRepresentation → 再帰
-    if (item.type === WebIFC.IFCMAPPEDITEM) {
-      const sourceRef = item.MappingSource?.value ?? item.MappingSource;
-      if (sourceRef) {
-        const source = this.api.GetLine(this.modelID, sourceRef);
-        if (source) {
-          const mappedRepRef = source.MappedRepresentation?.value ?? source.MappedRepresentation;
-          if (mappedRepRef) {
-            const mappedRep = this.api.GetLine(this.modelID, mappedRepRef);
-            if (mappedRep?.Items) {
-              for (const subRef of mappedRep.Items) {
-                const subId = subRef?.value ?? subRef;
-                const result = this._extractFromItem(subId, options);
-                if (result) return result;
-              }
-            }
-          }
+    // Resolve nested mapped representations and retain the placement transform.
+    // An unrepresentable BRep Body never falls back to an auxiliary SweptSolid.
+    const leaves = collectMappedItemLeaves(this.api, this.modelID, itemId);
+    for (const leaf of leaves) {
+      const item = leaf.item;
+      if (item.type === WebIFC.IFCEXTRUDEDAREASOLID && !options.brepOnly) {
+        const result = this._handleExtrudedAreaSolid(item, {
+          ...options,
+          mappingTransform: leaf.mappingTransform,
+        });
+        if (result) return result;
+      }
+      if (item.type === WebIFC.IFCFACETEDBREP && options.element?.stbCategory === 'beam') {
+        // The current BRep reader does not incorporate a mapped-item transform.
+        // Reject it instead of returning an incorrectly positioned axis.
+        const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+        if (leaf.mappingTransform.some((value, index) => Math.abs(value - identity[index]) > 1e-10))
+          continue;
+        try {
+          const measured = readIfcRectangularBrepLoft(
+            this.api,
+            this.modelID,
+            options.productShapeRef,
+            this.unitFactor,
+          );
+          return {
+            sectionId: null,
+            sectionInfo: null,
+            length: measured.length,
+            extrusionDirection: measured.direction,
+            localAxisStart: measured.localAxisStart,
+            localAxisEnd: measured.localAxisEnd,
+            measuredBrepLoft: measured,
+          };
+        } catch {
+          continue;
         }
       }
     }
-
-    // IFCBOOLEANCLIPPINGRESULT → FirstOperand を再帰
-    if (item.type === WebIFC.IFCBOOLEANCLIPPINGRESULT) {
-      const firstRef = item.FirstOperand?.value ?? item.FirstOperand;
-      if (firstRef) return this._extractFromItem(firstRef, options);
-    }
-
     return null;
   }
 
@@ -140,14 +162,25 @@ export class ProfileAnalyzer {
     if (!sectionInfo) return null;
 
     // mm変換（IFC内の寸法値は長さ単位と同じ）
+    const mappingScale = options.mappingTransform ? getUniformScale(options.mappingTransform) : 1;
     const convertedParams = {};
     for (const [key, value] of Object.entries(sectionInfo.params)) {
-      convertedParams[key] = value * this.unitFactor;
+      convertedParams[key] = value * this.unitFactor * mappingScale;
     }
     const normalizedSectionInfo = {
       ...sectionInfo,
       params: convertedParams,
     };
+    if (options.element?.stbCategory === 'footing' && Number.isFinite(lengthMM) && lengthMM > 0)
+      normalizedSectionInfo.params.depth = lengthMM;
+    const sourceSteel = decodeSteelProfileMetadata(
+      profileEntity.ProfileName?.value,
+      normalizedSectionInfo,
+    );
+    if (sourceSteel) {
+      normalizedSectionInfo.sourceSteel = sourceSteel;
+      normalizedSectionInfo.name = sourceSteel.name;
+    }
 
     if (options.skipSectionRegistration) {
       return {
@@ -155,6 +188,8 @@ export class ProfileAnalyzer {
         sectionInfo: normalizedSectionInfo,
         length: Math.round(lengthMM * 100) / 100,
         extrusionDirection: this._resolveExtrusionDirection(item),
+        mappingTransform: options.mappingTransform,
+        extrusionPositionRef: item.Position?.value ?? item.Position ?? null,
       };
     }
 
@@ -164,6 +199,8 @@ export class ProfileAnalyzer {
       sectionInfo: section,
       length: Math.round(lengthMM * 100) / 100,
       extrusionDirection: this._resolveExtrusionDirection(item),
+      mappingTransform: options.mappingTransform,
+      extrusionPositionRef: item.Position?.value ?? item.Position ?? null,
     };
   }
 
@@ -205,6 +242,12 @@ export class ProfileAnalyzer {
 
   _buildSectionRegistryKey(sectionInfo) {
     if (sectionInfo?.sectionKey) return sectionInfo.sectionKey;
+    if (sectionInfo?.sourceSteel)
+      return JSON.stringify({
+        type: sectionInfo.stbType,
+        params: sectionInfo.params,
+        sourceSteel: sectionInfo.sourceSteel,
+      });
 
     const params = sectionInfo?.params || {};
     const requiresDetailedKey =

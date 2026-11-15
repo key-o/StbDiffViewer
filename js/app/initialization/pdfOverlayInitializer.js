@@ -6,6 +6,7 @@ import { compileDrawingRenderDimensions } from '../../data/drawing/drawingRender
 import { elementRefKey } from '../../data/drawing/drawingModel.js';
 import { createStbMemberTagFactsFromDocument } from '../../viewer/drawing/stbTagFactsAdapter.js';
 import { buildStbPlanDrawing } from '../../viewer/drawing/stbPlanDrawing.js';
+import { compileStbLevelElevationRenderPlan } from '../../viewer/drawing/levelElevationDrawing.js';
 import { createStoryPlanView } from '../../data/drawing/storyPlanView.js';
 import { PdfDocumentAdapter } from '../../parser/pdf/PdfDocumentAdapter.js';
 import { decodeDxfArrayBuffer } from '../../parser/drawing/dxfTextDecoder.js';
@@ -91,7 +92,7 @@ function storyViewWithSourceRef(stories, storyCandidates, storyId) {
   return Object.freeze({ ...view, storySourceRef: candidate.sourceRef });
 }
 
-async function readStbRevisionText(file) {
+async function readStbRevisionSource(file) {
   if (typeof file?.arrayBuffer === 'function') {
     const buffer = await file.arrayBuffer();
     const bytes = new Uint8Array(buffer);
@@ -100,10 +101,14 @@ async function readStbRevisionText(file) {
     let encoding = declared || 'utf-8';
     if (encoding === 'utf8') encoding = 'utf-8';
     if (encoding === 'shift-jis' || encoding === 'sjis') encoding = 'shift_jis';
-    return new TextDecoder(encoding).decode(bytes);
+    return { text: new TextDecoder(encoding).decode(bytes), originalBytes: bytes };
   }
-  if (typeof file?.text === 'function') return file.text();
+  if (typeof file?.text === 'function') return { text: await file.text(), originalBytes: null };
   throw new TypeError('STB Fileが必要です。');
+}
+
+async function readStbRevisionText(file) {
+  return (await readStbRevisionSource(file)).text;
 }
 
 /** テストではgetState等を注入。実運用では登録済みSDV状態を読む。 */
@@ -113,11 +118,16 @@ export function createPdfOverlayServices({
   digest = sha256,
   serialize = (doc) => new XMLSerializer().serializeToString(doc),
 } = {}) {
-  const sourceDocument = (modelKey) => {
+  const sourceDocument = (modelKey, { working = false } = {}) => {
     if (modelKey !== 'A' && modelKey !== 'B')
       throw new RangeError('モデルAまたはBを選択してください。');
-    if (readState('models.editing.active'))
-      throw new Error('編集セッション中の照合は未対応です。編集を確定・終了してください。');
+    if (readState('models.editing.active')) {
+      if (!working || modelKey !== 'A')
+        throw new Error('編集中の照合は未対応です。CAD編集にはモデルAを使用してください。');
+      const document = readState('models.editing.workingDocument');
+      if (document?.nodeType !== 9) throw new Error('Working Document を取得できません。');
+      return document;
+    }
     const doc = readState(`models.document${modelKey}`);
     if (doc?.nodeType !== 9) throw new Error(`モデル${modelKey}が未読込です。`);
     return doc;
@@ -210,24 +220,24 @@ export function createPdfOverlayServices({
     createSheetToViewportTransform,
     renderDrawingSheetSvg,
     downloadDrawingRenderPlanDxf,
-    collectAlignmentCandidates: ({ modelKey, drawing }) =>
+    collectAlignmentCandidates: ({ modelKey, drawing, working = false }) =>
       collectAlignmentCandidates({
-        document: sourceDocument(modelKey),
+        document: sourceDocument(modelKey, { working }),
         drawing,
       }),
-    async createTagFactsResolver({ modelKey, drawing } = {}) {
+    async createTagFactsResolver({ modelKey, drawing, working = false } = {}) {
       if (
         drawing?.source?.modelKey !== modelKey ||
         typeof drawing?.source?.modelRevision !== 'string'
       )
         throw new TypeError('STB図面のsourceが不正です。');
 
-      const original = sourceDocument(modelKey);
+      const original = sourceDocument(modelKey, { working });
       const sourceXml = serialize(original);
       const currentRevision = await digest(new TextEncoder().encode(sourceXml));
       if (currentRevision !== drawing.source.modelRevision)
         throw new Error('STB図面のモデル改訂が現行モデルと一致しません。再生成してください。');
-      if (serialize(sourceDocument(modelKey)) !== sourceXml)
+      if (serialize(sourceDocument(modelKey, { working })) !== sourceXml)
         throw new Error('タグfacts準備中にモデルが変更されました。再生成してください。');
 
       return createCachedTagFactsResolver(original.cloneNode(true), drawing.source);
@@ -237,7 +247,8 @@ export function createPdfOverlayServices({
         throw new TypeError('STB Fileが必要です。');
       if (signal?.aborted)
         throw new globalThis.DOMException('STB改訂差替えを中止しました。', 'AbortError');
-      const sourceText = await readStbRevisionText(file);
+      const { text: sourceText, originalBytes } = await readStbRevisionSource(file);
+      const originalSha256 = originalBytes == null ? null : await sha256(originalBytes);
       if (typeof globalThis.DOMParser !== 'function')
         throw new Error('STB XML読込にはDOMParserが必要です。');
       const document = new globalThis.DOMParser().parseFromString(sourceText, 'application/xml');
@@ -254,7 +265,11 @@ export function createPdfOverlayServices({
       if (signal?.aborted)
         throw new globalThis.DOMException('STB改訂差替えを中止しました。', 'AbortError');
       return Object.freeze({
-        revision: Object.freeze({ id: modelRevision, sha256: modelRevision }),
+        revision: Object.freeze({
+          id: modelRevision,
+          sha256: modelRevision,
+          ...(originalSha256 == null ? {} : { originalSha256 }),
+        }),
         storyCandidates,
         filename: file.name || null,
       });
@@ -273,7 +288,8 @@ export function createPdfOverlayServices({
       if (storyId == null || !String(storyId).trim())
         throw new TypeError('対象階を指定してください。');
 
-      const sourceText = await readStbRevisionText(file);
+      const { text: sourceText, originalBytes } = await readStbRevisionSource(file);
+      const originalSha256 = originalBytes == null ? null : await sha256(originalBytes);
       if (typeof globalThis.DOMParser !== 'function')
         throw new Error('STB XML読込にはDOMParserが必要です。');
       const document = new globalThis.DOMParser().parseFromString(sourceText, 'application/xml');
@@ -308,14 +324,118 @@ export function createPdfOverlayServices({
       );
       return Object.freeze({
         drawing,
-        revision: Object.freeze({ id: modelRevision, sha256: modelRevision }),
+        revision: Object.freeze({
+          id: modelRevision,
+          sha256: modelRevision,
+          ...(originalSha256 == null ? {} : { originalSha256 }),
+        }),
         tagFactsResolver,
         storyCandidates,
         filename: file.name || null,
       });
     },
-    async createDrawing({ modelKey, view, signal } = {}) {
-      const original = sourceDocument(modelKey);
+    async assertDrawingSourceCurrent({ source } = {}) {
+      const modelKey = source?.modelKey;
+      if (!['A', 'B'].includes(modelKey) || !/^[a-f0-9]{64}$/i.test(source?.modelRevision || ''))
+        throw new Error('図面のSTB-A/B改訂が不正です。');
+      const document = sourceDocument(modelKey);
+      const xml = serialize(document);
+      if ((await digest(new TextEncoder().encode(xml))) !== source.modelRevision.toLowerCase())
+        throw new Error(
+          '図面生成後にSTB-' + modelKey + 'が更新されました。図面を再生成してください。',
+        );
+      if (sourceDocument(modelKey) !== document || serialize(document) !== xml)
+        throw new Error('STB-' + modelKey + '改訂確認中にモデルが変更されました。');
+    },
+    /**
+     * Build a verified elevation from an archive STB without installing models.A.
+     * Unlike createAxisElevationDrawing, this method MUST NOT read the global
+     * document: ZIP preflight runs before the ordinary model loader starts.
+     */
+    async createElevationFromStbFile({
+      file,
+      modelKey,
+      axisDirection,
+      axisId,
+      depth,
+      expectedRevisionSha256 = null,
+      signal,
+    } = {}) {
+      if (!file || (typeof file.text !== 'function' && typeof file.arrayBuffer !== 'function'))
+        throw new TypeError('STB Fileが必要です。');
+      if (modelKey !== 'A') throw new Error('軸組図の正本はSTB-Aのみです。');
+      if (
+        !['X', 'Y'].includes(axisDirection) ||
+        !String(axisId ?? '').trim() ||
+        !Number.isFinite(depth) ||
+        depth <= 0
+      )
+        throw new TypeError('ZIP軸組図の通り芯・奥行が不正です。');
+      if (signal?.aborted) throw new Error('ZIP軸組図生成を中止しました。');
+      const sourceText = await readStbRevisionText(file);
+      if (typeof globalThis.DOMParser !== 'function')
+        throw new Error('STB XML読込にはDOMParserが必要です。');
+      const document = new globalThis.DOMParser().parseFromString(sourceText, 'application/xml');
+      if (
+        document.querySelector?.('parsererror') ||
+        document.documentElement?.localName !== 'ST_BRIDGE'
+      )
+        throw new Error('ST_BRIDGE XMLとして読み込めません。');
+      const sourceXml = serialize(document);
+      const modelRevision = await digest(new TextEncoder().encode(sourceXml));
+      if (typeof modelRevision !== 'string' || !/^[0-9a-f]{64}$/.test(modelRevision))
+        throw new Error('STB改訂SHA-256が不正です。');
+      if (
+        expectedRevisionSha256 != null &&
+        String(expectedRevisionSha256).toLowerCase() !== modelRevision
+      )
+        throw new Error('ZIP軸組図の改訂が保存値と一致しません。');
+      if (signal?.aborted) throw new Error('ZIP軸組図生成を中止しました。');
+      const result = compileStbLevelElevationRenderPlan({
+        document: document.cloneNode(true),
+        source: { modelKey: 'A', modelRevision },
+        axisDirection,
+        axisId,
+        depth,
+      });
+      if (signal?.aborted) throw new Error('ZIP軸組図生成を中止しました。');
+      // Detailed elevation tags read section facts from the same isolated ZIP STB.
+      const tagFactsResolver = createCachedTagFactsResolver(
+        document.cloneNode(true),
+        result.drawing.source,
+      );
+      return Object.freeze({ drawing: result.drawing, tagFactsResolver });
+    },
+    async createAxisElevationDrawing({
+      modelKey,
+      axisDirection,
+      axisId,
+      depth,
+      signal,
+      working = false,
+    } = {}) {
+      if (modelKey !== 'A') throw new Error('軸組図の正本はSTB-Aのみです。');
+      const original = sourceDocument('A', { working });
+      const xml = serialize(original);
+      const snapshot = original.cloneNode(true);
+      const modelRevision = await digest(new TextEncoder().encode(xml));
+      if (signal?.aborted) throw new Error('軸組図生成を中止しました。');
+      if (!/^[a-f0-9]{64}$/.test(modelRevision)) throw new Error('STB改訂SHA-256が不正です。');
+      if (serialize(sourceDocument('A', { working })) !== xml)
+        throw new Error('軸組図生成中にSTB-Aが変更されました。');
+      const result = compileStbLevelElevationRenderPlan({
+        document: snapshot,
+        source: { modelKey: 'A', modelRevision },
+        axisDirection,
+        axisId,
+        depth,
+      });
+      if (signal?.aborted || serialize(sourceDocument('A', { working })) !== xml)
+        throw new Error('軸組図生成中にSTB-Aが変更または中止されました。');
+      return result.drawing;
+    },
+    async createDrawing({ modelKey, view, signal, working = false } = {}) {
+      const original = sourceDocument(modelKey, { working });
       // 改訂判定の正本は「clone後のserialization」ではなく読込済みsource Documentそのもの。
       // cloneNode(true)後はブラウザDOM実装によりnamespace宣言等のserializationが変化し得るため、
       // sourceとsnapshotの文字列表現を相互比較してはならない。
@@ -336,7 +456,7 @@ export function createPdfOverlayServices({
       const assertUnchanged = () => {
         // SDVの既存読込・検証経路では、内容が同一のDocumentへ参照だけ差し替わることがある。
         // PDF照合で固定すべきなのはDOMオブジェクト同一性ではなく、抽出元XMLの内容。
-        const current = sourceDocument(modelKey);
+        const current = sourceDocument(modelKey, { working });
         if (serialize(current) !== sourceXml)
           throw new Error('照合抽出中にモデルが変更されました。再実行してください。');
       };

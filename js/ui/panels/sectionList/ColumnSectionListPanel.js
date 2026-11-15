@@ -34,6 +34,7 @@ export class ColumnSectionListPanel extends BaseSectionListPanel {
     super({
       windowId: 'column-section-list-window',
       idPrefix: 'column-section-list',
+      sectionListType: 'column',
       title: 'RC柱断面リスト',
       windowClass: 'column-section-list-window',
       toggleButtonId: 'showColumnSectionListBtn',

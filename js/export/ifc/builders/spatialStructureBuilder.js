@@ -171,7 +171,7 @@ export function createSpatialContextEntities(w) {
  * @param {Object} refs - 共通エンティティ参照（dirZ, dirX, buildingPlacement を使用）
  * @returns {{storeyId: number, storeyPlacement: number}} 階エンティティIDと配置ID
  */
-export function createSingleStoreyEntity(w, name, elevation, refs) {
+export function createSingleStoreyEntity(w, name, elevation, refs, description = null) {
   // 階の配置（高さを反映）
   const storeyOrigin = w.createEntity('IFCCARTESIANPOINT', [[0.0, 0.0, elevation]]);
   const storeyAxis2Placement = w.createEntity('IFCAXIS2PLACEMENT3D', [
@@ -188,7 +188,7 @@ export function createSingleStoreyEntity(w, name, elevation, refs) {
     generateIfcGuid(), // GlobalId
     null, // OwnerHistory
     name, // Name
-    null, // Description
+    description, // Description: optional STB provenance
     null, // ObjectType
     `#${storeyPlacement}`, // ObjectPlacement
     null, // Representation

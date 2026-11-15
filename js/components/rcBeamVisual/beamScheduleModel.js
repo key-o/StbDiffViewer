@@ -29,6 +29,8 @@ import {
   normalizeBeamRebarLayers,
   resolveBeamFirstLayerFaces,
   resolveBeamLayerCenterSpacingMm,
+  resolveBeamStirrupPreferredPositions,
+  selectBeamLayerXPositions,
 } from '../../data/extractors/beamSectionList/beamRebarPositionResolver.js';
 
 const DEFAULT_MAIN_DIA = 'D25';
@@ -130,8 +132,8 @@ export function resolveBeamScheduleCovers(cover, profile = BASELINE_RC_SCHEDULE_
   const defaultCover = Number(profile?.beam?.defaultSourceCoverMm) || 40;
   const top = Number.isFinite(source.top) ? source.top : defaultCover;
   const bottom = Number.isFinite(source.bottom) ? source.bottom : defaultCover;
-  const left = Number.isFinite(source.left) ? source.left : top;
-  const right = Number.isFinite(source.right) ? source.right : top;
+  const left = Number.isFinite(source.left) ? source.left : defaultCover;
+  const right = Number.isFinite(source.right) ? source.right : defaultCover;
   const estimated = ['top', 'bottom', 'left', 'right'].some((key) => !Number.isFinite(source[key]));
   return { top, bottom, left, right, estimated };
 }
@@ -189,15 +191,20 @@ function createHorizontalLayers(bar, side, context) {
   let previousY = null;
   let previousLayer = null;
   let blocked = false;
+  let firstLayerPositions = null;
 
   layers.forEach((layer, index) => {
     if (blocked) return;
     const layoutRadius = beamLayerLayoutRadiusMm(layer, DEFAULT_MAIN_DIA);
-    const xPositions = evenlySpacedBeamValues(
-      layer.count,
-      context.mainCenters.left,
-      context.mainCenters.right,
-    );
+    const xPositions =
+      (index > 0 &&
+        selectBeamLayerXPositions(
+          layer.count,
+          firstLayerPositions,
+          context.preferredStirrupPositions,
+        )) ||
+      evenlySpacedBeamValues(layer.count, context.mainCenters.left, context.mainCenters.right);
+    if (index === 0) firstLayerPositions = xPositions;
 
     let y;
     let positionSource;
@@ -346,10 +353,19 @@ export function buildBeamScheduleGeometry(positionData, options = {}) {
     bottom: depth - mainFaces.bottom,
   };
 
+  const firstLayerCount = Math.max(
+    Number(normalizeBeamScheduleBarLayers(positionData?.topBar)[0]?.count) || 0,
+    Number(normalizeBeamScheduleBarLayers(positionData?.bottomBar)[0]?.count) || 0,
+  );
+  const preferredStirrupPositions = resolveBeamStirrupPreferredPositions(
+    evenlySpacedBeamValues(firstLayerCount, mainCenters.left, mainCenters.right),
+    hasStirrup ? stirrup.count : 0,
+  );
   const context = {
     width,
     depth,
     mainCenters,
+    preferredStirrupPositions,
     layerSpacing,
     applyDefaults: positionResolution.applyDefaults,
     faceSources: positionResolution.faceSources,

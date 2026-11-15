@@ -7,9 +7,11 @@
 import { createLogger } from '../utils/logger.js';
 import {
   canExportStbToDxf,
+  canExportAllStoriesToDxf,
   exportStbToDxf,
   getStbExportStats,
 } from '../export/dxf/stb-to-dxf/index.js';
+import { STORY_BATCH_RENDER_ELEMENT_TYPES } from '../data/drawing/storyBatchContract.js';
 import { DEFAULT_ELEMENT_COLORS } from '../config/colorConfig.js';
 import { ELEMENT_LABELS } from '../config/elementLabels.js';
 import {
@@ -95,16 +97,23 @@ export function updateStbExportStatus() {
 
   const { canExport, reason, solidElementTypes } = canExportStbToDxf();
 
-  if (canExport) {
+  const storyExport = canExportAllStoriesToDxf(STORY_BATCH_RENDER_ELEMENT_TYPES);
+  const canExportStoryPlan = storyExport.canExport && storyExport.route === 'render-plan';
+
+  if (canExport || canExportStoryPlan) {
     statusEl.className = 'stb-export-status status-ready';
-    statusTextEl.textContent = `エクスポート可能: ${solidElementTypes.length}種類の要素`;
+    statusTextEl.textContent = canExport
+      ? `エクスポート可能: ${solidElementTypes.length}種類の要素`
+      : 'STB-Aの全階DXFを出力できます。単独・通り芯出力は利用できません。';
 
     if (elementSelectEl) elementSelectEl.classList.remove('hidden');
-    if (statsEl) statsEl.classList.remove('hidden');
-    if (filenameGroupEl) filenameGroupEl.classList.remove('hidden');
+    if (statsEl) statsEl.classList.toggle('hidden', !canExport);
+    if (filenameGroupEl) filenameGroupEl.classList.toggle('hidden', !canExport);
 
-    updateStbExportTypeList(solidElementTypes);
-    if (exportBtn) exportBtn.disabled = false;
+    updateStbExportTypeList(canExport ? solidElementTypes : STORY_BATCH_RENDER_ELEMENT_TYPES, {
+      includeSceneStats: canExport,
+    });
+    if (exportBtn) exportBtn.disabled = !canExport;
   } else {
     statusEl.className = 'stb-export-status status-not-ready';
     statusTextEl.textContent = reason;
@@ -122,20 +131,20 @@ export function updateStbExportStatus() {
  * STBエクスポート要素タイプリストを更新
  * @param {Array<string>} availableTypes - 利用可能な要素タイプ
  */
-export function updateStbExportTypeList(availableTypes) {
+export function updateStbExportTypeList(availableTypes, { includeSceneStats = true } = {}) {
   const listContainer = document.getElementById('stb-export-type-list');
   if (!listContainer) return;
 
   listContainer.innerHTML = '';
   selectedStbExportTypes.clear();
 
-  const stats = getStbExportStats(availableTypes);
+  const stats = includeSceneStats ? getStbExportStats(availableTypes) : null;
   ensureElementColorPreferenceSubscription();
 
   for (const type of availableTypes) {
     const info = getTypeInfo(type);
     const color = getTypeColor(type);
-    const elementCount = stats.byElementType[type] || 0;
+    const elementCount = stats?.byElementType[type] || 0;
 
     const item = document.createElement('label');
     item.className = 'stb-export-type-item';
@@ -167,7 +176,7 @@ export function updateStbExportTypeList(availableTypes) {
 
     const countSpan = document.createElement('span');
     countSpan.className = 'type-count';
-    countSpan.textContent = `(${elementCount}要素)`;
+    countSpan.textContent = includeSceneStats ? `(${elementCount}要素)` : '';
 
     item.appendChild(checkbox);
     item.appendChild(colorBox);
@@ -195,7 +204,7 @@ function updateStbExportStats() {
   statsEl.textContent = `選択: ${totalElementCount} 要素`;
 
   if (exportBtn) {
-    exportBtn.disabled = totalElementCount === 0;
+    exportBtn.disabled = !canExportStbToDxf().canExport || totalElementCount === 0;
   }
 }
 

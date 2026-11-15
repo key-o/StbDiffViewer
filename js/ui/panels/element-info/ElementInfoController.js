@@ -45,9 +45,22 @@ const JOINT_XML_TAGS = [
   'StbJointColumnShapeT',
 ];
 
+function releaseCadElementInfo(contentDiv) {
+  if (!['cad', 'cad-candidate', 'cad-stale'].includes(contentDiv?.dataset.infoOwner)) return;
+  delete contentDiv.dataset.infoOwner;
+  delete contentDiv.dataset.cadViewId;
+  delete contentDiv.dataset.cadSheetId;
+  delete contentDiv.dataset.cadPlacementId;
+  const exportButton = document.getElementById('exportElementInfoJsonBtn');
+  if (exportButton) exportButton.disabled = false;
+}
+
 function resetElementInfoState(contentDiv = null, { renderEmptyMessage = false } = {}) {
   currentDisplayNodes = { nodeA: null, nodeB: null, elementType: null };
   setCurrentEditingElement(null);
+  if (contentDiv?.dataset.infoOwner === 'glb') {
+    delete contentDiv.dataset.infoOwner;
+  }
   clearElementInfoDisplayState(contentDiv, { renderEmptyMessage });
 }
 
@@ -141,6 +154,11 @@ async function initializeSchema() {
 export async function displayElementInfo(idA, idB, elementType, modelSource = null) {
   const panel = document.getElementById('component-info');
   const contentDiv = document.getElementById('element-info-content');
+  // Switching back from CAD properties restores the ordinary STB editor/export.
+  releaseCadElementInfo(contentDiv);
+  if (contentDiv?.dataset.infoOwner === 'glb') {
+    delete contentDiv.dataset.infoOwner;
+  }
 
   if (!elementType || (!idA && !idB)) {
     resetElementInfoState(contentDiv, { renderEmptyMessage: true });
@@ -153,6 +171,10 @@ export async function displayElementInfo(idA, idB, elementType, modelSource = nu
   }
 
   await initializeSchema();
+
+  // CAD may have been selected while schema initialization was pending.
+  // Respect that newer selection instead of reviving the old STB editor.
+  if (contentDiv.dataset.infoOwner?.startsWith('cad')) return;
 
   setCurrentEditingElement({ idA, idB, elementType, modelSource });
   currentDisplayNodes = { nodeA: null, nodeB: null, elementType: null };
@@ -378,6 +400,41 @@ export async function displayElementInfo(idA, idB, elementType, modelSource = nu
   );
 }
 
+export function displayGlbElementInfo(info = {}) {
+  const panel = document.getElementById('component-info');
+  const contentDiv = document.getElementById('element-info-content');
+  releaseCadElementInfo(contentDiv);
+  resetElementInfoState(contentDiv);
+
+  if (!panel || !contentDiv) {
+    logger.error('Component info panel or content div not found!');
+    return;
+  }
+
+  applyPanelSize(panel);
+  setupPanelResizeObserver(panel);
+
+  const element = info.element || {};
+  const elementId = info.elementId || element.elementId || '-';
+  const elementName = element.name || info.name || '';
+  const category = info.category || element.category || '';
+  const title = [category, elementName].filter(Boolean).join(' - ') || 'GLB要素';
+  const details = {
+    ...(info.documentTitle ? { documentTitle: info.documentTitle } : {}),
+    element,
+    ...(info.type ? { type: info.type } : {}),
+  };
+
+  const heading = document.createElement('h3');
+  heading.textContent = `${title} (ID: ${elementId})`;
+  const json = document.createElement('pre');
+  json.className = 'glb-element-json';
+  json.textContent = JSON.stringify(details, null, 2);
+
+  contentDiv.replaceChildren(heading, json);
+  contentDiv.dataset.infoOwner = 'glb';
+}
+
 export function refreshElementInfoPanel() {
   const currentElement = getCurrentEditingElement();
   if (currentElement) {
@@ -388,6 +445,7 @@ export function refreshElementInfoPanel() {
 
 export function displayMultiSelectionSummary(summaryData = {}) {
   const contentDiv = document.getElementById('element-info-content');
+  releaseCadElementInfo(contentDiv);
   resetElementInfoState(contentDiv, { renderEmptyMessage: false });
   renderMultiSelectionSummary(summaryData);
 }
@@ -404,6 +462,14 @@ eventBus.on(ImportanceEvents.SETTINGS_CHANGED, () => {
 
 eventBus.on(EditEvents.WORKING_QUANTITIES_UPDATED, () => {
   refreshElementInfoPanel();
+});
+
+// CAD gizmo moves, numeric coordinate edits and Undo/Redo all change the Working
+// Document. Refresh the existing STB property editor without requiring a reselect.
+eventBus.on(EditEvents.WORKING_DOCUMENT_CHANGED, () => {
+  const content = globalThis.document?.getElementById('element-info-content');
+  if (content?.dataset.infoOwner?.startsWith('cad')) return;
+  if (getCurrentEditingElement()) refreshElementInfoPanel();
 });
 
 export function initializeExportJsonButton() {

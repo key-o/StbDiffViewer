@@ -310,9 +310,12 @@ function generateLayerTable(layers) {
 
   addPairs(lines, [0, 'TABLE'], [2, 'LAYER'], [70, layers.length]);
 
-  for (const layerName of layers) {
-    const colorIndex = ELEMENT_TYPE_COLORS[layerName] || 7;
-    addPairs(lines, [0, 'LAYER'], [2, layerName], [70, 0], [62, colorIndex], [6, 'CONTINUOUS']);
+  // An entry is a bare layer name, or {name, colorIndex?, lineType?} from the project's layer settings.
+  for (const layer of layers) {
+    const layerName = typeof layer === 'string' ? layer : layer.name;
+    const colorIndex = layer?.colorIndex ?? (ELEMENT_TYPE_COLORS[layerName] || 7);
+    const lineType = layer?.lineType ?? 'CONTINUOUS';
+    addPairs(lines, [0, 'LAYER'], [2, layerName], [70, 0], [62, colorIndex], [6, lineType]);
   }
 
   addPairs(lines, [0, 'ENDTAB']);
@@ -633,12 +636,20 @@ export async function createDxfBlob(content, options = {}) {
  * @param {string} content - DXFファイル内容
  * @param {string} filename - ファイル名（.dxf有無どちらも可）
  * @param {FileSystemDirectoryHandle} [directoryHandle] - 保存先フォルダ
- * @param {{profile?: string}} [options] - 出力互換プロファイル
+ * @param {{profile?: string, fallbackToBrowserOnDirectoryError?: boolean}} [options]
+ *   出力互換プロファイル・フォルダ書込失敗時フォールバック
  * @returns {Promise<boolean>} 保存成功フラグ
  */
 export async function downloadDxf(content, filename, directoryHandle = null, options = {}) {
   const outputFilename = normalizeDxfFilename(filename);
   const blob = await createDxfBlob(content, options);
+  // Revision checks must run after async character encoding and before the
+  // first observable write/download. Existing non-sheet callers are unchanged.
+  if (options.assertBeforeSave !== undefined) {
+    if (typeof options.assertBeforeSave !== 'function')
+      throw new TypeError('DXF保存直前の照合関数が不正です。');
+    await options.assertBeforeSave();
+  }
 
   // File System Access APIを使った保存
   if (directoryHandle) {
@@ -650,6 +661,7 @@ export async function downloadDxf(content, filename, directoryHandle = null, opt
       return true;
     } catch (error) {
       log.error('[DxfFormatWriter] File System Access APIでの保存エラー:', error);
+      if (options.fallbackToBrowserOnDirectoryError === false) throw error;
       // フォールバック: 通常のダウンロード
     }
   }

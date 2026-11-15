@@ -72,6 +72,16 @@ export { STB_ELEMENT_TABS };
  * 重要度管理システムのメインクラス
  */
 class ImportanceManager {
+  /** Keep generated settings of the displayed model intact during a provisional load. */
+  beginReplacement() {
+    const previous = { ...this };
+    Object.assign(this, new ImportanceManager(), {
+      currentConfigId: previous.currentConfigId,
+      currentConfigName: previous.currentConfigName,
+    });
+    return { rollback: () => Object.assign(this, previous) };
+  }
+
   constructor() {
     this.userImportanceSettings = new Map();
     this.mvdImportanceSettings = {

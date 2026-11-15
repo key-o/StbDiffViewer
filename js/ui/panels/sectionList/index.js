@@ -23,6 +23,14 @@ export {
 export { BeamSectionListRenderer } from './BeamSectionListRenderer.js';
 
 export { BaseSectionListRenderer } from './BaseSectionListRenderer.js';
+export {
+  SteelSectionListPanel,
+  getSteelSectionListPanel,
+  initSteelColumnSectionListPanel,
+  initSteelBeamSectionListPanel,
+  initSrcColumnSectionListPanel,
+  initSrcBeamSectionListPanel,
+} from './SteelSectionListPanel.js';
 
 export { BaseSectionListPanel } from './BaseSectionListPanel.js';
 
@@ -31,3 +39,10 @@ export {
   exportColumnSectionListToDxf,
   exportBeamSectionListToDxf,
 } from './SectionListDxfExporter.js';
+
+export {
+  SlabSectionListPanel,
+  getSlabSectionListPanel,
+  initSlabSectionListPanel,
+  configureSlabListPersistence,
+} from './SlabSectionListPanel.js';

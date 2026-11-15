@@ -67,24 +67,23 @@ export function extractBeamSourceCover(arrangementElement, simpleBarElement) {
     [arrangementElement, 'depth_cover_bottom'],
     [simpleBarElement, 'depth_cover_bottom'],
   ]);
-  const left =
-    firstFiniteAttr([
-      [arrangementElement, 'width_cover_left'],
-      [arrangementElement, 'depth_cover_left'],
-      [simpleBarElement, 'width_cover_left'],
-      [arrangementElement, 'depth_cover_start_X'],
-      [simpleBarElement, 'depth_cover_start_X'],
-      [simpleBarElement, 'depth_cover_left'],
-    ]) ?? top;
-  const right =
-    firstFiniteAttr([
-      [arrangementElement, 'width_cover_right'],
-      [arrangementElement, 'depth_cover_right'],
-      [simpleBarElement, 'width_cover_right'],
-      [arrangementElement, 'depth_cover_end_X'],
-      [simpleBarElement, 'depth_cover_end_X'],
-      [simpleBarElement, 'depth_cover_right'],
-    ]) ?? top;
+  // 左右は上下かぶりとは独立。未指定はnullのまま残し、基本設定側で補完する。
+  const left = firstFiniteAttr([
+    [arrangementElement, 'width_cover_left'],
+    [arrangementElement, 'depth_cover_left'],
+    [simpleBarElement, 'width_cover_left'],
+    [arrangementElement, 'depth_cover_start_X'],
+    [simpleBarElement, 'depth_cover_start_X'],
+    [simpleBarElement, 'depth_cover_left'],
+  ]);
+  const right = firstFiniteAttr([
+    [arrangementElement, 'width_cover_right'],
+    [arrangementElement, 'depth_cover_right'],
+    [simpleBarElement, 'width_cover_right'],
+    [arrangementElement, 'depth_cover_end_X'],
+    [simpleBarElement, 'depth_cover_end_X'],
+    [simpleBarElement, 'depth_cover_right'],
+  ]);
 
   if ([top, bottom, left, right].every((value) => value === null)) return null;
   return { top, bottom, left, right };

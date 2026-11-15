@@ -293,10 +293,11 @@ export function redrawUndefinedElementsForViewMode(scheduleRender) {
 
   // 要素の比較を実行
   const comparisonResult = compareElements(dataA, dataB, nodeMapA, nodeMapB, (el) => {
-    // 位置ベースのキー生成（start-end座標で比較）
+    // 位置ベースのキー生成（start-end座標で比較）。keyExtractorは{key, data}を返す契約。
     const start = el.startCoords;
     const end = el.endCoords;
-    return `${start.x.toFixed(0)},${start.y.toFixed(0)},${start.z.toFixed(0)}-${end.x.toFixed(0)},${end.y.toFixed(0)},${end.z.toFixed(0)}`;
+    const key = `${start.x.toFixed(0)},${start.y.toFixed(0)},${start.z.toFixed(0)}-${end.x.toFixed(0)},${end.y.toFixed(0)},${end.z.toFixed(0)}`;
+    return { key, data: el };
   });
 
   // ラベル表示設定を取得

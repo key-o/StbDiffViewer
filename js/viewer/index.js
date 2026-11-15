@@ -68,6 +68,12 @@ import { createLabel } from './annotations/labels.js';
 import { drawAxes, drawStories } from './annotations/layout.js';
 import { clearSceneContent, getModelBounds } from './scene/sceneManager.js';
 import {
+  loadGlbModel,
+  clearGlbModel,
+  getGlbModel,
+  setGlbModelVisible,
+} from './scene/gltfModelLoader.js';
+import {
   createOrUpdateGridHelper,
   setGridHelperVisibility,
   isGridHelperVisible,
@@ -167,6 +173,10 @@ export {
   fitCameraToModel,
   fitCameraToBox,
   computeModelBoundingBox,
+  loadGlbModel,
+  clearGlbModel,
+  getGlbModel,
+  setGlbModelVisible,
   setView,
   VIEW_DIRECTIONS,
   clearSceneContent,
@@ -184,6 +194,7 @@ export { clippingStateManager } from './clipping/ClippingStateManager.js';
 
 // パフォーマンスユーティリティの再エクスポート
 export { getElementRegistry } from './utils/ElementRegistry.js';
+export { beginSceneReplacement } from './scene/sceneReplacement.js';
 export {
   findElementInGroup,
   getBatchElementCenter,
@@ -282,6 +293,7 @@ export { getNodePositions } from './geometry/core/ElementNodeResolver.js';
 // STB構造パーサー
 export {
   clearParseCache,
+  beginParseCacheReplacement,
   setStateProvider,
   parseStbFile,
   updateCachedNodeCoordinate,

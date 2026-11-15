@@ -160,7 +160,7 @@ export class BaseSectionListRenderer {
         if (raw) {
           tdSection.innerHTML = this.renderGridCell(raw, diagramHeight);
         } else {
-          tdSection.innerHTML = this.renderEmptyGridCell(diagramHeight);
+          tdSection.innerHTML = this.renderEmptyGridCell(diagramHeight, symbol);
           tdSection.classList.add('empty');
         }
 

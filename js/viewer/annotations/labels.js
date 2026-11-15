@@ -250,9 +250,9 @@ export function createLabelSprite(text, position, spriteGroup, elementType, meta
       map: texture,
       transparent: true,
       sizeAttenuation: true,
-      // 表示対象と判定されたラベルは文字列全体を前面描画する。
-      // 遮蔽の有無は下記のアンカーRaycastでラベル単位に判定する。
-      depthTest: false,
+      // 通り芯・階ラベルは部材の深度で遮蔽する（常時前面表示にしない）。
+      // 通常の部材タグは従来どおりアンカーRaycastでラベル単位に判定する。
+      depthTest: isAxisLabel || isStoryLabel,
       depthWrite: false,
     });
     const sprite = new THREE.Sprite(material);

@@ -27,9 +27,44 @@ import {
 
 let sessionSequence = 0;
 
+const STB_NAMESPACE = 'https://www.building-smart.or.jp/dl';
+
 function createSessionId() {
   sessionSequence += 1;
   return `edit-${Date.now().toString(36)}-${sessionSequence.toString(36)}`;
+}
+
+function createEmptyModelDocument() {
+  const implementation = globalThis.document?.implementation;
+  if (!implementation || typeof implementation.createDocument !== 'function') {
+    throw new Error('新規モデルを作成できる XML DOM がありません。');
+  }
+
+  const document = implementation.createDocument(STB_NAMESPACE, 'ST_BRIDGE', null);
+  const root = document.documentElement;
+  root.setAttribute('version', '2.1.1');
+
+  const common = document.createElementNS(STB_NAMESPACE, 'StbCommon');
+  common.setAttribute('project_name', '');
+  common.setAttribute('app_name', 'StbDiffViewer');
+  common.setAttribute('app_version', '2.1.0');
+  root.appendChild(common);
+
+  const model = document.createElementNS(STB_NAMESPACE, 'StbModel');
+  for (const tagName of [
+    'StbNodes',
+    'StbAxes',
+    'StbStories',
+    'StbMembers',
+    'StbSections',
+    'StbJoints',
+    'StbConnections',
+    'StbWeld',
+  ]) {
+    model.appendChild(document.createElementNS(STB_NAMESPACE, tagName));
+  }
+  root.appendChild(model);
+  return document;
 }
 
 function cloneDocument(document) {
@@ -227,7 +262,8 @@ const editingSession = {
       throw new Error('編集セッションは既に開始されています。先に破棄してください。');
     }
 
-    const sourceDocument = options.sourceDocument || getState('models.documentA');
+    const sourceDocument =
+      options.sourceDocument || getState('models.documentA') || createEmptyModelDocument();
     const sourceNodeMap = options.sourceNodeMap || getState('models.nodeMapA');
 
     // source snapshot と working copy を別々の DOM として保持する。
@@ -300,6 +336,20 @@ const editingSession = {
   getMoveFollowRelatedNodes() {
     const current = getState('models.editing') || createInitialEditingState();
     return current.moveFollowRelatedNodes !== false;
+  },
+
+  /** @param {'node'|'geometry'} mode ギズモ基準: 節点重心 / 生成ジオメトリ中心 */
+  setMoveGizmoAnchorMode(mode) {
+    const current = requireActiveSession();
+    const nextValue = mode === 'geometry' ? 'geometry' : 'node';
+    if (current.moveGizmoAnchorMode === nextValue) return nextValue;
+    setState('models.editing', { ...current, moveGizmoAnchorMode: nextValue });
+    return nextValue;
+  },
+
+  getMoveGizmoAnchorMode() {
+    const current = getState('models.editing') || createInitialEditingState();
+    return current.moveGizmoAnchorMode === 'geometry' ? 'geometry' : 'node';
   },
 
   markChanged() {

@@ -7,6 +7,7 @@
 import { generateIfcGuid } from '../StepWriter.js';
 import { calculateBeamBasis, rotateVectorAroundAxis } from '../../../data/geometry/vectorMath.js';
 import { STB_TAG_NAMES } from '../../../constants/elementTypes.js';
+import { encodeBeamMetadata } from '../../../common-ifc/pipeline/StbBeamMetadata.js';
 
 /**
  * 梁のIFCエンティティを作成
@@ -36,6 +37,8 @@ export function createBeamEntities(w, params) {
     placementMode,
     sectionHeight,
     kindStructure,
+    isFoundation,
+    sourceBeamOffsets,
     stbType,
     profileId,
     bodyContext,
@@ -147,7 +150,7 @@ export function createBeamEntities(w, params) {
     generateIfcGuid(), // GlobalId
     null, // OwnerHistory
     name, // Name
-    null, // Description
+    encodeBeamMetadata({ isFoundation, sourceBeamOffsets }), // STB source-provenance only
     kindStructure, // ObjectType: kind_structure (S/RC/SRC)
     `#${beamLocalPlacement}`, // ObjectPlacement
     `#${productShape}`, // Representation

@@ -5,10 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' 'sha256-xpt49HZNL8gCyHi9dDVE7bmc/fJ9EpzPo5RpqqYs1r0=' https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' 'sha256-/erU9/BSXX2Jt6g5q6ciQ7qDmY4JTyg4INn3yjNGiys=' https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://esm.sh ws://127.0.0.1:8765; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
     />
     <title>STB Diff Viewer</title>
     <link rel="icon" href="./favicon.ico" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <meta name="theme-color" content="#1e293b" />
+    <script type="module" src="./pwa/registerServiceWorker.js"></script>
     <link rel="stylesheet" href="./style/variables.css" />
     <link rel="stylesheet" href="./style/style.css" />
     <link rel="stylesheet" href="./style/utilities.css" />
@@ -43,6 +46,7 @@
     <link rel="stylesheet" href="./style/components/ar-mode.css" />
     <link rel="stylesheet" href="./style/components/validation-panel.css" />
     <link rel="stylesheet" href="./style/components/measurement.css" />
+    <link rel="stylesheet" href="./style/components/document-control.css" />
     <!-- Import map for bare module specifiers used in ES modules (browser) -->
     <script type="importmap">
       {
@@ -54,7 +58,8 @@
           "html2canvas": "https://esm.sh/html2canvas@1.4.1",
           "jspdf": "https://esm.sh/jspdf@4.2.1",
           "web-ifc": "https://cdn.jsdelivr.net/npm/web-ifc@0.0.74/web-ifc-api.js",
-          "encoding-japanese": "https://esm.sh/encoding-japanese@2.2.0"
+          "encoding-japanese": "https://esm.sh/encoding-japanese@2.2.0",
+          "fflate": "https://esm.sh/fflate@0.8.3"
         }
       }
     </script>
@@ -202,6 +207,27 @@
             <input type="file" id="fileB" />
           </div>
 
+          <div id="glbModelControls" class="file-input-wrapper glb-file-input-wrapper hidden">
+            <label for="glbFile"><strong>GLBモデル（重ね表示）</strong></label>
+            <input
+              type="file"
+              id="glbFile"
+              accept=".glb,model/gltf-binary,.json,application/json"
+              multiple
+            />
+            <span class="file-input-hint">GLBと対応JSONを同時に選択できます</span>
+            <div class="model-file-actions">
+              <label>
+                <input type="checkbox" id="glbModelVisible" checked disabled />
+                表示
+              </label>
+              <button type="button" id="clearGlbModel" class="clear-file-btn" disabled>
+                解除
+              </button>
+            </div>
+            <span class="file-name-display" id="glbFileName">未選択</span>
+          </div>
+
           <hr class="section-divider" />
 
           <button type="button" id="compareButton" class="btn-primary compare-button">
@@ -320,6 +346,15 @@
         >
           📑 簡易CAD
         </button>
+        <button
+          type="button"
+          id="toggle-document-control-btn"
+          class="hidden"
+          aria-controls="document-control-float"
+          aria-expanded="false"
+        >
+          🤖 AI連携
+        </button>
       </div>
 
       <!-- 出力・変換セクション -->
@@ -338,9 +373,6 @@
           <!-- DXF/IFC出力セクション -->
           <div class="export-settings">
             <label><strong>エクスポート</strong></label>
-            <button type="button" id="toggle-dxf-floating-btn" class="btn btn-secondary">
-              📐 DXFエクスポート
-            </button>
             <button type="button" id="exportIfcBtn" class="btn btn-secondary">
               📦 IFCファイルに変換
             </button>
@@ -375,6 +407,18 @@
             </button>
             <button type="button" id="showBeamSectionListBtn" class="btn btn-secondary">
               RC梁断面リスト
+            </button>
+            <button type="button" id="showSteelColumnSectionListBtn" class="btn btn-secondary">
+              S柱断面リスト
+            </button>
+            <button type="button" id="showSteelBeamSectionListBtn" class="btn btn-secondary">
+              S梁断面リスト
+            </button>
+            <button type="button" id="showSrcColumnSectionListBtn" class="btn btn-secondary">
+              SRC柱断面リスト
+            </button>
+            <button type="button" id="showSrcBeamSectionListBtn" class="btn btn-secondary">
+              SRC梁断面リスト
             </button>
           </div>
 
@@ -492,6 +536,9 @@
         <span>2ファイル: 差分比較</span>
         <span>右パネルの選択ボタンも利用可</span>
       </div>
+      <button type="button" id="canvas-edit-start-btn" class="canvas-load-btn canvas-edit-start-btn">
+        ✏️ 編集モードで開始
+      </button>
       <button type="button" id="canvas-load-btn" class="canvas-load-btn hidden">
         📥 モデル読込
       </button>
@@ -1103,100 +1150,44 @@
       </div>
     </div>
 
-    <!-- DXFフローティングウィンドウ -->
-    <div id="dxf-floating" class="floating-window hidden">
-      <div class="float-window-header" id="dxf-floating-header">
-        <span class="float-window-title">📐 DXFエクスポート</span>
+    <!-- #557: AI連携（文書読取許可・Web MCP中継）。他機能と同じフローティングウィンドウ。#485/#500: タブ内読取許可と外部AI接続許可は別操作 -->
+    <div id="document-control-float" class="floating-window hidden">
+      <div class="float-window-header" id="document-control-header">
+        <span class="float-window-title">🤖 AI連携（文書読取許可）</span>
         <div class="float-window-controls">
           <button
-            class="float-window-btn"
-            id="close-dxf-floating-btn"
-            aria-label="閉じる"
             type="button"
+            class="float-window-btn"
+            id="close-document-control-btn"
+            aria-label="閉じる"
           >
             ✕
           </button>
         </div>
       </div>
       <div class="float-window-content">
-        <!-- STBからDXFエクスポート -->
-        <div id="stb-dxf-export-panel" class="stb-dxf-export-panel">
-          <label><strong>STBモデルからDXFエクスポート</strong></label>
-          <div id="stb-export-status" class="stb-export-status">
-            <span id="stb-export-status-text">モデルを読み込んでください</span>
-          </div>
-          <div id="stb-export-element-select" class="stb-export-element-select hidden">
-            <label>出力要素:</label>
-            <div id="stb-export-type-list" class="stb-export-type-list"></div>
-            <div class="stb-export-controls">
-              <button type="button" id="selectAllStbExportTypes" class="btn btn-sm">全選択</button>
-              <button type="button" id="deselectAllStbExportTypes" class="btn btn-sm">
-                全解除
-              </button>
-            </div>
-          </div>
-          <div id="stb-export-stats" class="stb-export-stats hidden">
-            <span id="stb-export-mesh-count">メッシュ: 0</span>
-          </div>
-          <div id="stb-export-filename-group" class="stb-export-filename-group hidden">
-            <label for="stbDxfExportFilename">ファイル名:</label>
-            <input
-              type="text"
-              id="stbDxfExportFilename"
-              class="form-control"
-              value="stb-export.dxf"
-            />
-          </div>
-          <button type="button" id="exportStbDxfButton" class="btn btn-primary" disabled>
-            📤 STB→DXFエクスポート
-          </button>
-
-          <hr class="section-divider" />
-
-          <!-- バッチエクスポート -->
-          <div class="batch-export-section">
-            <label><strong>バッチエクスポート</strong></label>
-            <div class="batch-export-buttons">
-              <button
-                type="button"
-                id="exportAllStoriesDxfBtn"
-                class="btn btn-sm"
-                disabled
-                title="全階のDXFを出力"
-              >
-                全階
-              </button>
-              <button
-                type="button"
-                id="exportAllXAxesDxfBtn"
-                class="btn btn-sm"
-                disabled
-                title="全X通りのDXFを出力"
-              >
-                全X通り
-              </button>
-              <button
-                type="button"
-                id="exportAllYAxesDxfBtn"
-                class="btn btn-sm"
-                disabled
-                title="全Y通りのDXFを出力"
-              >
-                全Y通り
-              </button>
-              <button
-                type="button"
-                id="exportAllAxesDxfBtn"
-                class="btn btn-sm"
-                disabled
-                title="全通り芯のDXFを出力"
-              >
-                全通り芯
-              </button>
-            </div>
-            <div id="batch-export-progress" class="batch-export-progress hidden">
-              <span id="batch-export-progress-text">処理中...</span>
-            </div>
+        <div class="document-control-panel" id="document-control-panel">
+          <p class="document-control-help">
+            このタブのSource Document（原本）だけに読取許可を設定します。Working Document（編集中）は明示的に追加した場合のみ対象となります。
+            Web版の外部通信は既定OFFです。localhostでのLinux開発検証時のみ、下欄でGatewayとのペアリングと外部読取共有を別々に許可できます。公開Web版の外部接続は無効です。Tauri版も別途接続・外部共有の明示許可が必要です。
+          </p>
+          <p id="document-control-status" class="document-control-status" role="status" aria-live="polite">
+            未許可
+          </p>
+          <p id="document-control-documents" class="document-control-documents">
+            対象ファイル：なし
+          </p>
+          <label class="document-control-working-option" for="document-control-include-working">
+            <input type="checkbox" id="document-control-include-working" disabled>
+            編集中のWorking Documentの読取も許可する（既定OFF・Sourceとは別の文書）
+          </label>
+          <div class="document-control-actions">
+            <button type="button" id="document-control-grant" disabled>
+              このタブの読取を許可
+            </button>
+            <button type="button" id="document-control-revoke" disabled>
+              許可を停止
+            </button>
           </div>
         </div>
       </div>

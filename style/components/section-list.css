@@ -650,3 +650,446 @@
 [data-theme='dark'] .section-grid-section-cell.empty {
   background: var(--bg-secondary);
 }
+
+/* #529 readable slab schedule: restore the source editor's paired-line, six-column view.
+   Rendering keeps explicit STB SHORT/LONG positions and does not infer 1WAY directions. */
+.slab-section-list-window {
+  left: 50%;
+  top: 3vh;
+  transform: translateX(-50%);
+  /* The common .floating-window uses max-width:600px/max-height:80vh.
+     Override both so the schedule can actually use the larger requested size. */
+  min-width: min(480px, calc(100vw - 24px));
+  min-height: min(400px, calc(100vh - 24px));
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+}
+.slab-section-list-window.slab-list-maximized {
+  position: fixed !important;
+  left: 2vw !important;
+  top: 2vh !important;
+  right: auto !important;
+  bottom: auto !important;
+  transform: none !important;
+  width: 96vw !important;
+  height: 94vh !important;
+  max-width: none !important;
+  max-height: none !important;
+}
+.slab-section-list-window .slab-section-list-content {
+  padding: 12px 14px;
+}
+.slab-section-list-window .slab-list-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 7px;
+  padding: 2px 0 10px;
+  border-bottom: 1px solid var(--border-color, #dce2eb);
+}
+.slab-section-list-window .slab-list-toolbar > input[type='search'] {
+  flex: 1 1 160px;
+  max-width: 290px;
+  min-width: 115px;
+}
+.slab-section-list-window .slab-list-toolbar button,
+.slab-section-list-window .slab-list-toolbar select,
+.slab-section-list-window .slab-list-toolbar input[type='search'],
+.slab-section-list-window .slab-list-more summary {
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 5px;
+  font-size: 12px;
+}
+.slab-section-list-window .slab-list-toolbar button {
+  cursor: pointer;
+}
+.slab-section-list-window .slab-list-save-btn {
+  background: #456b9f;
+  border-color: #456b9f;
+  color: white;
+}
+.slab-section-list-window .slab-list-status {
+  flex: 1 0 100%;
+  color: var(--text-secondary, #64748b);
+  font-size: 12px;
+}
+.slab-section-list-window .slab-list-more {
+  position: relative;
+  flex: 0 0 auto;
+}
+.slab-section-list-window .slab-list-more summary {
+  cursor: pointer;
+  list-style-position: inside;
+  user-select: none;
+  white-space: nowrap;
+}
+.slab-section-list-window .slab-list-more-body {
+  position: absolute;
+  top: calc(100% + 3px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 170px;
+  padding: 9px;
+  background: var(--bg-primary, white);
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 7px;
+  box-shadow: 0 8px 24px #0002;
+}
+.slab-section-list-window .slab-list-layout {
+  width: 100%;
+  overflow: hidden;
+}
+.slab-section-list-window .slab-list-table-area {
+  width: 100%;
+  scrollbar-gutter: stable;
+}
+.slab-section-list-window .slab-section-grid-table {
+  width: 100%;
+  min-width: 700px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  background: var(--bg-primary, white);
+  color: var(--text-primary, #202a37);
+  font-size: 12px;
+}
+.slab-section-list-window .slab-section-grid-table caption {
+  caption-side: top;
+  text-align: left;
+  padding: 12px 5px;
+  color: var(--text-heading, #304a68);
+  font-weight: 650;
+  font-size: 14px;
+}
+.slab-section-list-window .slab-section-grid-table th,
+.slab-section-list-window .slab-section-grid-table td {
+  border: 1px solid var(--border-color, #a5acb6);
+  text-align: center;
+  vertical-align: middle;
+  font-weight: 400;
+}
+.slab-section-list-window .slab-section-grid-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 8px 4px;
+  background: var(--bg-secondary, #f7f8fa);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.slab-section-list-window .slab-section-grid-table th:nth-child(1) { width: 10%; }
+.slab-section-list-window .slab-section-grid-table th:nth-child(2) { width: 13%; }
+.slab-section-list-window .slab-section-grid-table th:nth-child(3) { width: 7%; }
+.slab-section-list-window .slab-section-grid-table th:nth-child(4) { width: 26%; }
+.slab-section-list-window .slab-section-grid-table th:nth-child(5) { width: 26%; }
+.slab-section-list-window .slab-section-grid-table th:nth-child(6) { width: 18%; }
+.slab-section-list-window .slab-section-grid-table tbody tr.selected td {
+  background: rgba(80, 140, 220, 0.10);
+}
+.slab-section-list-window .slab-section-grid-table tbody tr:hover td {
+  background: rgba(80, 140, 220, 0.06);
+}
+.slab-section-list-window .slab-list-simple-cell {
+  padding: 5px 4px;
+  overflow-wrap: anywhere;
+}
+.slab-section-list-window .slab-list-row-status {
+  display: block;
+  color: var(--text-secondary, #69778a);
+  font-size: 10px;
+  line-height: 1.25;
+  padding: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+.slab-section-list-window .slab-list-row-warning {
+  color: var(--color-warning, #995a11);
+  font-weight: 650;
+}
+.slab-section-list-window .slab-list-pair-line {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.slab-section-list-window .slab-list-pair-line + .slab-list-pair-line {
+  border-top: 1px solid var(--border-color, #d0d5dd);
+}
+.slab-section-list-window .slab-list-position-cell .slab-list-pair-line {
+  padding-inline: 0;
+}
+.slab-section-list-window .slab-list-cell-input {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  text-align: center;
+  font: inherit;
+}
+.slab-section-list-window .slab-list-cell-input:focus {
+  background: var(--bg-primary, white);
+  outline: 2px solid #8cb6ea;
+  outline-offset: -1px;
+}
+.slab-section-list-window .slab-list-ambiguous,
+.slab-section-list-window .slab-list-invalid {
+  color: var(--color-warning, #995a11);
+  font-weight: 650;
+}
+.slab-section-list-window .slab-list-not_applicable {
+  color: var(--text-secondary, #738095);
+}
+.slab-section-list-window .slab-list-inspector {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 15;
+  box-sizing: border-box;
+  width: min(410px, 100%);
+  padding: 12px 16px 20px;
+  border-left: 1px solid var(--border-color, #dce2eb);
+  background: var(--bg-primary, white);
+  box-shadow: -8px 0 28px #0002;
+  display: none;
+  scrollbar-gutter: stable;
+}
+.slab-section-list-window.show-slab-details .slab-list-inspector {
+  display: block;
+}
+.slab-section-list-window .slab-list-detail-heading {
+  position: sticky;
+  top: -12px;
+  z-index: 2;
+  background: var(--bg-primary, white);
+  border-bottom: 1px solid var(--border-color, #dce2eb);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 9px 0;
+}
+.slab-section-list-window .slab-list-detail-heading button {
+  cursor: pointer;
+  border: 1px solid var(--border-color, #dce2eb);
+  border-radius: 5px;
+  background: var(--bg-secondary, #f1f5f9);
+  padding: 4px 10px;
+}
+.slab-section-list-window .slab-list-inspector input,
+.slab-section-list-window .slab-list-inspector select {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+@media (max-width: 850px) {
+  .slab-section-list-window .slab-section-list-content { padding: 7px; }
+  .slab-section-list-window .slab-list-inspector { width: min(390px, 100%); }
+  .slab-section-list-window .slab-list-toolbar > input[type='search'] { max-width: none; }
+}
+
+/* S柱/S梁断面リスト。断面は寸法比を保持し、横方向のみ複数位置を配置する。 */
+.steel-section-grid-table { border-collapse: collapse; width: max-content; min-width: 100%; }
+.steel-section-grid-table th, .steel-section-grid-table td { border: 1px solid var(--border-color, #aaa); padding: 6px; vertical-align: top; }
+.steel-section-grid-table th { position: sticky; top: 0; background: var(--bg-secondary, #f5f5f5); z-index: 2; }
+.steel-section-variants { display: flex; align-items: start; gap: 10px; }
+.steel-section-variant { display: flex; align-items: center; flex-direction: column; gap: 5px; min-width: 165px; max-width: 230px; font-size: 12px; overflow-wrap: anywhere; }
+.steel-section-profile { color: var(--text-primary, #333); flex-shrink: 0; }
+.steel-section-unavailable { display: grid; place-items: center; width: 150px; height: 130px; color: var(--text-secondary, #777); text-align: center; }
+/* S柱・S梁リストでは共通の600px/80vh上限を解除し、画面内で拡大可能にする。 */
+.steel-section-list-window {
+  top: 24px;
+  left: max(12px, calc((100vw - 1200px) / 2));
+  width: min(1200px, calc(100vw - 24px));
+  height: min(820px, calc(100vh - 48px));
+  min-width: min(500px, calc(100vw - 24px));
+  min-height: min(350px, calc(100vh - 24px));
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+}
+
+.steel-section-list-window .float-window-content {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  height: calc(100% - 40px);
+  overflow: hidden;
+}
+
+.steel-section-list-window .section-list-toolbar {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.steel-section-list-window .section-list-table-wrapper {
+  min-width: 0;
+  min-height: 0;
+}
+
+/* SRC柱・SRC梁: RC梁と同じ階×符号×項目の枠組み。
+   行高さを両列で共有し、主筋/Fc等は断面や文字量に引きずられない。 */
+.steel-section-grid-table.src-section-grid-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: auto;
+  width: max-content;
+  min-width: 100%;
+  background: var(--bg-primary, white);
+}
+.src-section-grid-table th,
+.src-section-grid-table td {
+  box-sizing: border-box;
+}
+.src-section-grid-table td.section-grid-section-cell,
+.src-section-grid-table td.section-grid-row-label-cell {
+  padding: 0;
+  vertical-align: top;
+}
+.src-section-grid-table .section-grid-header-floor,
+.src-section-grid-table .section-grid-floor-cell {
+  width: 70px;
+  min-width: 70px;
+}
+.src-section-grid-table .section-grid-row-label-cell {
+  border-right: 1px solid var(--border-color, #ccc);
+}
+/* 鋼材表の共通th指定より優先し、左上2列をスクロール時にも保持する。 */
+.src-section-grid-table th.section-grid-header-floor { z-index: 30; }
+.src-section-grid-table th.section-grid-header-row-label { z-index: 25; }
+.src-section-grid-table th.section-grid-header-symbol { z-index: 10; }
+
+.src-grid-row-labels,
+.src-grid-position-slot,
+.src-grid-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  box-sizing: border-box;
+}
+.src-grid-position-slots {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  justify-content: stretch;
+  width: max-content;
+  min-width: 100%;
+}
+.src-grid-position-slot {
+  min-width: 190px;
+  border-right: 1px solid var(--border-color, #ccc);
+  background: var(--bg-primary, white);
+}
+.src-grid-position-slot:last-child {
+  border-right: 0;
+}
+.src-grid-label,
+.src-grid-name,
+.src-grid-position,
+.src-grid-spec-value,
+.src-grid-diagram {
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--border-color, #ccc);
+  margin: 0;
+  padding: 3px 5px;
+  color: var(--text-primary, #333);
+  font-size: 12px;
+}
+.src-grid-row-labels > :last-child,
+.src-grid-spec-values > :last-child {
+  border-bottom: 0;
+}
+.src-grid-name {
+  height: 24px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-weight: var(--font-weight-bold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.src-grid-position {
+  height: 28px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-weight: var(--font-weight-bold);
+  background: var(--bg-tertiary, #e8e8e8);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.src-grid-diagram {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100px;
+  overflow: hidden;
+  background: var(--bg-primary, white);
+}
+.src-grid-diagram .steel-section-profile {
+  max-width: none;
+  max-height: none;
+  flex: none;
+}
+.src-grid-label {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  font-weight: var(--font-weight-bold);
+  background: var(--bg-secondary, #f5f5f5);
+  white-space: nowrap;
+}
+.src-grid-label.src-grid-diagram {
+  justify-content: center;
+}
+.src-grid-spec-label,
+.src-grid-spec-value {
+  /* 2行を固定高に収め、どの符号でも次のFc/主筋行が動かない。 */
+  height: 42px;
+  min-height: 42px;
+  max-height: 42px;
+}
+.src-grid-spec-value {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 16px;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow: hidden;
+}
+.src-grid-spec-value:focus {
+  outline: 2px solid var(--color-primary, #377bc7);
+  outline-offset: -2px;
+  overflow-x: auto;
+}
+.src-grid-empty,
+.src-grid-empty-slot {
+  background: var(--bg-secondary, #fafafa);
+}
+.src-grid-empty-slot .src-grid-diagram {
+  color: var(--text-disabled, #999);
+  background: var(--bg-secondary, #fafafa);
+}
+@media print {
+  .src-section-grid-table .section-grid-header-floor,
+  .src-section-grid-table .section-grid-header-symbol,
+  .src-section-grid-table .section-grid-header-row-label,
+  .src-section-grid-table .section-grid-floor-cell,
+  .src-section-grid-table .section-grid-row-label-cell {
+    position: static !important;
+  }
+}

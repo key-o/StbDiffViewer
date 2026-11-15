@@ -78,6 +78,7 @@ export function compileDrawingRenderDimensions({
   drawing,
   modelToPaper: modelToPaperInput,
   displaySettings = {},
+  formatDimensionValue = undefined,
 } = {}) {
   const intents = drawing?.dimensionIntents ?? [];
   if (!Array.isArray(intents))
@@ -99,6 +100,7 @@ export function compileDrawingRenderDimensions({
         familyBuiltIn: true,
         modelToPaper,
         resolveReference,
+        ...(formatDimensionValue ? { formatValue: formatDimensionValue } : {}),
       });
       return Object.freeze({
         id: `dimension:${compiled.intent.id}`,

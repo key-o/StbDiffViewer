@@ -8,7 +8,7 @@ const DIM_OFFSET_2_MM = 5500;
 const GRID_BUBBLE_RADIUS_MM = 650;
 const GRID_BUBBLE_GAP_MM = 550;
 const GRID_BUBBLE_CENTER_OFFSET_MM = DIM_OFFSET_2_MM + GRID_BUBBLE_RADIUS_MM + GRID_BUBBLE_GAP_MM;
-const STRUCTURAL_DIMENSION_FAMILY_ID = 'builtin:structural-dimension-v1';
+export const STRUCTURAL_DIMENSION_FAMILY_ID = 'builtin:structural-dimension-v1';
 
 function finiteBounds(bounds) {
   return (
@@ -142,6 +142,15 @@ function linearChainIntent(id, axisIds, offsetModelMm) {
   });
 }
 
+function uniqueDimensionPositions(references) {
+  const positions = new Set();
+  return references.filter((reference) => {
+    if (positions.has(reference.coordinateValue)) return false;
+    positions.add(reference.coordinateValue);
+    return true;
+  });
+}
+
 function parallelAxisGuidById(document) {
   const result = new Map();
   for (const element of parseElements(document, 'StbParallelAxis')) {
@@ -216,8 +225,12 @@ export function buildStbPlanDimensionIntents({
     dimensionReferences == null
       ? buildStbPlanDimensionReferences({ document })
       : [...dimensionReferences];
-  const xAxes = references.filter((reference) => reference.coordinateKey === 'x');
-  const yAxes = references.filter((reference) => reference.coordinateKey === 'y');
+  const xAxes = uniqueDimensionPositions(
+    references.filter((reference) => reference.coordinateKey === 'x'),
+  );
+  const yAxes = uniqueDimensionPositions(
+    references.filter((reference) => reference.coordinateKey === 'y'),
+  );
   const intents = [];
 
   if (xAxes.length >= 2) {

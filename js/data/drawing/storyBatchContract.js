@@ -12,6 +12,7 @@ export const STORY_BATCH_RENDER_ELEMENT_TYPES = Object.freeze([
   'StripFooting',
   'Pile',
   'Parapet',
+  'Node',
   'Open',
 ]);
 

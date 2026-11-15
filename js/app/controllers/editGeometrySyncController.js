@@ -26,6 +26,11 @@ import {
   insertWorkingSolidElement,
   replaceWorkingSolidElement,
 } from '../editing/workingSolidGenerator.js';
+import {
+  getSectionTypesForTagName,
+  refreshSectionsForElementType,
+} from '../../common-stb/import/extractor/sectionExtractor.js';
+import { isSectionElementType } from '../../modelLoader/editImpactResolver.js';
 import { resolveWorkingComparisonSnapshot } from '../editing/workingComparisonSnapshot.js';
 import { isWallComparisonSnapshotVisible } from '../viewModes/wallKindFilter.js';
 import {
@@ -278,7 +283,26 @@ function getLineEndpoints(document, nodeMap, elementType, elementId) {
 
   const start = getNodePosition(document, nodeMap, element.getAttribute(startAttribute));
   const end = getNodePosition(document, nodeMap, element.getAttribute(endAttribute));
-  return start && end ? { start, end } : null;
+  if (!start || !end) return null;
+
+  // オフセットは共有StbNodeを動かさず部材の描画位置だけを変更する。
+  // 実座標は作業中Documentの属性を使い、追加・Undo・Redoにも同じ規則を適用する。
+  const applyOffset = (point, prefix) => {
+    const effective = { ...point };
+    for (const axis of ['X', 'Y', 'Z']) {
+      const raw = element.getAttribute(`${prefix}_${axis}`);
+      if (raw == null || raw === '') continue;
+      const value = Number(raw);
+      if (!Number.isFinite(value)) return null;
+      effective[axis.toLowerCase()] += value;
+    }
+    return effective;
+  };
+  const startPrefix = startAttribute === 'id_node_bottom' ? 'offset_bottom' : 'offset_start';
+  const endPrefix = endAttribute === 'id_node_top' ? 'offset_top' : 'offset_end';
+  const effectiveStart = applyOffset(start, startPrefix);
+  const effectiveEnd = applyOffset(end, endPrefix);
+  return effectiveStart && effectiveEnd ? { start: effectiveStart, end: effectiveEnd } : null;
 }
 
 function findPolygonOffset(element, elementType, nodeId) {
@@ -446,6 +470,43 @@ function replacePolygonElementInScene(deps, elementType, elementId, document, no
   return result;
 }
 
+function replaceLinearElementInScene(deps, elementType, elementId, document, nodeMap) {
+  const group = deps.elementGroups?.[elementType];
+  if (!group?.traverse) {
+    return { supported: false, replaced: false, reason: 'element-group-missing' };
+  }
+  const endpoints = getLineEndpoints(document, nodeMap, elementType, elementId);
+  if (!endpoints) {
+    return { supported: false, replaced: false, reason: 'line-endpoints-missing' };
+  }
+  const descriptor = { kind: 'working-line', ...endpoints };
+  const replacement = deps.replaceElementRenderablesInGroup?.(
+    group,
+    elementType,
+    elementId,
+    descriptor,
+  );
+  const result = { supported: true, replaced: replacement?.replaced === true, replacement };
+  emitReplacementLifecycle(elementType, elementId, result);
+  if (result.replaced) return result;
+
+  // 現在の表示条件でrenderableがない場合は対象1要素だけ追加する。
+  if (!replacement?.reason) {
+    const insertion = deps.insertElementRenderablesInGroup?.(
+      group,
+      elementType,
+      elementId,
+      descriptor,
+    );
+    return {
+      ...result,
+      inserted: insertion?.inserted === true,
+      insertion,
+    };
+  }
+  return result;
+}
+
 function getStructuralChanges(payload) {
   return Array.isArray(payload?.structuralChanges)
     ? payload.structuralChanges
@@ -461,6 +522,15 @@ function getStructuralChanges(payload) {
             change.elementId !== null,
         )
     : [];
+}
+
+function refreshWorkingSectionCaches(document, changes) {
+  const sectionTypes = new Set();
+  for (const { elementType } of changes) {
+    if (!isSectionElementType(elementType)) continue;
+    for (const type of getSectionTypesForTagName(`Stb${elementType}`)) sectionTypes.add(type);
+  }
+  for (const type of sectionTypes) refreshSectionsForElementType(document, type);
 }
 
 function insertSolidElementInScene(deps, elementType, elementId, document, nodeMap) {
@@ -551,6 +621,10 @@ export function syncWorkingDocumentGeometry(payload = {}, deps = workingGeometry
   ) {
     return { supported: false, nodeUpdates: 0, lineUpdates: 0, solidUpdates: 0 };
   }
+
+  // 断面抽出はdocument単位でキャッシュされるため、断面の追加・削除・変更後は
+  // 該当タイプを再抽出しないと新規断面を参照する部材が描画されない。
+  refreshWorkingSectionCaches(targetDocument, [...structuralChanges, ...affectedElements]);
 
   let nodeUpdates = 0;
   let lineUpdates = 0;
@@ -659,6 +733,7 @@ export function syncWorkingDocumentGeometry(payload = {}, deps = workingGeometry
 
   const solidTypes = new Set();
   const polygonTypes = new Set();
+  const lineTypes = new Set();
   for (const element of affectedElements) {
     const { elementType, elementId } = element;
     if (structuralKeys.has(`${elementType}:${String(elementId)}`)) continue;
@@ -674,6 +749,12 @@ export function syncWorkingDocumentGeometry(payload = {}, deps = workingGeometry
       continue;
     }
 
+    // offset・属性編集は節点を移動しないため、delta updaterでは表示が変わらない。
+    // nodeChangesがないときだけ現在のWorking位置から線分を作り直す。
+    if (nodeChanges.length === 0) {
+      lineTypes.add(`${elementType}:${String(elementId)}`);
+      continue;
+    }
     const group = deps.elementGroups?.[elementType];
     for (const change of nodeChanges) {
       if (!change.previousPosition || !change.position) continue;
@@ -692,6 +773,20 @@ export function syncWorkingDocumentGeometry(payload = {}, deps = workingGeometry
       lineUpdates += Number(result?.lines || 0) + Number(result?.segments || 0);
       lineUpdates += Number(result?.labels || 0);
     }
+  }
+
+  for (const key of lineTypes) {
+    const separator = key.indexOf(':');
+    const elementType = key.slice(0, separator);
+    const elementId = key.slice(separator + 1);
+    const result = replaceLinearElementInScene(
+      deps,
+      elementType,
+      elementId,
+      targetDocument,
+      targetNodeMap,
+    );
+    if (result?.replaced || result?.inserted) lineUpdates += 1;
   }
 
   for (const key of polygonTypes) {

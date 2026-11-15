@@ -128,6 +128,7 @@ export function extractFootingElements(xmlDoc) {
         name: name,
         guid: guid || undefined,
         level_bottom: levelBottom ? parseFloat(levelBottom) : 0,
+        hasLevelBottom: levelBottom !== null && levelBottom.trim() !== '',
         offset_X: offsetX ? parseFloat(offsetX) : 0,
         offset_Y: offsetY ? parseFloat(offsetY) : 0,
         rotate: rotate ? parseFloat(rotate) : 0,

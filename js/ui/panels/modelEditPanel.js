@@ -1,8 +1,9 @@
 /**
  * @fileoverview モデル編集専用の上部リボンUI。
  *
- * Revit系の操作感に寄せて、履歴・新規作成・配置基準・CAD操作を
- * 編集モード中だけ画面上端の横並びコマンド群へ集約する。
+ * Revit系の操作感に寄せて、履歴・新規作成・配置基準・CAD操作のコマンドを
+ * 編集モード中だけ画面上端の横並びコマンド群へ集約する。選択要素ごとの数値入力や
+ * 説明は要素情報パネル側に置き、リボンにはコマンドと設定だけを置く。
  * 編集モードへの入口自体は従来どおり「出力・変換」内に残す。
  * semantic mutation は従来どおり EditingSession / cadOperationService / Working Command を正本とする。
  */
@@ -10,7 +11,7 @@
 import { getSelectedObjects } from '../../app/controllers/interactionController.js';
 import { createSemanticSelectionIdentity } from '../../app/controllers/interaction/semanticSelection.js';
 import editingSession from '../../app/editing/editingSession.js';
-import { eventBus, EditEvents } from '../../data/events/index.js';
+import { eventBus, EditEvents, UIEvents } from '../../data/events/index.js';
 import {
   createRibbonCommand,
   decorateAsRibbonCommand,
@@ -20,8 +21,15 @@ import {
   ribbonTabsHtml,
   wireRibbonTabs,
 } from '../common/ribbon.js';
-import { showError } from '../common/toast.js';
-import { isEditMode } from './element-info/editMode/editState.js';
+import { showError, showSuccess } from '../common/toast.js';
+import { registerTopRibbon, refreshTopRibbonInset } from '../common/ribbonInset.js';
+import { getState, setState } from '../../data/state/globalState.js';
+import {
+  collectAffectedElements,
+  collectIdentityChanges,
+  collectStructuralChanges,
+} from '../../app/editing/editCommand.js';
+import { isEditMode, setEditMode } from './element-info/editMode/editState.js';
 import {
   PLACEMENT_TYPES,
   ensurePlacementContext,
@@ -30,12 +38,19 @@ import {
   placementContextFromSelection,
   setPlacementContext,
 } from './modelEditPlacementContext.js';
+import {
+  historyGroupsHtml,
+  initializeHistoryCommands,
+  syncHistoryCommands,
+} from './modelEditHistoryCommands.js';
+import { initializeModifyTab, modifyTabBody, syncModifyTab } from './modelEditModifyTab.js';
 
 const RIBBON_ID = 'model-edit-ribbon';
 const STYLE_ID = 'model-edit-ribbon-styles';
 const COLLAPSED_BODY_CLASS = 'model-edit-ribbon-collapsed';
 let initialized = false;
 let createObserver = null;
+let registrationInProgress = false;
 
 const CREATE_COMMANDS = [
   ['Node', '節点', 'node'],
@@ -77,30 +92,33 @@ function ribbonTabs() {
       id: 'home',
       label: 'ホーム',
       body:
+        historyGroupsHtml() +
         ribbonGroupHtml(
-          '編集履歴',
+          'モデル登録',
           ribbonCommandHtml({
-            id: 'model-edit-undo-button',
-            icon: 'undo',
-            label: '元に戻す',
-            disabled: true,
+            id: 'model-edit-register-a',
+            icon: 'modelA',
+            label: 'モデルA',
+            title:
+              'Working Documentを検証し、モデルAとしてメモリ上で登録する（編集セッションは終了）',
           }) +
             ribbonCommandHtml({
-              id: 'model-edit-redo-button',
-              icon: 'redo',
-              label: 'やり直し',
-              disabled: true,
+              id: 'model-edit-register-b',
+              icon: 'modelB',
+              label: 'モデルB',
+              title:
+                'Working Documentを検証し、モデルBとしてメモリ上で登録する（編集セッションは終了）',
             }),
         ) +
         ribbonGroupHtml(
           '配置基準',
           ribbonStackHtml(
-            `<select id="model-edit-placement-type" class="model-edit-placement-select" aria-label="配置基準種別"></select>
-            <select id="model-edit-placement-target" class="model-edit-placement-select" aria-label="配置基準対象"></select>`,
+            `<select id="model-edit-placement-type" class="form-control" aria-label="配置基準種別"></select>
+            <select id="model-edit-placement-target" class="form-control" aria-label="配置基準対象"></select>`,
           ) +
             ribbonCommandHtml({
               id: 'model-edit-placement-from-selection',
-              icon: 'align',
+              icon: 'pickBasis',
               label: '選択要素',
               title: '現在選択している大梁・小梁・床を配置基準にする',
             }),
@@ -119,13 +137,7 @@ function ribbonTabs() {
     {
       id: 'modify',
       label: '修正',
-      body: ribbonGroupHtml(
-        '修正',
-        `<div id="model-edit-cad-operations" class="model-edit-ribbon-cad-operations">
-          <div class="add-member-summary">要素を選択すると MOVE / ALIGN / COPY を利用できます。</div>
-        </div>`,
-        { className: 'model-edit-ribbon-group-cad' },
-      ),
+      body: modifyTabBody(),
     },
   ];
 }
@@ -143,11 +155,11 @@ function createRibbon() {
   ribbon.setAttribute('aria-label', 'モデル編集リボン');
   ribbon.innerHTML = `
     <div class="ribbon-tabbar">
-      <strong class="model-edit-ribbon-title">✎ 編集モード</strong>
+      <strong class="model-edit-ribbon-title">✏️ 編集モード</strong>
       ${tabList}
       <div class="ribbon-status model-edit-ribbon-status" aria-live="polite">
-        <span id="model-edit-session-active" class="model-edit-session-badge">Inactive</span>
-        <span id="model-edit-session-dirty">clean</span>
+        <span id="model-edit-session-active" class="model-edit-session-badge">停止中</span>
+        <span id="model-edit-session-dirty">変更なし</span>
         <span>rev.<span id="model-edit-session-revision">0</span></span>
         <span id="model-edit-summary-slot"></span>
         <button type="button" id="model-edit-ribbon-collapse" class="ribbon-iconbtn model-edit-ribbon-collapse"
@@ -159,6 +171,7 @@ function createRibbon() {
 
   wireRibbonTabs(ribbon);
   document.body.appendChild(ribbon);
+  registerTopRibbon(ribbon, { fullWidth: true });
 }
 
 function setupCollapseButton() {
@@ -345,68 +358,268 @@ function syncSessionStatus() {
   const state = editingSession.getState();
   const active = state?.active === true;
   const editModeActive = isEditMode();
-  const historyCount = state?.history?.length || 0;
-  const redoCount = state?.redoStack?.length || 0;
+  // 簡易CADには独立したリボンがあるため、編集中でも同時表示しない。
+  const ribbonVisible =
+    editModeActive && !document.body.classList.contains('workspace-view-active');
   const ribbon = document.getElementById(RIBBON_ID);
   const activeText = document.getElementById('model-edit-session-active');
   const dirtyText = document.getElementById('model-edit-session-dirty');
   const revisionText = document.getElementById('model-edit-session-revision');
-  const undoButton = document.getElementById('model-edit-undo-button');
-  const redoButton = document.getElementById('model-edit-redo-button');
+  syncHistoryCommands(state);
+  syncModifyTab();
 
   if (ribbon) {
-    ribbon.hidden = !editModeActive;
-    ribbon.setAttribute('aria-hidden', editModeActive ? 'false' : 'true');
+    ribbon.hidden = !ribbonVisible;
+    ribbon.setAttribute('aria-hidden', String(!ribbonVisible));
   }
-  document.body.classList.toggle('model-edit-ribbon-mounted', editModeActive);
+  document.body.classList.toggle('model-edit-ribbon-mounted', ribbonVisible);
+  refreshTopRibbonInset();
 
   if (activeText) {
-    activeText.textContent = active ? 'Editing' : 'Inactive';
+    activeText.textContent = active ? '編集中' : '停止中';
     activeText.classList.toggle('active', active);
   }
-  if (dirtyText) dirtyText.textContent = state?.dirty === true ? 'dirty' : 'clean';
+  if (dirtyText) dirtyText.textContent = state?.dirty === true ? '変更あり' : '変更なし';
   if (revisionText) revisionText.textContent = String(state?.workingRevision ?? 0);
-  if (undoButton) {
-    undoButton.disabled = !active || historyCount === 0;
-    undoButton.title = `元に戻す (${historyCount}件)`;
-  }
-  if (redoButton) {
-    redoButton.disabled = !active || redoCount === 0;
-    redoButton.title = `やり直し (${redoCount}件)`;
+  for (const side of ['a', 'b']) {
+    const button = document.getElementById(`model-edit-register-${side}`);
+    if (button) button.disabled = !active || registrationInProgress;
   }
 }
 
+/** 要素情報パネルの CAD 操作欄を現在の選択・編集状態で描き直す（編集終了時は取り除く）。 */
 async function refreshCadOperationPanel() {
-  if (!isEditMode()) return;
   try {
     const module = await import('./element-info/editMode/cadOperationPanel.js');
-    module.mountCadOperationPanel?.({ containerId: 'model-edit-cad-operations' });
+    module.mountCadOperationPanel?.();
   } catch (error) {
     showError(
-      `CAD操作リボンを更新できませんでした: ${error instanceof Error ? error.message : String(error)}`,
+      `CAD操作欄を更新できませんでした: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
 
-function initializeHistoryButtons() {
-  document.getElementById('model-edit-undo-button')?.addEventListener('click', () => {
-    try {
-      editingSession.undo();
-      syncSessionStatus();
-      void refreshCadOperationPanel();
-    } catch (error) {
-      showError(`Undoできませんでした: ${error instanceof Error ? error.message : String(error)}`);
+function restoreEditModeUi() {
+  setEditMode(true);
+  const editButton = document.getElementById('edit-mode-button');
+  if (editButton) {
+    editButton.textContent = '✏️ 編集モード（ON）';
+    editButton.classList.add('edit-mode-active');
+  }
+  const controls = document.getElementById('editing-controls');
+  if (controls) {
+    controls.hidden = false;
+    controls.setAttribute('aria-hidden', 'false');
+  }
+  eventBus.emit(EditEvents.MODE_TOGGLED, { active: true });
+}
+
+function emitRestoredWorkingChanges(state) {
+  const commands = state.history || [];
+  const affectedMap = new Map();
+  for (const command of commands) {
+    for (const element of collectAffectedElements(command)) {
+      affectedMap.set(`${element.elementType}:${element.elementId}`, element);
     }
-  });
-  document.getElementById('model-edit-redo-button')?.addEventListener('click', () => {
-    try {
-      editingSession.redo();
-      syncSessionStatus();
-      void refreshCadOperationPanel();
-    } catch (error) {
-      showError(`Redoできませんでした: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  // Reapply the final Working positions relative to freshly loaded source nodes.
+  const nodeChanges = [];
+  for (const [nodeId, target] of state.workingNodeMap || []) {
+    const source = state.sourceNodeMapA?.get(nodeId);
+    if (!source || !target) continue;
+    const keys = ['x', 'y', 'z'];
+    if (!keys.every((key) => Number(source[key]) === Number(target[key]))) {
+      nodeChanges.push({
+        nodeId: String(nodeId),
+        previousPosition: { x: source.x, y: source.y, z: source.z },
+        position: { x: target.x, y: target.y, z: target.z },
+      });
     }
+  }
+  eventBus.emit(EditEvents.WORKING_DOCUMENT_CHANGED, {
+    reason: 'registration-failure-recovery',
+    sessionId: state.sessionId,
+    workingRevision: state.workingRevision,
+    targetDocument: state.workingDocument,
+    targetNodeMap: state.workingNodeMap,
+    nodeChanges,
+    structuralChanges: commands.flatMap((command) => collectStructuralChanges(command)),
+    identityChanges: commands.flatMap((command) => collectIdentityChanges(command)),
+    affectedElements: [...affectedMap.values()],
   });
+}
+
+function resetEditModeUiAfterLoad() {
+  if (editingSession.getState()?.active === true || !isEditMode()) return;
+  setEditMode(false);
+  const editButton = document.getElementById('edit-mode-button');
+  if (editButton) {
+    editButton.textContent = '✏️ 編集モード';
+    editButton.classList.remove('edit-mode-active');
+  }
+  const controls = document.getElementById('editing-controls');
+  if (controls) {
+    controls.hidden = true;
+    controls.setAttribute('aria-hidden', 'true');
+  }
+  eventBus.emit(EditEvents.MODE_TOGGLED, { active: false });
+}
+
+/**
+ * Register a validated Working Document to A/B without downloading a file.
+ * A successful reload ends the Working session and its Undo history.
+ */
+async function registerWorkingDocumentAs(side) {
+  if (registrationInProgress) return;
+  const initial = editingSession.getState();
+  const workingDocument = editingSession.getWorkingDocument?.();
+  if (!initial?.active || !workingDocument) {
+    showError('編集セッションを開始してからモデルを登録してください。');
+    return;
+  }
+
+  registrationInProgress = true;
+  syncSessionStatus();
+  let replacement = null;
+  let compare = null;
+  let previousInputs = null;
+  let registration = null;
+  const inputLocks = ['fileA', 'fileB'].map((id) => {
+    const input = document.getElementById(id);
+    const disabled = input?.disabled;
+    if (input) input.disabled = true;
+    return { input, disabled };
+  });
+  try {
+    registration = await import('../../app/editing/workingModelRegistration.js');
+    const {
+      assignWorkingSnapshotFile,
+      captureModelInputSelection,
+      hasModelInputSelectionChanged,
+      hasModelInputSelectionChangedAfterAssignment,
+      prepareValidatedWorkingSnapshot,
+    } = registration;
+    const snapshot = await prepareValidatedWorkingSnapshot(workingDocument, {
+      revision: initial.workingRevision,
+    });
+    const unchanged = () => {
+      const now = editingSession.getState();
+      return (
+        now?.active === true &&
+        now.workingDocument === workingDocument &&
+        now.workingRevision === initial.workingRevision
+      );
+    };
+    if (!unchanged()) {
+      throw new Error('バリデーション中に編集内容が変更されました。再度登録してください。');
+    }
+
+    const targetInput = document.getElementById(`file${side}`);
+    if (!targetInput) throw new Error(`モデル${side}の入力欄がありません。`);
+    const existingFile = targetInput.files?.[0] || null;
+    const confirmation = existingFile
+      ? `モデル${side}「${existingFile.name}」を編集中のモデルで置き換えます。`
+      : `編集中のモデルをモデル${side}へ登録します。`;
+    if (
+      typeof globalThis.confirm !== 'function' ||
+      !globalThis.confirm(
+        confirmation +
+          '\n登録後は編集セッションとUndo履歴が終了します。ディスクへは保存しません。続行しますか？',
+      )
+    )
+      return;
+
+    const compareHandler = globalThis.window?.handleCompareModelsClick;
+    if (typeof compareHandler !== 'function') {
+      throw new Error('読込・比較ハンドラーが初期化されていません。');
+    }
+    compare = (requireCompleteRendering = true) => compareHandler({ requireCompleteRendering });
+
+    // Preflight both files before the destructive loader reset.
+    const registrationFile = new File([snapshot.xml], snapshot.filename, {
+      type: 'application/xml',
+    });
+    const selectedBeforePreflight = captureModelInputSelection();
+    previousInputs = selectedBeforePreflight;
+    const candidateA = side === 'A' ? registrationFile : selectedBeforePreflight.fileA;
+    const candidateB = side === 'B' ? registrationFile : selectedBeforePreflight.fileB;
+    const { processModelDocuments } = await import('../../modelLoader/modelProcessing.js');
+    await processModelDocuments(candidateA, candidateB);
+    if (!unchanged()) {
+      throw new Error('事前検証中に編集内容が変更されました。再度登録してください。');
+    }
+    if (hasModelInputSelectionChanged(selectedBeforePreflight, captureModelInputSelection())) {
+      throw new Error(
+        '事前解析中にモデルA/Bのファイル選択が変更されました。再度登録してください。',
+      );
+    }
+
+    replacement = assignWorkingSnapshotFile(side, snapshot);
+    if (
+      hasModelInputSelectionChangedAfterAssignment(
+        selectedBeforePreflight,
+        captureModelInputSelection(),
+        side,
+        replacement.file,
+      )
+    ) {
+      throw new Error(
+        'モデル登録の入力設定中にファイル選択が変更されました。再度登録してください。',
+      );
+    }
+    const succeeded = await compare();
+    if (
+      hasModelInputSelectionChangedAfterAssignment(
+        selectedBeforePreflight,
+        captureModelInputSelection(),
+        side,
+        replacement.file,
+      )
+    ) {
+      throw new Error(
+        'モデル読込中にモデルA/Bのファイル選択が変更されました。再度登録してください。',
+      );
+    }
+    if (succeeded !== true || !getState(`models.document${side}`)) {
+      throw new Error('モデル読込・比較が完了しなかったため、登録を確定できませんでした。');
+    }
+
+    resetEditModeUiAfterLoad();
+    const warnings = snapshot.report?.statistics?.warningCount || 0;
+    showSuccess(
+      `編集中のモデルをモデル${side}へ登録しました（ディスク保存なし、警告${warnings}件）。`,
+    );
+    replacement = null;
+  } catch (error) {
+    let recovery = null;
+    if (replacement) {
+      recovery = await registration.recoverWorkingRegistrationAfterLoadFailure({
+        replacement,
+        previousInputs,
+        compare: () => compare(false),
+        workingState: initial,
+        getEditingState: () => editingSession.getState(),
+        restoreEditingState: (saved) => setState('models.editing', saved),
+        restoreEditingUi: restoreEditModeUi,
+        onWorkingRebound: emitRestoredWorkingChanges,
+      });
+    }
+    const recoveryNote = recovery?.workingRestored
+      ? recovery.sourceViewRestored
+        ? '元のモデルを再読み込みし編集セッションを復元しました。編集中の3D表示は再確認してください。'
+        : '編集中のデータとUndo履歴は保持しましたが、元の3D表示の復元には失敗しました。'
+      : '';
+    showError(
+      `モデル${side}の登録に失敗しました: ${error instanceof Error ? error.message : String(error)} ${recoveryNote}`,
+    );
+  } finally {
+    for (const { input, disabled } of inputLocks) {
+      if (input) input.disabled = disabled;
+    }
+    registrationInProgress = false;
+    resetEditModeUiAfterLoad();
+    syncSessionStatus();
+  }
 }
 
 /**
@@ -422,7 +635,18 @@ export function initializeModelEditPanel() {
   setupPlacementControls();
   observeExtensionCommands();
   void renderExplicitCreateCommands();
-  initializeHistoryButtons();
+  initializeHistoryCommands({
+    onChanged: () => {
+      syncSessionStatus();
+      void refreshCadOperationPanel();
+    },
+  });
+  initializeModifyTab();
+  for (const side of ['A', 'B']) {
+    document
+      .getElementById(`model-edit-register-${side.toLowerCase()}`)
+      ?.addEventListener('click', () => void registerWorkingDocumentAs(side));
+  }
   syncSessionStatus();
 
   eventBus.on(EditEvents.WORKING_DOCUMENT_CHANGED, () => {
@@ -433,6 +657,7 @@ export function initializeModelEditPanel() {
     syncSessionStatus();
     void refreshCadOperationPanel();
   });
+  eventBus.on(UIEvents.WORKSPACE_VISIBILITY_CHANGED, syncSessionStatus);
 }
 
 export { syncSessionStatus };

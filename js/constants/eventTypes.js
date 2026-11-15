@@ -78,6 +78,17 @@ export const RenderEvents = {
 };
 
 /**
+ * シーン内モデルのイベント
+ * @constant {Object}
+ */
+export const SceneEvents = {
+  /** GLBモデルの表示が開始された */
+  GLB_LOADED: 'scene:glbLoaded',
+  /** GLBモデルがシーンから解除された */
+  GLB_CLEARED: 'scene:glbCleared',
+};
+
+/**
  * 軸描画関連イベント
  * @constant {Object}
  */
@@ -99,6 +110,8 @@ export const UIEvents = {
   PANEL_CLOSED: 'ui:panelClosed',
   /** テーマが変更された */
   THEME_CHANGED: 'ui:themeChanged',
+  /** 簡易CAD等の全画面ワークスペース表示が切り替わった */
+  WORKSPACE_VISIBILITY_CHANGED: 'ui:workspaceVisibilityChanged',
 };
 
 /**
@@ -270,12 +283,16 @@ export const EditEvents = {
   WORKING_DOCUMENT_CHANGED: 'edit:workingDocumentChanged',
   /** Working Documentの派生数量が対象revisionで更新された */
   WORKING_QUANTITIES_UPDATED: 'edit:workingQuantitiesUpdated',
+  /** 明示実行した取り合い診断の結果が更新された（自動再判定はしない） */
+  JOIN_AUDIT_UPDATED: 'edit:joinAuditUpdated',
   /** 編集起因の再比較が完了した（ペイロード: { changedElementTypes: string[] }） */
   RECOMPARISON_COMPLETED: 'edit:recomparisonCompleted',
   /** 編集がキャンセルされた */
   EDIT_CANCELLED: 'edit:cancelled',
   /** 編集モードが切り替わった */
   MODE_TOGGLED: 'edit:modeToggled',
+  /** MOVE gizmo の基準位置設定が変更された */
+  GIZMO_ANCHOR_MODE_CHANGED: 'edit:gizmoAnchorModeChanged',
 };
 
 /**
@@ -366,6 +383,8 @@ export const FinalizationEvents = {
 export const InteractionEvents = {
   /** 要素情報を表示 */
   DISPLAY_ELEMENT_INFO: 'interaction:displayElementInfo',
+  /** GLB由来の要素情報を表示 */
+  DISPLAY_GLB_ELEMENT_INFO: 'interaction:displayGlbElementInfo',
   /** 選択された鉄筋ジオメトリの情報を表示 */
   DISPLAY_REBAR_INFO: 'interaction:displayRebarInfo',
   /** 複数選択サマリー情報を表示 */
@@ -410,6 +429,7 @@ export const EventTypes = {
   ComparisonKey: COMPARISON_KEY_EVENTS,
   Comparison: ComparisonEvents,
   Render: RenderEvents,
+  Scene: SceneEvents,
   Axis: AxisEvents,
   UI: UIEvents,
   Selection: SelectionEvents,
@@ -443,6 +463,7 @@ export function isValidEventType(eventType) {
     ...Object.values(COMPARISON_KEY_EVENTS),
     ...Object.values(ComparisonEvents),
     ...Object.values(RenderEvents),
+    ...Object.values(SceneEvents),
     ...Object.values(AxisEvents),
     ...Object.values(UIEvents),
     ...Object.values(SelectionEvents),

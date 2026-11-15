@@ -4,6 +4,7 @@
  */
 
 import { IFCBeamExporter } from './IFCBeamExporter.js';
+import { encodeSurfaceMetadata } from '../../common-ifc/pipeline/StbSurfaceMetadata.js';
 import { generateIfcGuid } from './IFCExporterBase.js';
 import { createLogger } from '../../utils/logger.js';
 
@@ -107,7 +108,7 @@ export class IFCSTBExporter extends IFCBeamExporter {
       generateIfcGuid(),
       null,
       name,
-      null,
+      encodeSurfaceMetadata('slab', slabData),
       null,
       `#${slabLocalPlacement}`,
       `#${productShape}`,
@@ -192,6 +193,7 @@ export class IFCSTBExporter extends IFCBeamExporter {
       lengthWR = 0,
       profileFD,
       profileWR,
+      sourceFoundationPart = null,
       rotation = 0,
     } = data;
 
@@ -271,7 +273,9 @@ export class IFCSTBExporter extends IFCBeamExporter {
       generateIfcGuid(),
       null, // OwnerHistory
       name,
-      'FoundationColumn', // Description
+      sourceFoundationPart === 'FD' || sourceFoundationPart === 'WR'
+        ? `STBFOUNDATION_META:${JSON.stringify({ part: sourceFoundationPart })}`
+        : 'FoundationColumn', // Description: only single-section forms have unambiguous provenance
       'FoundationColumn', // ObjectType
       `#${localPlacement}`,
       `#${productShape}`,
@@ -307,6 +311,7 @@ export class IFCSTBExporter extends IFCBeamExporter {
       depth = 500,
       rotation = 0,
       predefinedType = 'PAD_FOOTING',
+      sourceFootingMeta = null,
     } = footingData;
 
     // 必須パラメータのチェック
@@ -384,7 +389,7 @@ export class IFCSTBExporter extends IFCBeamExporter {
       generateIfcGuid(),
       null, // OwnerHistory
       name,
-      null, // Description
+      sourceFootingMeta ? `STBFOOTING_META:${JSON.stringify(sourceFootingMeta)}` : null,
       null, // ObjectType
       `#${footingLocalPlacement}`,
       `#${productShape}`,

@@ -7,6 +7,7 @@ import { DRAWING_DETAIL_TAG_TEMPLATE_BY_ELEMENT_TYPE } from '../../config/drawin
 import { tagFamilyCategoryForElementType } from '../../data/drawing/tags/tagFamilyDefinition.js';
 import {
   familySelectionValue,
+  familyIdFromSelection,
   listTagFamiliesForCategory,
 } from '../../data/drawing/tags/tagFamilyRegistry.js';
 import { createEmptyTagFamilyState } from '../../data/drawing/tags/tagFamilyStore.js';
@@ -113,9 +114,11 @@ export function refreshPdfDrawingTagFamilyOptions(
       const stillExists = [...select.options].some((option) => option.value === previous);
       select.value = persistedExists
         ? persistedValue
-        : stillExists
-          ? previous
-          : PDF_DRAWING_TAG_MODES.MARK;
+        : familyIdFromSelection(previous)
+          ? PDF_DRAWING_TAG_MODES.MARK
+          : stillExists
+            ? previous
+            : PDF_DRAWING_TAG_MODES.MARK;
     });
 }
 
@@ -170,7 +173,7 @@ export function setupPdfDrawingTagControls() {
   });
 }
 
-export function readPdfDrawingDisplaySettings(root = globalThis.document) {
+export function readPdfDrawingDisplaySettings(root = globalThis.document, tagFamilyState = null) {
   const visibility = {};
   const tagModes = {};
   const colors = {};
@@ -191,6 +194,17 @@ export function readPdfDrawingDisplaySettings(root = globalThis.document) {
       // tagModesは後方互換名。値は legacy mode または family:<TagFamily id>。
       tagModes[select.dataset.elementType] = select.value;
     });
+  // TagFamily管理ウィンドウの選択はstateが正本。設定表のselectが旧値のまま、
+  // または未生成でも、タグタイプ変更を図面描画へ確実に反映する。
+  // 「符号」「詳細」「非表示」を選択するとsession側でselectionsをnullへ戻す。
+  for (const [category, familyId] of Object.entries(tagFamilyState?.selections ?? {})) {
+    if (typeof familyId !== 'string' || !familyId.trim()) continue;
+    const selection = familySelectionValue(familyId);
+    for (const elementType of PDF_DRAWING_MEMBER_TYPES) {
+      if (canonicalPdfDrawingTagCategory(elementType) === category)
+        tagModes[elementType] = selection;
+    }
+  }
   root
     .querySelectorAll('.element-settings-table input.element-color-input[data-element-type]')
     .forEach((input) => {

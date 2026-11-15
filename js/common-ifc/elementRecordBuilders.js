@@ -1,4 +1,5 @@
 import * as WebIFC from 'web-ifc';
+import { normalizeVerticalIfcPile } from './pipeline/StbVerticalPileNormalization.js';
 
 /**
  * IFC 要素の解析結果から共通の STB 要素レコードを構築する。
@@ -175,6 +176,28 @@ function extractOpeningInfo(api, modelID, unitFactor, openingEl) {
   return null;
 }
 
+/** Return an FD/WR marker only from exporter-owned, unambiguous metadata. */
+export function parseFoundationColumnPart(description) {
+  if (typeof description !== 'string' || !description.startsWith('STBFOUNDATION_META:')) {
+    return null;
+  }
+  try {
+    const meta = JSON.parse(description.slice('STBFOUNDATION_META:'.length));
+    return meta?.part === 'FD' || meta?.part === 'WR' ? meta.part : null;
+  } catch {
+    return null;
+  }
+}
+
+export function buildFoundationColumnSectionAttrs(description, profileResult) {
+  const sectionId = profileResult?.sectionId || null;
+  const length = profileResult?.length || 0;
+  if (parseFoundationColumnPart(description) === 'FD') {
+    return { idSectionFD: sectionId, lengthFD: length, idSectionWR: null, lengthWR: 0 };
+  }
+  return { idSectionFD: null, lengthFD: 0, idSectionWR: sectionId, lengthWR: length };
+}
+
 export function parsePileMetadata(description) {
   if (typeof description !== 'string' || !description.startsWith('STBPILE_META:')) return null;
   try {
@@ -184,10 +207,83 @@ export function parsePileMetadata(description) {
   }
 }
 
+/** Restore a sourced analytical point relative to the actual IFC placement (mm). */
+export function recoverSourcePoint(point, metadata) {
+  const offset = metadata?.nodeOffset;
+  if (!offset || !['x', 'y', 'z'].every((axis) => Number.isFinite(offset[axis]))) return point;
+  return {
+    x: point.x + offset.x,
+    y: point.y + offset.y,
+    z: point.z + offset.z,
+  };
+}
+
+/** Recover the one-node pile support; keep geometry endpoints for source attributes. */
+export function recoverPilePoints(start, end, pileMeta) {
+  const metadata = pileMeta?.element;
+  if (metadata?.format !== '1node') return { start, end };
+  return start.z >= end.z
+    ? { start: recoverSourcePoint(start, metadata), end }
+    : { start, end: recoverSourcePoint(end, metadata) };
+}
+
+/** Footing offsets and support nodes share the same Node/browser reconstruction. */
+export function buildFootingElementRecord(params) {
+  const { el, origin, unitFactor, profileResult, elementId, storyId, nodeReconstructor } = params;
+  let source = null;
+  if (el.description?.startsWith('STBFOOTING_META:')) {
+    try {
+      const candidate = JSON.parse(el.description.slice('STBFOOTING_META:'.length));
+      if (
+        candidate?.nodeOffset &&
+        ['x', 'y', 'z'].every((axis) => Number.isFinite(candidate.nodeOffset[axis])) &&
+        ['offsetX', 'offsetY'].every((key) => Number.isFinite(candidate[key])) &&
+        (candidate.levelBottom === undefined || Number.isFinite(candidate.levelBottom))
+      )
+        source = candidate;
+    } catch {
+      /* Ignore malformed provenance, never invent source offsets. */
+    }
+  }
+  const point = recoverSourcePoint(
+    {
+      x: origin.x * unitFactor,
+      y: origin.y * unitFactor,
+      z: origin.z * unitFactor,
+    },
+    source,
+  );
+  return {
+    id: String(elementId),
+    stbType: el.stbType,
+    stbCategory: el.stbCategory,
+    name: el.name || `${el.stbType}-${elementId}`,
+    nodeStart: nodeReconstructor.addOrGet(point.x, point.y, point.z),
+    sectionId: profileResult?.sectionId || null,
+    storyId,
+    offsetX: source?.offsetX ?? 0,
+    offsetY: source?.offsetY ?? 0,
+    levelBottom: source
+      ? source.levelBottom
+      : -Math.round((profileResult?.length || 0) * 1000) / 1000,
+  };
+}
+
 export function buildPileAttrs(startPt, endPt, nodeStart, nodeEnd, length, pileMeta = null) {
   const isStartTop = startPt.z >= endPt.z;
   const elementMeta = pileMeta?.element || null;
-  const lengthAll = toFiniteNumber(elementMeta?.length_all) ?? Math.round(length * 100) / 100;
+  const lengthAll = toFiniteNumber(elementMeta?.length_all);
+  // STB 2.1.0 requires positive pile lengths. Do not silently substitute a
+  // reconstructed geometric length for an explicit legacy zero: omit that
+  // nonconforming field, while retaining its exact value in IFC metadata.
+  const publishedLengthAll =
+    lengthAll === null ? Math.round(length * 100) / 100 : lengthAll > 0 ? lengthAll : undefined;
+  const lengthHead = toFiniteNumber(elementMeta?.length_head);
+  const lengthFoot = toFiniteNumber(elementMeta?.length_foot);
+  const extraLengths = {
+    ...(lengthHead > 0 ? { lengthHead } : {}),
+    ...(lengthFoot > 0 ? { lengthFoot } : {}),
+  };
   const kindPile = elementMeta?.kind_pile || 'CAST_IN_PLACE';
 
   if (elementMeta?.format === '1node') {
@@ -195,20 +291,27 @@ export function buildPileAttrs(startPt, endPt, nodeStart, nodeEnd, length, pileM
       pileFormat: '1node',
       nodeSingle: isStartTop ? nodeStart : nodeEnd,
       levelTop: toFiniteNumber(elementMeta.level_top) ?? (isStartTop ? startPt.z : endPt.z),
-      lengthAll,
+      ...(publishedLengthAll !== undefined ? { lengthAll: publishedLengthAll } : {}),
+      ...extraLengths,
       offsetX: toFiniteNumber(elementMeta.offset_X) ?? 0,
       offsetY: toFiniteNumber(elementMeta.offset_Y) ?? 0,
       kindPile,
     };
   }
 
-  return {
-    pileFormat: '2node',
-    nodeBottom: isStartTop ? nodeEnd : nodeStart,
-    nodeTop: isStartTop ? nodeStart : nodeEnd,
-    lengthAll,
-    kindPile,
-  };
+  // For third-party IFC without STB source metadata, derive the single-node
+  // STB representation exclusively from measured, consistent vertical endpoints.
+  if (!elementMeta) {
+    return { ...normalizeVerticalIfcPile(startPt, endPt, nodeStart, nodeEnd, length), kindPile };
+  }
+
+  // A sourced two-node STB pile contains two analytical node identities that
+  // ST-Bridge 2.1 cannot encode. Do not equate matching vertical geometry
+  // with lossless topology or replace an explicit legacy length of zero.
+  if (elementMeta?.format === '2node') {
+    throw new Error('StbPile: source two-node topology cannot be preserved in ST-Bridge 2.1');
+  }
+  throw new Error(`Unsupported pile source format: ${elementMeta?.format ?? 'missing'}`);
 }
 
 export function buildPileProfileResult(profileAnalyzer, pileMeta, analyzedProfile) {
@@ -256,6 +359,7 @@ export function countElementsByType(elements) {
 }
 
 function toFiniteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 }
@@ -276,6 +380,7 @@ export function buildWallElementRecord({
   nodeReconstructor,
   storyId,
   wallOpenings = [],
+  sectionId = null,
 }) {
   const { wallLength, height } = dimensions;
 
@@ -291,9 +396,10 @@ export function buildWallElementRecord({
       stbCategory: el.stbCategory,
       name: el.name || `${el.stbType}-${elementId}`,
       nodeIds: [nodeId],
-      sectionId: null,
+      sectionId,
       storyId,
       kindStructure: el.kindStructure || 'RC',
+      kindLayout: el.kindLayout || null,
       openings: [],
     };
   }
@@ -335,9 +441,10 @@ export function buildWallElementRecord({
     stbCategory: el.stbCategory,
     name: el.name || `${el.stbType}-${elementId}`,
     nodeIds: [n1, n2, n3, n4],
-    sectionId: null,
+    sectionId,
     storyId,
     kindStructure: el.kindStructure || 'RC',
+    kindLayout: el.kindLayout || null,
     openings,
   };
 }

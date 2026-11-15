@@ -57,3 +57,25 @@ export function setElementGroupsClippingPlanes(groups, planes) {
     });
   });
 }
+
+/** AR開始前の個別マテリアルのクリッピング配列を参照ごと退避する。 */
+export function captureElementGroupsMaterialClipping(groups) {
+  const saved = new Map();
+  Object.values(groups).forEach((group) => {
+    group?.traverse?.((child) => {
+      if (!child.material) return;
+      for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
+        if (!saved.has(material)) saved.set(material, material.clippingPlanes);
+      }
+    });
+  });
+  return saved;
+}
+
+/** AR中に付け替えた平面を解除し、材質固有の設定をそのまま戻す。 */
+export function restoreElementGroupsMaterialClipping(saved) {
+  for (const [material, planes] of saved) {
+    material.clippingPlanes = planes;
+    material.needsUpdate = true;
+  }
+}

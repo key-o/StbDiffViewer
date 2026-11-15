@@ -1,4 +1,6 @@
 /** @fileoverview PDF照合セッションのJSON入出力、部材メモ、図面上の自由メモ。 */
+import { createDrawingProjectLifecycle } from '../../../app/documentControl/drawingProjectLifecycle.js';
+import { registerDrawingProjectOwner } from '../../../app/documentControl/drawingProjectBridge.js';
 import {
   createPdfOverlaySession,
   parsePdfOverlaySession,
@@ -21,12 +23,46 @@ import {
   serializeDrawingProject,
 } from '../../../data/drawing/drawingProjectSchema.js';
 import {
+  resolveCurrentSheetDrawingDocument,
+  stageDrawingSheetProjectImport,
+} from '../../../data/drawing/drawingSheetProjectEdit.js';
+import {
   commitDrawingProjectDrawingRevisionRebind,
   planDrawingProjectDrawingRevisionRebind,
   planDrawingProjectStoryRevisionRebind,
 } from '../../../data/drawing/drawingProjectRevisionRebind.js';
+import {
+  createDrawingProjectArchive,
+  readDrawingProjectArchive,
+} from '../../../data/drawing/drawingProjectArchive.js';
+import {
+  planDrawingProjectSlotRevisionRebind,
+  commitDrawingProjectSlotRevisionRebind,
+} from '../../../data/drawing/drawingProjectSlotRevisionRebind.js';
+import { stageDrawingProjectSlotRevisionFromStb } from '../../../app/pdfOverlay/drawingProjectSlotRevisionStage.js';
+import { assertDrawingProjectSlotRuntimeCurrent } from '../../../app/pdfOverlay/drawingProjectSlotRuntimeGuard.js';
+import { prepareDrawingProjectSlotModelSourceProof } from '../../../app/pdfOverlay/drawingProjectSlotModelSourceProof.js';
+import { createDrawingProjectSlotPublicationParticipant } from '../../../app/pdfOverlay/drawingProjectSlotPublicationParticipant.js';
+import { createDrawingProjectSlotModelLoadHandoff } from '../../../app/pdfOverlay/drawingProjectSlotModelLoadHandoff.js';
+import { synchronizeDrawingProjectSlotAfterModelLoad } from '../../../app/pdfOverlay/drawingProjectSlotPostCommitSync.js';
+import {
+  captureDrawingProjectSlotStageLease,
+  drawingProjectSlotApprovalsFingerprint,
+  drawingProjectSlotWorkspaceFingerprint,
+} from '../../../app/pdfOverlay/drawingProjectSlotStageLease.js';
+import { collectDrawingProjectArchiveSources } from '../../../data/drawing/drawingProjectArchiveSources.js';
+import { cutDrawingModelToBounds } from '../../../data/drawing/drawingSheetCutRegion.js';
+import { ownsZipColdStartRollback } from '../../../app/pdfOverlay/drawingProjectZipRollbackGuard.js';
+import {
+  stageDrawingProjectArchiveWithIntents,
+  stageDrawingProjectArchiveWorkspace,
+} from '../../../app/pdfOverlay/drawingProjectArchiveWorkspaceStage.js';
 import { getState } from '../../../data/state/globalState.js';
 import { invertAffine, transformPoint } from '../../../data/drawing/affine2d.js';
+import {
+  discardOrphanedDrawingIntents,
+  listOrphanedDrawingIntents,
+} from '../../../data/drawing/drawingProjectOrphanDiscard.js';
 import { planViewContextSnapshot } from '../../../data/drawing/drawingModel.js';
 import {
   BUILTIN_TAG_FAMILIES,
@@ -46,6 +82,7 @@ import {
 import { TagFamilyManagerController } from './TagFamilyManagerController.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+const ORPHAN_OPTION_VALUE = '__orphan__';
 const REVIEW_STATES = new Set(['unreviewed', 'confirmed', 'mismatch']);
 const REVIEW_CONTEXT_ONLY_INVALIDATION_CODES = new Set([
   'PDF_CHANGED',
@@ -104,6 +141,8 @@ function rounded(value) {
 
 function drawingPlacementSnapshot(drawing) {
   if (!drawing?.source?.modelKey || !drawing?.source?.modelRevision || !drawing?.view) return null;
+  // タグ・自由メモの保存contextは平面図(階)専用。立面(軸組図)は保存contextを持たないため配置なし扱い。
+  if (drawing.view.type !== 'plan') return null;
   return {
     source: {
       modelKey: String(drawing.source.modelKey),
@@ -179,9 +218,20 @@ export class PdfOverlaySessionController {
     this.pendingDocument = null;
     this.drawingProjectId = null;
     this.loadedDrawingProject = null;
+    this.activeDrawingDocumentId = null;
+    this.archiveSourceRevisions = [];
+    this.archivedPdfFontFile = null;
+    this.archiveExportSequence = 0;
+    this.drawingLifecycle = createDrawingProjectLifecycle();
+    this.detachDrawingProvider = registerDrawingProjectOwner(this);
+    this.openDrawingIdentity = null;
+    this.openModelDocument = null;
+    this.drawingImportSequence = 0;
+    this.zipColdStartEpoch = 0;
     this.rebindStaged = null;
     this.rebindApprovals = new Map();
     this.rebindAbortController = null;
+    this.slotModelLoadInProgress = false;
     this.pickDrawingMemo = false;
     this.lastPlacementSignature = null;
     this.applyingRestore = false;
@@ -193,7 +243,219 @@ export class PdfOverlaySessionController {
     this.clearDrawingProjectReplacement();
   }
 
+  hasLoadedDrawingProject() {
+    return this.loadedDrawingProject != null;
+  }
+
+  getOpenDrawingProjectDescriptor() {
+    const active = this.drawingLifecycle?.getOpenDrawingProjectDescriptor?.() ?? null;
+    if (
+      active &&
+      (this.panel.drawing !== this.openDrawingIdentity ||
+        this.currentModelDocument() !== this.openModelDocument)
+    ) {
+      this.closeOpenDrawingProject();
+      return null;
+    }
+    return active;
+  }
+
+  subscribeDrawingProjectLifecycle(listener) {
+    return this.drawingLifecycle.subscribeDrawingProjectLifecycle(listener);
+  }
+
+  currentModelDocument() {
+    const key = this.panel.drawing?.source?.modelKey;
+    return ['A', 'B'].includes(key) ? getState(`models.document${key}`) : null;
+  }
+
+  drawingDescriptorInput(project = this.loadedDrawingProject) {
+    const document =
+      project &&
+      (project.drawingDocuments.length > 1
+        ? resolveCurrentSheetDrawingDocument(
+            project,
+            this.panel.drawing,
+            this.panel.selectedCadDrawingView?.(),
+            this.activeDrawingDocumentId,
+          )
+        : this.drawingProjectDocumentForCurrent(project));
+    return {
+      project,
+      document,
+      runtime: {
+        memberReviews: this.memberReviews,
+        drawingMemos: this.drawingMemos,
+        tagPlacements: this.tagPlacements,
+        scaleDenominator: this.panel.scaleDenominator(),
+        rotationDeg: this.panel.drawingRotationDeg,
+        tagOrientationMode: this.panel.tagOrientationMode,
+      },
+    };
+  }
+
+  openDrawingProject(project) {
+    // Isolated legacy controller fixtures do not instantiate the lifecycle owner.
+    if (!this.drawingLifecycle) return null;
+    if (!this.panel.drawing || !this.currentModelDocument())
+      throw new Error('モデルと作図対象が開かれていません。');
+    const descriptor = this.drawingDescriptorInput(project);
+    this.openDrawingIdentity = this.panel.drawing;
+    this.openModelDocument = this.currentModelDocument();
+    return this.drawingLifecycle.open(descriptor);
+  }
+
+  reviseOpenDrawingProject() {
+    if (!this.getOpenDrawingProjectDescriptor()) return;
+    try {
+      this.drawingLifecycle.revise(this.drawingDescriptorInput());
+    } catch {
+      this.closeOpenDrawingProject();
+    }
+  }
+
+  closeOpenDrawingProject() {
+    // Cancel in-flight import first, including the case where no project is open.
+    ++this.drawingImportSequence;
+    this.drawingLifecycle?.close?.();
+    this.openDrawingIdentity = null;
+    this.openModelDocument = null;
+  }
+
+  disposeDrawingProjectProvider() {
+    this.closeOpenDrawingProject();
+    this.archivedPdfFontFile = null;
+    this.detachDrawingProvider?.();
+  }
+
+  /**
+   * #650: explicit user-controlled release of the registered DrawingProject.
+   * Closing the CAD window revokes only the active descriptor and deliberately
+   * leaves loadedDrawingProject available for ZIP export. Model reload stays
+   * blocked until the project itself is explicitly released.
+   */
+  unloadLoadedDrawingProjectFromUser(event) {
+    if (!event?.isTrusted || !this.loadedDrawingProject) return false;
+    if (this.applyingRestore || this.preparingRestore) {
+      this.setDrawingProjectStatus('ZIP/JSON復元中は図面プロジェクトを解除できません。');
+      return false;
+    }
+    const confirmDiscard =
+      globalThis.window?.confirm?.bind(globalThis.window) || globalThis.confirm;
+    if (
+      typeof confirmDiscard !== 'function' ||
+      !confirmDiscard(
+        '登録図面・シート・タグ・レビューの未保存変更を破棄します。プロジェクトZIPまたはJSONを保存済みですか？解除してモデルの差替えを許可しますか？',
+      )
+    )
+      return false;
+
+    // Invalidate in-flight archive/rebind operations before revoking the owner.
+    ++this.zipColdStartEpoch;
+    ++this.archiveExportSequence;
+    this.rebindAbortController?.abort();
+    this.closeOpenDrawingProject();
+    this.clearDrawingProjectReplacement();
+    this.loadedDrawingProject = null;
+    this.drawingProjectId = null;
+    this.activeDrawingDocumentId = null;
+    this.archiveSourceRevisions = [];
+    this.archivedPdfFontFile = null;
+    this.memberReviews = [];
+    this.drawingMemos = [];
+    this.drawingMemoIdentity = null;
+    this.tagPlacements = [];
+    // Project-owned custom templates must not leak into the next model session.
+    this.setTagFamilyState(createEmptyTagFamilyState(), { render: false });
+    this.selectedIdentity = null;
+    this.pendingDocument = null;
+    this.tagContexts?.clear?.();
+    this.panel.invalidateDrawing?.('図面プロジェクトを解除しました。モデルを再読込できます。');
+    this.panel.sheetBrowser?.invalidatePreviewSources?.();
+    this.panel.sheetBrowser?.render?.();
+    this.panel.updatePdfFeatureAvailability?.();
+    this.setDrawingProjectStatus('図面プロジェクトを解除しました。モデルを再読込できます。');
+    return true;
+  }
+
+  createNewDrawingProjectFromUser(event) {
+    if (!event?.isTrusted) return;
+    this.openNewDrawingProject();
+  }
+
+  /** 現在の図面から新規DrawingProjectを開く。ユーザー操作の検証は呼び出し側が行う。 */
+  openNewDrawingProject() {
+    this.closeOpenDrawingProject();
+    const previous = this.loadedDrawingProject;
+    const previousId = this.drawingProjectId;
+    this.loadedDrawingProject = null;
+    this.drawingProjectId = null;
+    let project;
+    try {
+      project = this.createDrawingProjectSnapshot();
+    } catch (error) {
+      this.loadedDrawingProject = previous;
+      this.drawingProjectId = previousId;
+      throw error;
+    }
+    this.drawingProjectId = project.projectId;
+    this.loadedDrawingProject = project;
+    this.activeDrawingDocumentId = null;
+    this.archiveSourceRevisions = [];
+    this.archivedPdfFontFile = null;
+    this.archiveExportSequence++;
+    this.clearDrawingProjectReplacement();
+    this.openDrawingProject(project);
+    this.setDrawingProjectStatus('新規DrawingProjectを開きました。');
+    this.panel.sheetBrowser?.render();
+  }
+
   bindEvents() {
+    this.root
+      .querySelector('#pdf-overlay-unload-drawing-project')
+      ?.addEventListener('click', (event) => this.unloadLoadedDrawingProjectFromUser(event));
+    this.root
+      .querySelector('#pdf-overlay-new-drawing-project')
+      ?.addEventListener('click', (event) => {
+        try {
+          this.createNewDrawingProjectFromUser(event);
+        } catch (error) {
+          showWarning(error?.message || '新規DrawingProjectを開けませんでした。');
+        }
+      });
+
+    this.root
+      .querySelector('#pdf-overlay-export-drawing-project-zip')
+      ?.addEventListener('click', () => {
+        this.exportDrawingProjectZip().catch((error) => {
+          this.setDrawingProjectStatus(error?.message || 'プロジェクトZIPを書き出せませんでした。');
+          showWarning(error?.message || 'プロジェクトZIPを書き出せませんでした。');
+        });
+      });
+    this.root
+      .querySelector('#pdf-overlay-import-drawing-project-zip-trigger')
+      ?.addEventListener('click', () =>
+        this.root.querySelector('#pdf-overlay-import-drawing-project-zip')?.click(),
+      );
+    this.root
+      .querySelector('#pdf-overlay-import-drawing-project-zip')
+      ?.addEventListener('change', (event) => {
+        const importing = this.importDrawingProjectZip(event.target.files?.[0]);
+        const ownEpoch = this.zipColdStartEpoch;
+        return importing
+          .catch((error) => {
+            // The stale request must not replace a newer import's success status.
+            if (ownEpoch !== this.zipColdStartEpoch) return;
+            this.setDrawingProjectStatus(
+              error?.message || 'プロジェクトZIPを読み込めませんでした。',
+            );
+            showWarning(error?.message || 'プロジェクトZIPを読み込めませんでした。');
+          })
+          .finally(() => {
+            // The user may already have selected a different file in this input.
+            if (ownEpoch === this.zipColdStartEpoch) event.target.value = '';
+          });
+      });
     this.root.querySelector('#pdf-overlay-export-drawing-project').addEventListener('click', () => {
       try {
         this.exportDrawingProject();
@@ -211,18 +473,21 @@ export class PdfOverlaySessionController {
       );
     this.root
       .querySelector('#pdf-overlay-import-drawing-project')
-      .addEventListener('change', (event) =>
-        this.importDrawingProject(event.target.files?.[0])
+      .addEventListener('change', (event) => {
+        const importing = this.importDrawingProject(event.target.files?.[0]);
+        const ownEpoch = this.zipColdStartEpoch;
+        return importing
           .catch((error) => {
+            if (ownEpoch !== this.zipColdStartEpoch) return;
             this.setDrawingProjectStatus(
               error?.message || 'Drawing Workspace JSONを読み込めませんでした。',
             );
             showWarning(error?.message || 'Drawing Workspace JSONを読み込めませんでした。');
           })
           .finally(() => {
-            event.target.value = '';
-          }),
-      );
+            if (ownEpoch === this.zipColdStartEpoch) event.target.value = '';
+          });
+      });
     this.root
       .querySelector('#pdf-overlay-rebind-stb-trigger')
       .addEventListener('click', () => this.root.querySelector('#pdf-overlay-rebind-stb').click());
@@ -238,25 +503,31 @@ export class PdfOverlaySessionController {
           event.target.value = '';
         }),
     );
-    this.root.querySelector('#pdf-overlay-rebind-reevaluate').addEventListener('click', () => {
-      try {
-        Promise.resolve(this.reevaluateDrawingProjectReplacement()).catch((error) => {
-          this.setDrawingProjectRebindStatus(error?.message || '対応を再評価できませんでした。');
-          showWarning(error?.message || '対応を再評価できませんでした。');
-        });
-      } catch (error) {
-        this.setDrawingProjectRebindStatus(error?.message || '対応を再評価できませんでした。');
-        showWarning(error?.message || '対応を再評価できませんでした。');
-      }
-    });
-    this.root.querySelector('#pdf-overlay-rebind-commit').addEventListener('click', () => {
-      try {
-        this.commitDrawingProjectReplacement();
-      } catch (error) {
-        this.setDrawingProjectRebindStatus(error?.message || 'STB改訂を確定できませんでした。');
-        showWarning(error?.message || 'STB改訂を確定できませんでした。');
-      }
-    });
+    this.root
+      .querySelector('#pdf-overlay-rebind-reevaluate')
+      .addEventListener('click', () => this.runDrawingProjectReplacementReevaluation());
+    this.root.querySelector('#pdf-overlay-rebind-commit').addEventListener('click', (event) =>
+      Promise.resolve()
+        .then(() =>
+          this.rebindStaged?.slotMode
+            ? this.commitDrawingProjectSlotFromUser(event)
+            : this.commitDrawingProjectReplacement(),
+        )
+        .catch((error) => {
+          this.setDrawingProjectRebindStatus(error?.message || 'STB改訂を確定できませんでした。');
+          showWarning(error?.message || 'STB改訂を確定できませんでした。');
+        }),
+    );
+    this.root
+      .querySelector('#pdf-overlay-rebind-export-prepared-zip')
+      .addEventListener('click', () =>
+        Promise.resolve()
+          .then(() => this.exportPreparedDrawingProjectSlotZip())
+          .catch((error) => {
+            this.setDrawingProjectRebindStatus(error?.message || '改訂ZIPを準備できませんでした。');
+            showWarning(error?.message || '改訂ZIPを準備できませんでした。');
+          }),
+      );
     this.root
       .querySelector('#pdf-overlay-rebind-clear')
       .addEventListener('click', () => this.clearDrawingProjectReplacement());
@@ -295,10 +566,6 @@ export class PdfOverlaySessionController {
       this.cancelDrawingMemo();
       this.panel.renderOverlay();
     });
-    this.root.querySelector('#pdf-overlay-tag-edit-mode').addEventListener('change', () => {
-      this.cancelTagDrag();
-      this.panel.renderOverlay();
-    });
     this.root.querySelector('#pdf-overlay-tag-rotation').addEventListener('change', () => {
       this.updateSelectedTagAppearance();
     });
@@ -320,9 +587,15 @@ export class PdfOverlaySessionController {
     this.root.querySelector('#pdf-overlay-session-status').textContent = message;
   }
 
+  syncDrawingProjectUnloadControl() {
+    const unload = this.root.querySelector('#pdf-overlay-unload-drawing-project');
+    if (unload) unload.disabled = !this.loadedDrawingProject;
+  }
+
   setDrawingProjectStatus(message) {
     const status = this.root.querySelector('#pdf-overlay-drawing-project-status');
     if (status) status.textContent = message;
+    this.syncDrawingProjectUnloadControl();
   }
 
   setDrawingProjectRebindStatus(message) {
@@ -340,10 +613,16 @@ export class PdfOverlaySessionController {
     const trigger = this.root.querySelector('#pdf-overlay-rebind-stb-trigger');
     const reevaluate = this.root.querySelector('#pdf-overlay-rebind-reevaluate');
     const commit = this.root.querySelector('#pdf-overlay-rebind-commit');
+    const preparedZip = this.root.querySelector('#pdf-overlay-rebind-export-prepared-zip');
     const clear = this.root.querySelector('#pdf-overlay-rebind-clear');
     if (trigger) trigger.disabled = !this.loadedDrawingProject;
+    if (preparedZip) preparedZip.disabled = true;
     if (reevaluate) reevaluate.disabled = true;
-    if (commit) commit.disabled = true;
+    if (commit) {
+      commit.disabled = true;
+      commit.textContent = '改訂を確定してJSON保存';
+      commit.title = '';
+    }
     if (clear) clear.disabled = true;
     this.setDrawingProjectRebindStatus(
       status ||
@@ -389,11 +668,51 @@ export class PdfOverlaySessionController {
     return records;
   }
 
+  runDrawingProjectReplacementReevaluation() {
+    const report = (error) => {
+      this.setDrawingProjectRebindStatus(error?.message || '対応を再評価できませんでした。');
+      showWarning(error?.message || '対応を再評価できませんでした。');
+    };
+    try {
+      Promise.resolve(this.reevaluateDrawingProjectReplacement()).catch(report);
+    } catch (error) {
+      report(error);
+    }
+  }
+
+  createRebindOrphanButton(entityId) {
+    const button = this.root.ownerDocument.createElement('button');
+    button.type = 'button';
+    button.textContent = '対応先なしとして保持';
+    button.addEventListener('click', () => {
+      this.rebindApprovals.set(entityId, { orphan: true });
+      this.runDrawingProjectReplacementReevaluation();
+    });
+    return button;
+  }
+
+  createRebindOrphanUndoButton(entityId) {
+    const button = this.root.ownerDocument.createElement('button');
+    button.type = 'button';
+    button.textContent = '取消';
+    button.addEventListener('click', () => {
+      this.rebindApprovals.delete(entityId);
+      this.runDrawingProjectReplacementReevaluation();
+    });
+    return button;
+  }
+
   approvedMappingsForRebind() {
-    return [...this.rebindApprovals.entries()].map(([entityId, sourceRef]) => ({
-      entityId,
-      sourceRef: { ...sourceRef },
-    }));
+    return [...this.rebindApprovals.entries()]
+      .filter(([, sourceRef]) => !sourceRef.orphan)
+      .map(([entityId, sourceRef]) => ({ entityId, sourceRef: { ...sourceRef } }));
+  }
+
+  /** 対応先なしとして明示承認された(作図意図は孤児として保持する)entityId。 */
+  orphanedEntityIdsForRebind() {
+    return [...this.rebindApprovals.entries()]
+      .filter(([, sourceRef]) => sourceRef.orphan)
+      .map(([entityId]) => entityId);
   }
 
   renderDrawingProjectRebindPlan() {
@@ -402,6 +721,8 @@ export class PdfOverlaySessionController {
     const reevaluate = this.root.querySelector('#pdf-overlay-rebind-reevaluate');
     const commit = this.root.querySelector('#pdf-overlay-rebind-commit');
     const clear = this.root.querySelector('#pdf-overlay-rebind-clear');
+    const preparedZip = this.root.querySelector('#pdf-overlay-rebind-export-prepared-zip');
+    if (preparedZip) preparedZip.disabled = true;
     if (list) list.replaceChildren();
     if (!staged) {
       if (reevaluate) reevaluate.disabled = true;
@@ -411,13 +732,17 @@ export class PdfOverlaySessionController {
     }
 
     if (clear) clear.disabled = false;
+    if (staged.slotMode) return this.renderDrawingProjectSlotRebindPlan();
     const plan = staged.plan;
     for (const mapping of plan.mappings) {
       const item = this.root.ownerDocument.createElement('li');
       const from = mapping.fromSourceRef;
       if (mapping.status === 'resolved') {
         const to = mapping.toSourceRef;
-        item.textContent = `${mapping.entityId}: ${from.elementType} #${from.elementId} → #${to.elementId} / ${mapping.method}`;
+        item.textContent = to
+          ? `${mapping.entityId}: ${from.elementType} #${from.elementId} → #${to.elementId} / ${mapping.method}`
+          : `${mapping.entityId}: ${from.elementType} #${from.elementId} → 対応先なし（作図意図を孤児として保持）`;
+        if (!to) item.append(this.createRebindOrphanUndoButton(mapping.entityId));
       } else {
         const label = this.root.ownerDocument.createElement('span');
         label.textContent = `${mapping.entityId}: ${from.elementType} #${from.elementId} / ${mapping.reason} `;
@@ -428,6 +753,12 @@ export class PdfOverlaySessionController {
         blank.value = '';
         blank.textContent = '対応先を選択…';
         select.append(blank);
+        if (from.elementType !== 'Story') {
+          const orphan = this.root.ownerDocument.createElement('option');
+          orphan.value = ORPHAN_OPTION_VALUE;
+          orphan.textContent = '対応先なし（作図意図を孤児として保持）';
+          select.append(orphan);
+        }
         const candidates = this.rebindCandidateRecords(
           staged.imported.drawing,
           from.elementType,
@@ -440,16 +771,27 @@ export class PdfOverlaySessionController {
           select.append(option);
         }
         const approved = this.rebindApprovals.get(mapping.entityId);
-        if (approved) select.value = JSON.stringify(approved);
+        if (approved)
+          select.value = approved.orphan ? ORPHAN_OPTION_VALUE : JSON.stringify(approved);
         select.addEventListener('change', () => {
           this.rebindAbortController?.abort();
           this.rebindAbortController = null;
           if (!select.value) this.rebindApprovals.delete(mapping.entityId);
+          else if (select.value === ORPHAN_OPTION_VALUE)
+            this.rebindApprovals.set(mapping.entityId, { orphan: true });
           else this.rebindApprovals.set(mapping.entityId, JSON.parse(select.value));
           if (reevaluate) reevaluate.disabled = this.rebindApprovals.size === 0;
         });
         item.append(label, select);
       }
+      list?.append(item);
+    }
+    for (const diagnostic of plan.diagnostics || []) {
+      const item = this.root.ownerDocument.createElement('li');
+      item.textContent = `⚠ ${diagnostic.entityId}: ${diagnostic.code}（${diagnostic.toSourceRef.elementType} #${diagnostic.toSourceRef.elementId}）。このままでは確定時にタグ配置を復元できません。 `;
+      // 対応先は解決済みでも描画されない場合、確定を進める手段として孤児化を選べるようにする。
+      if (diagnostic.toSourceRef.elementType !== 'Story')
+        item.append(this.createRebindOrphanButton(diagnostic.entityId));
       list?.append(item);
     }
 
@@ -459,7 +801,226 @@ export class PdfOverlaySessionController {
     );
     if (reevaluate)
       reevaluate.disabled = plan.status === 'ready' || this.rebindApprovals.size === 0;
-    if (commit) commit.disabled = plan.status !== 'ready';
+    if (commit) {
+      commit.disabled = plan.status !== 'ready';
+      commit.textContent = '改訂を確定してJSON保存';
+      commit.title = '';
+    }
+  }
+
+  /**
+   * Stage all registered plan views of a modelSlot from a single new STB.
+   * For multi-view projects, persisted metadata is authoritative: legacy
+   * workspace snapshotting would silently discard the other documents.
+   */
+  async stageDrawingProjectSlotReplacement(file, { selected = null, selectedId = null } = {}) {
+    const sourceProject = this.loadedDrawingProject;
+    if (!sourceProject) throw new Error('DrawingProjectが開かれていません。');
+    const active =
+      selected ||
+      resolveCurrentSheetDrawingDocument(
+        sourceProject,
+        this.panel.drawing,
+        this.panel.selectedCadDrawingView?.(),
+        selectedId || this.activeDrawingDocumentId,
+      );
+    if (this.panel.drawing?.source?.modelKey !== 'A')
+      throw new Error('複数ビュー改訂の準備は現在STB-Aの図面からのみ行えます。');
+    const prior = this.rebindStaged;
+    if (prior?.slotMode && prior.sourceProjectSnapshot !== serializeDrawingProject(sourceProject))
+      throw new Error(
+        '対応選択中にDrawingProjectが変更されました。改訂を最初から再検証してください。',
+      );
+    // An STB import yields several times. Pin the input project, model, selected
+    // view and manual approvals *before* the first await, not after the import.
+    const sourceProjectSnapshot = serializeDrawingProject(sourceProject);
+    const sourceStillCurrent = captureDrawingProjectSlotStageLease(() => ({
+      staged: sourceProject,
+      stagePlan: null,
+      stagePlanStatus: null,
+      sourceFile: file,
+      project: this.loadedDrawingProject,
+      serializedProject: this.loadedDrawingProject
+        ? serializeDrawingProject(this.loadedDrawingProject)
+        : null,
+      drawing: this.panel?.drawing,
+      modelDocument: getState('models.documentA'),
+      activeDrawingDocumentId: this.activeDrawingDocumentId,
+      selectedViewKey: this.panel?.selectedCadDrawingView?.()?.key ?? null,
+      workspaceSignature: this.drawingProjectSlotWorkspaceSignature(),
+      approvals: this.rebindApprovals,
+    }));
+    this.rebindAbortController?.abort();
+    const controller = new globalThis.AbortController();
+    this.rebindAbortController = controller;
+    this.panel.services = this.panel.services || this.panel.getServices?.();
+    const services = this.panel.services;
+    this.rebindStaged = null;
+    this.renderDrawingProjectRebindPlan();
+    try {
+      const stage = await stageDrawingProjectSlotRevisionFromStb({
+        project: sourceProject,
+        modelSlotId: active.modelSlotId,
+        file,
+        modelKey: 'A',
+        services,
+        signal: controller.signal,
+        approvedMappings: this.approvedMappingsForRebind(),
+        orphanedEntityIds: this.orphanedEntityIdsForRebind(),
+        planSlotRebind: planDrawingProjectSlotRevisionRebind,
+      });
+      if (controller.signal.aborted || this.rebindAbortController !== controller) return;
+      if (!sourceStillCurrent())
+        throw new Error(
+          'STB解析中に原本、登録ビューまたは承認内容が変更されました。再検証してください。',
+        );
+      this.rebindAbortController = null;
+      this.rebindStaged = {
+        ...stage,
+        slotMode: true,
+        file,
+        modelSlotId: active.modelSlotId,
+        selectedDrawingId: active.id,
+        sourceProjectSnapshot,
+        approvalSignature: drawingProjectSlotApprovalsFingerprint(this.rebindApprovals),
+        imported: {
+          ...stage.inspection,
+          filename: file.name || null,
+          drawing: stage.importedById[active.id]?.drawing ?? null,
+        },
+      };
+      this.renderDrawingProjectRebindPlan();
+      showInfo(
+        stage.plan.status === 'ready'
+          ? '全登録伏図のSTB改訂対応を検証しました。ZIP保存できます。直接確定には新STB-A原本の読み込みが必要です。'
+          : '複数ビューで未解決の対応があります。対応先を選択して再評価してください。',
+      );
+      return stage.plan;
+    } catch (error) {
+      if (controller.signal.aborted || this.rebindAbortController !== controller) return;
+      this.rebindAbortController = null;
+      this.renderDrawingProjectRebindPlan();
+      throw error;
+    }
+  }
+
+  renderDrawingProjectSlotRebindPlan() {
+    const staged = this.rebindStaged;
+    const list = this.root.querySelector('#pdf-overlay-rebind-mapping-list');
+    const reevaluate = this.root.querySelector('#pdf-overlay-rebind-reevaluate');
+    const commit = this.root.querySelector('#pdf-overlay-rebind-commit');
+    const entries =
+      staged.phase === 'story'
+        ? staged.plan.mappings
+        : staged.plan.viewPlans.flatMap((viewPlan) =>
+            viewPlan.mappings.map((mapping) => ({ ...mapping, drawingId: viewPlan.drawingId })),
+          );
+    const byEntity = new Map();
+    for (const entry of entries) {
+      const prior = byEntity.get(entry.entityId);
+      if (!prior || (prior.status === 'resolved' && entry.status !== 'resolved'))
+        byEntity.set(entry.entityId, entry);
+    }
+    for (const mapping of byEntity.values()) {
+      const item = this.root.ownerDocument.createElement('li');
+      const from = mapping.fromSourceRef;
+      const prefix = `[${mapping.drawingId}] ${mapping.entityId}: ${from.elementType} #${from.elementId}`;
+      if (mapping.status === 'resolved') {
+        item.textContent = mapping.toSourceRef
+          ? `${prefix} → #${mapping.toSourceRef.elementId} / ${mapping.method}`
+          : `${prefix} → 孤児化（作図意図保持）`;
+        if (!mapping.toSourceRef) item.append(this.createRebindOrphanUndoButton(mapping.entityId));
+      } else {
+        const label = this.root.ownerDocument.createElement('span');
+        label.textContent = `${prefix} / ${mapping.reason} `;
+        const select = this.root.ownerDocument.createElement('select');
+        select.className = 'form-control';
+        select.dataset.rebindEntityId = mapping.entityId;
+        const blank = this.root.ownerDocument.createElement('option');
+        blank.value = '';
+        blank.textContent = '対応先を選択…';
+        select.append(blank);
+        if (from.elementType !== 'Story') {
+          const orphan = this.root.ownerDocument.createElement('option');
+          orphan.value = ORPHAN_OPTION_VALUE;
+          orphan.textContent = '対応先なし（孤児として保持）';
+          select.append(orphan);
+        }
+        const records = new Map();
+        for (const result of Object.values(staged.importedById)) {
+          for (const candidate of this.rebindCandidateRecords(
+            result.drawing,
+            from.elementType,
+            staged.inspection.storyCandidates,
+          ))
+            records.set(JSON.stringify(candidate.sourceRef), candidate);
+        }
+        for (const candidate of this.rebindCandidateRecords(
+          null,
+          from.elementType,
+          staged.inspection.storyCandidates,
+        ))
+          records.set(JSON.stringify(candidate.sourceRef), candidate);
+        for (const candidate of records.values()) {
+          const option = this.root.ownerDocument.createElement('option');
+          option.value = JSON.stringify(candidate.sourceRef);
+          option.textContent = candidate.label;
+          select.append(option);
+        }
+        const approved = this.rebindApprovals.get(mapping.entityId);
+        if (approved)
+          select.value = approved.orphan ? ORPHAN_OPTION_VALUE : JSON.stringify(approved);
+        select.addEventListener('change', () => {
+          this.rebindAbortController?.abort();
+          this.rebindAbortController = null;
+          if (!select.value) this.rebindApprovals.delete(mapping.entityId);
+          else if (select.value === ORPHAN_OPTION_VALUE)
+            this.rebindApprovals.set(mapping.entityId, { orphan: true });
+          else this.rebindApprovals.set(mapping.entityId, JSON.parse(select.value));
+          if (reevaluate) reevaluate.disabled = this.rebindApprovals.size === 0;
+          if (commit) commit.disabled = true;
+          const preparedZip = this.root.querySelector('#pdf-overlay-rebind-export-prepared-zip');
+          if (preparedZip) preparedZip.disabled = true;
+          this.setDrawingProjectRebindStatus(
+            '対応先を変更しました。新改訂ZIPの保存前に「選択対応で再評価」を実行してください。',
+          );
+        });
+        item.append(label, select);
+      }
+      list?.append(item);
+    }
+    for (const entry of staged.plan.unresolved || []) {
+      if (!entry.code) continue;
+      const item = this.root.ownerDocument.createElement('li');
+      item.textContent = `⚠ ${entry.drawingId || entry.drawingIds?.join('/') || '共有'}: ${entry.entityId} / ${entry.code}`;
+      if (entry.toSourceRef?.elementType && entry.toSourceRef.elementType !== 'Story')
+        item.append(this.createRebindOrphanButton(entry.entityId));
+      list?.append(item);
+    }
+    this.setDrawingProjectRebindStatus(
+      `${staged.imported.filename || 'STB'} / ${staged.plan.status === 'ready' ? '対応確認済（未適用ZIP保存可能）' : '要対応'} / ${Object.keys(staged.importedById).length}ビュー読込 / 未解決 ${staged.plan.unresolved.length}件。保存済みビュー定義を使用（未保存の画面編集は含めません）。`,
+    );
+    if (reevaluate)
+      reevaluate.disabled = staged.plan.status === 'ready' || this.rebindApprovals.size === 0;
+    // A ready stage alone is insufficient: only a user-confirmed, live
+    // Document Control registration may invoke the SHA-verified model loader.
+    const canCommit =
+      staged.phase === 'slot' &&
+      staged.plan.status === 'ready' &&
+      !this.slotModelLoadInProgress &&
+      !this.rebindAbortController &&
+      Boolean(this.getOpenDrawingProjectDescriptor?.()) &&
+      typeof globalThis.window?.handleCompareModelsClick === 'function';
+    if (commit) {
+      commit.disabled = !canCommit;
+      commit.textContent = '新STB-Aを読込・全ビュー改訂確定';
+      commit.title = canCommit
+        ? '検証済みのSTB-A原本を正式モデル読込経路で読み込み、全登録ビューを一括確定します。保存は別操作です。'
+        : '全登録ビューの対応確認、開いているDrawingProject、正式3Dローダーが必要です。';
+    }
+    const preparedZip = this.root.querySelector('#pdf-overlay-rebind-export-prepared-zip');
+    if (preparedZip)
+      preparedZip.disabled = staged.phase !== 'slot' || staged.plan.status !== 'ready';
   }
 
   async stageDrawingProjectReplacement(file) {
@@ -469,7 +1030,7 @@ export class PdfOverlaySessionController {
       throw new Error('先にDrawing Workspace JSONを読み込んでください。');
     const currentDrawing = this.panel.drawing;
     if (!currentDrawing)
-      throw new Error('現在のSVG図面を生成してからSTB改訂差替えを開始してください。');
+      throw new Error('現在の図面を生成してからSTB改訂差替えを開始してください。');
 
     // 別STBのstagingを開始した時点で旧ready planを破棄する。
     // 以後のsnapshot/parseが失敗しても旧revisionのplanを再利用できる状態へ戻さない。
@@ -477,10 +1038,38 @@ export class PdfOverlaySessionController {
       status: '新STBを解析して改訂対応を確認しています…',
     });
 
+    // Multiple registered views own their persisted metadata; do not flatten them
+    // through the legacy single-plan workspace snapshot editor.
+    const persisted = this.loadedDrawingProject;
+    if (persisted.drawingDocuments.length > 1) {
+      const selected = resolveCurrentSheetDrawingDocument(
+        persisted,
+        currentDrawing,
+        this.panel.selectedCadDrawingView?.(),
+        this.activeDrawingDocumentId,
+      );
+      if (
+        persisted.drawingDocuments.filter((item) => item.modelSlotId === selected.modelSlotId)
+          .length > 1
+      )
+        return this.stageDrawingProjectSlotReplacement(file, { selected });
+    }
+
     // runtimeで編集したタグ配置・レビュー・注記等を、差替え元の作図意図として先にsnapshotする。
     // 単一 slot・図面の履歴を保持して現在改訂の runtime 編集を統合する。
     const sourceProject = this.createDrawingProjectSnapshot();
     const document = this.drawingProjectDocumentForCurrent(sourceProject);
+    // A one-view commit would advance the shared modelSlot and strand sibling
+    // DrawingDocuments on an older revision. Keep the legacy UI fail-closed until
+    // the slot-wide staging/review UI is wired to the atomic #650 API.
+    if (
+      sourceProject.drawingDocuments.some(
+        (item) => item.modelSlotId === document.modelSlotId && item.id !== document.id,
+      )
+    )
+      throw new Error(
+        '複数登録ビューのSTB改訂は一括確定が必要です。複数ビュー対応UIは準備中です。',
+      );
     this.panel.services = this.panel.services || this.panel.getServices?.();
     const services = this.panel.services;
     if (typeof services?.createDrawingFromStbFile !== 'function')
@@ -564,6 +1153,10 @@ export class PdfOverlaySessionController {
   reevaluateDrawingProjectReplacement() {
     if (!this.rebindStaged || !this.loadedDrawingProject)
       throw new Error('先に新STBをstagingしてください。');
+    if (this.rebindStaged.slotMode)
+      return this.stageDrawingProjectSlotReplacement(this.rebindStaged.file, {
+        selectedId: this.rebindStaged.selectedDrawingId,
+      });
     if (!this.rebindStaged.imported?.drawing)
       return this.materializeDrawingProjectReplacementStory();
     const sourceProject = this.createDrawingProjectSnapshot();
@@ -584,6 +1177,7 @@ export class PdfOverlaySessionController {
       newRevision: this.rebindStaged.imported.revision,
       drawingModel: this.rebindStaged.imported.drawing,
       approvedMappings: this.approvedMappingsForRebind(),
+      orphanedEntityIds: this.orphanedEntityIdsForRebind(),
     });
     this.rebindStaged = { ...this.rebindStaged, plan };
     this.renderDrawingProjectRebindPlan();
@@ -660,6 +1254,7 @@ export class PdfOverlaySessionController {
       newRevision: imported.revision,
       drawingModel: imported.drawing,
       approvedMappings: this.approvedMappingsForRebind(),
+      orphanedEntityIds: this.orphanedEntityIdsForRebind(),
     });
     this.rebindStaged = { ...staged, imported, plan };
     this.renderDrawingProjectRebindPlan();
@@ -670,6 +1265,7 @@ export class PdfOverlaySessionController {
     const staged = this.rebindStaged;
     if (!staged || !this.loadedDrawingProject)
       throw new Error('確定できるSTB改訂差替えがありません。');
+    if (staged.slotMode) return this.commitDrawingProjectSlotReplacement({ download });
     if (staged.plan.status !== 'ready')
       throw new Error('未解決の対応が残っているためSTB改訂を確定できません。');
 
@@ -677,6 +1273,16 @@ export class PdfOverlaySessionController {
     // current workspaceからplanを再評価し、未解決が生じた場合はcommitせずreview UIへ戻す。
     const sourceProject = this.createDrawingProjectSnapshot();
     const sourceDocument = this.drawingProjectDocumentForCurrent(sourceProject);
+    // Guard commit independently of staging, since an existing plan can outlive
+    // a DrawingProject/view edit. Never publish a partially upgraded modelSlot.
+    if (
+      sourceProject.drawingDocuments.some(
+        (item) => item.modelSlotId === sourceDocument.modelSlotId && item.id !== sourceDocument.id,
+      )
+    )
+      throw new Error(
+        '複数登録ビューのSTB改訂は一括確定が必要です。複数ビュー対応UIは準備中です。',
+      );
     const storyPlan = this.currentReplacementStoryPlan(sourceProject, sourceDocument, staged);
     if (storyPlan && storyPlan.status !== 'ready') {
       this.rebindStaged = {
@@ -693,6 +1299,7 @@ export class PdfOverlaySessionController {
       newRevision: staged.imported.revision,
       drawingModel: staged.imported.drawing,
       approvedMappings: this.approvedMappingsForRebind(),
+      orphanedEntityIds: this.orphanedEntityIdsForRebind(),
     });
     if (currentPlan.status !== 'ready') {
       this.rebindStaged = { ...staged, plan: currentPlan };
@@ -713,7 +1320,10 @@ export class PdfOverlaySessionController {
       drawingId: document.id,
       drawingModel: staged.imported.drawing,
     });
-    const inactiveTags = restored.tagStatuses.filter((item) => !item.active);
+    // 孤児として保持を承認したtagは、新改訂では描画せず作図意図だけ残す。
+    const inactiveTags = restored.tagStatuses.filter(
+      (item) => !item.active && item.invalidationCode !== 'BINDING_ORPHANED',
+    );
     if (inactiveTags.length) {
       const detail = inactiveTags
         .slice(0, 5)
@@ -724,12 +1334,341 @@ export class PdfOverlaySessionController {
       );
     }
 
+    return this.publishDrawingProjectCommittedRevision({
+      staged,
+      sourceDocument,
+      document,
+      restored,
+      committed,
+      download,
+    });
+  }
+
+  /**
+   * Publish no state until every saved view has passed the project-native
+   * tag/dimension/annotation preflight. The final runtime view is the originally
+   * selected one; other registered views remain in persisted metadata.
+   */
+  prepareDrawingProjectSlotReplacement() {
+    const staged = this.rebindStaged;
+    if (!staged?.slotMode || staged.phase !== 'slot' || staged.plan.status !== 'ready')
+      throw new Error('一括確定できる複数ビューSTB改訂がありません。');
+    if (staged.approvalSignature !== drawingProjectSlotApprovalsFingerprint(this.rebindApprovals))
+      throw new Error('対応先の承認内容がstaging後に変更されました。再評価してください。');
+    const project = this.loadedDrawingProject;
+    if (serializeDrawingProject(project) !== staged.sourceProjectSnapshot)
+      throw new Error('staging後に登録ビューや図面が変更されました。STB改訂を再検証してください。');
+    const selected = resolveCurrentSheetDrawingDocument(
+      project,
+      this.panel.drawing,
+      this.panel.selectedCadDrawingView?.(),
+      staged.selectedDrawingId,
+    );
+    if (selected.id !== staged.selectedDrawingId || selected.modelSlotId !== staged.modelSlotId)
+      throw new Error('STB差替え対象の現在ビューが変更されています。');
+    const drawings = Object.fromEntries(
+      Object.entries(staged.importedById).map(([id, result]) => [id, result.drawing]),
+    );
+    const plan = planDrawingProjectSlotRevisionRebind({
+      project,
+      modelSlotId: selected.modelSlotId,
+      newRevision: staged.inspection.revision,
+      drawingModelsById: drawings,
+      approvedMappings: this.approvedMappingsForRebind(),
+      orphanedEntityIds: this.orphanedEntityIdsForRebind(),
+    });
+    if (plan.status !== 'ready') {
+      this.rebindStaged = { ...staged, plan };
+      this.renderDrawingProjectRebindPlan();
+      throw new Error('再評価で未解決の対応が見つかりました。全ビューの対応を確認してください。');
+    }
+    const committed = commitDrawingProjectSlotRevisionRebind({ project, plan });
+    let active = null;
+    for (const viewPlan of plan.viewPlans) {
+      const drawingId = viewPlan.drawingId;
+      const imported = staged.importedById[drawingId];
+      if (!imported?.drawing) throw new Error('staging済みDrawingModelがありません: ' + drawingId);
+      const preflight = stageDrawingProjectArchiveWorkspace({
+        plan: { project: committed, drawingId },
+        drawing: imported.drawing,
+        tagFactsResolver: imported.tagFactsResolver,
+      });
+      if (preflight.restored) {
+        const inactive = preflight.restored.tagStatuses.filter(
+          (item) => !item.active && item.invalidationCode !== 'BINDING_ORPHANED',
+        );
+        if (inactive.length) throw new Error('新STBでタグ配置を復元できません: ' + drawingId);
+      }
+      if (drawingId === staged.selectedDrawingId)
+        active = { document: preflight.document, restored: preflight.restored, imported };
+    }
+    if (!active?.restored) throw new Error('改訂後の現在ビューの復元情報がありません。');
+    return { staged, project, selected, committed, active };
+  }
+
+  /**
+   * A semantic rebind mapping may be edited while an async SHA-256 check or ZIP
+   * export is running. Snapshot approvals, selected view and model source as
+   * well as the DrawingProject: never publish a superseded approval.
+   */
+  drawingProjectSlotWorkspaceSignature() {
+    return drawingProjectSlotWorkspaceFingerprint({
+      memberReviews: this.memberReviews,
+      drawingMemos: this.drawingMemos,
+      tagPlacements: this.tagPlacements,
+      tagFamilyState: this.tagFamilyState,
+      drawingMemoIdentity: this.drawingMemoIdentity,
+    });
+  }
+
+  createDrawingProjectSlotStageLease({ allowProvisionalModelDocument = false } = {}) {
+    return captureDrawingProjectSlotStageLease(
+      () => ({
+        staged: this.rebindStaged,
+        stagePlan: this.rebindStaged?.plan,
+        stagePlanStatus: this.rebindStaged?.plan?.status,
+        sourceFile: this.rebindStaged?.file,
+        project: this.loadedDrawingProject,
+        serializedProject: serializeDrawingProject(this.loadedDrawingProject),
+        drawing: this.panel?.drawing,
+        modelDocument: getState('models.documentA'),
+        activeDrawingDocumentId: this.activeDrawingDocumentId,
+        selectedViewKey: this.panel?.selectedCadDrawingView?.()?.key ?? null,
+        workspaceSignature: this.drawingProjectSlotWorkspaceSignature(),
+        approvals: this.rebindApprovals,
+      }),
+      { allowProvisionalModelDocument },
+    );
+  }
+
+  /**
+   * Construct an explicit, one-shot model-load handoff for a reviewed slot.
+   * The normal compare button still uses the fail-closed drawing guard.
+   */
+  createDrawingProjectSlotModelLoadHandoff() {
+    return createDrawingProjectSlotModelLoadHandoff({
+      session: this,
+      readSelectedFiles: () => ({
+        fileA: globalThis.document?.getElementById?.('fileA')?.files?.[0] ?? null,
+        fileB: globalThis.document?.getElementById?.('fileB')?.files?.[0] ?? null,
+      }),
+    });
+  }
+
+  /**
+   * Prepare a cryptographic proof for the formal model loader's candidate
+   * document, before any provisional reset of models.documentA or the 3D scene.
+   * This does not authorize the ordinary compareModels() UI path to bypass its
+   * registered DrawingProject guard.
+   */
+  async prepareDrawingProjectSlotCandidateProof({ file, candidateDocument, getSelectedFile } = {}) {
+    const staged = this.rebindStaged;
+    const isStageCurrent = this.createDrawingProjectSlotStageLease();
+    return prepareDrawingProjectSlotModelSourceProof({
+      staged,
+      file,
+      candidateDocument,
+      getCurrentStage: () => this.rebindStaged,
+      getSelectedFile,
+      getCurrentOriginalFile: () => getState('files.originalFileA'),
+      isStageCurrent,
+    });
+  }
+
+  /**
+   * Metadata-only, reversible participant for a coordinated STB model load.
+   * The caller must finish raw-source verification before the loader transaction
+   * and separately resynchronize Document Control and CAD rendering after commit.
+   * This does not authorize bypassing the normal model reload guard.
+   */
+  createDrawingProjectSlotModelPublicationParticipant({
+    verifyPublishedModelSource,
+    prepared = null,
+  } = {}) {
+    // The ordinary archive/export lease intentionally includes the old DOM.
+    // For a coordinated model load, models.documentA is already provisional
+    // when the drawingParticipant.publish() runs. Only this verified path may
+    // omit that single field; every other staged input is still protected.
+    if (typeof verifyPublishedModelSource !== 'function')
+      throw new TypeError('正式STB-A原本SHA証明がないため一体公開できません。');
+    if (
+      prepared &&
+      (prepared.staged !== this.rebindStaged ||
+        prepared.project !== this.loadedDrawingProject ||
+        prepared.selected?.modelSlotId !== this.rebindStaged?.modelSlotId)
+    )
+      throw new Error('改訂候補とDrawingProjectの事前検証状態が一致しません。');
+    const publicationPrepared = prepared || this.prepareDrawingProjectSlotReplacement();
+    const assertCurrent = this.createDrawingProjectSlotStageLease({
+      allowProvisionalModelDocument: true,
+    });
+    return createDrawingProjectSlotPublicationParticipant({
+      session: this,
+      prepared: publicationPrepared,
+      assertCurrent,
+      verifyPublishedModelSource,
+      // Capture BEFORE clearLoadedModels replaces files.originalFileA. An
+      // unarchived source revision must remain recoverable after 3D commit.
+      previousOriginalFileA: getState('files.originalFileA'),
+    });
+  }
+
+  /**
+   * Called once after the formal model commit reports a verified Document
+   * Control rebind. All UI restoration happens beyond the rollback boundary.
+   */
+  /** Refresh tag-family controls without mutating DrawingProject registration. */
+  refreshPublishedTagFamilyUi() {
+    refreshPdfDrawingTagFamilyOptions(this.tagFamilyState, globalThis.document);
+    this.tagFamilyUi?.refresh();
+  }
+
+  synchronizeDrawingProjectSlotAfterModelPublication({ prepared } = {}) {
+    return synchronizeDrawingProjectSlotAfterModelLoad({ session: this, prepared });
+  }
+
+  /**
+   * #650: explicit and non-reentrant user action for the formal STB-A loader.
+   * A canceled preflight leaves the old model, DrawingProject and review intact.
+   * After irreversible model publication, failure must not be reported as a
+   * successful rollback of the 3D scene.
+   */
+  async commitDrawingProjectSlotFromUser(event) {
+    if (!event?.isTrusted || this.slotModelLoadInProgress) return false;
+    if (
+      !this.rebindStaged?.slotMode ||
+      this.rebindStaged.phase !== 'slot' ||
+      this.rebindStaged.plan?.status !== 'ready' ||
+      this.rebindAbortController
+    )
+      throw new Error('全登録ビューの改訂対応を再評価してください。');
+    const loadModel = globalThis.window?.handleCompareModelsClick;
+    if (typeof loadModel !== 'function')
+      throw new Error('正式STB-Aモデル読込サービスが初期化されていません。');
+    const confirm = globalThis.window?.confirm;
+    if (typeof confirm !== 'function')
+      throw new Error('STB-A一括改訂の実行確認サービスがありません。');
+    const viewCount = Object.keys(this.rebindStaged.importedById || {}).length;
+    if (
+      !confirm.call(
+        globalThis.window,
+        `検証済みの新STB-Aへ切り替え、同じモデル枠の${viewCount}ビューを一括改訂します。3Dモデルは変更され、旧改訂に戻せない場合があります。開始前に現在のプロジェクトZIP/JSONを保存しましたか？改訂後のZIP/JSONも別途保存してください。続行しますか？`,
+      )
+    )
+      return false;
+
+    // Pin the exact file, reviewed mappings and source descriptor before any
+    // asynchronous model work; never bypass the ordinary Compare button guard.
+    const handoff = this.createDrawingProjectSlotModelLoadHandoff();
+    const oldModelDocument = getState('models.documentA');
+    this.slotModelLoadInProgress = true;
+    const button = this.root.querySelector('#pdf-overlay-rebind-commit');
+    if (button) button.disabled = true;
+    this.setDrawingProjectRebindStatus(
+      '正式STB-Aローダーでモデルと全登録ビューを一体確定しています…',
+    );
+    try {
+      const success = await loadModel.call(globalThis.window, {
+        requireCompleteRendering: true,
+        drawingProjectLoadHandoff: handoff,
+      });
+      if (success !== true) {
+        const modelPublished = getState('models.documentA') !== oldModelDocument;
+        this.setDrawingProjectRebindStatus(
+          modelPublished
+            ? '新STB-Aは公開済みですが図面の一括確定に失敗しました。登録状態を確認し、ZIP/JSONから再検証してください。'
+            : '一括改訂は中止されました。旧モデルと図面を維持しています。対応とSTB原本を確認してください。',
+        );
+        return false;
+      }
+      showSuccess(
+        'STB-Aと全登録ビューを一括改訂しました。新しいプロジェクトZIP/JSONを保存してください。',
+      );
+      return true;
+    } catch (error) {
+      const modelPublished = getState('models.documentA') !== oldModelDocument;
+      this.setDrawingProjectRebindStatus(
+        modelPublished
+          ? '新STB-Aは公開済みですが図面の一括確定後に問題が発生しました。登録状態を確認し、ZIP/JSONから再検証してください。'
+          : `旧STB-Aと図面は維持されています。一括改訂を再検証してください: ${error.message}`,
+      );
+      throw error;
+    } finally {
+      this.slotModelLoadInProgress = false;
+      if (button) {
+        // A rollback may retain a valid reviewed stage. An irreversible
+        // failure has no valid old descriptor and must not enable a retry.
+        button.disabled =
+          !this.rebindStaged?.slotMode ||
+          this.rebindStaged.phase !== 'slot' ||
+          this.rebindStaged.plan?.status !== 'ready' ||
+          !this.getOpenDrawingProjectDescriptor?.();
+      }
+    }
+  }
+
+  async commitDrawingProjectSlotReplacement({ download = true } = {}) {
+    const { staged, selected, committed, active } = this.prepareDrawingProjectSlotReplacement();
+    // The isolated STB importer does not install models.documentA. Never publish
+    // the new DrawingModel while runtime documentA still contains the old STB.
+    const services = this.panel.services || this.panel.getServices?.();
+    if (typeof services?.assertDrawingSourceCurrent !== 'function')
+      throw new Error('新改訂のSTB-A原本確認サービスがありません。');
+    const stageStillCurrent = this.createDrawingProjectSlotStageLease();
+    const originalSha256 = staged.inspection?.revision?.originalSha256;
+    if (!originalSha256)
+      throw new Error('新STB改訂の原本SHA-256がありません。直接確定できません。');
+    await assertDrawingProjectSlotRuntimeCurrent({
+      source: active.imported.drawing.source,
+      getCurrentDocument: () => getState('models.documentA'),
+      getCurrentOriginalFile: () => getState('files.originalFileA'),
+      expectedOriginalSha256: originalSha256,
+      assertDrawingSourceCurrent: (args) => services.assertDrawingSourceCurrent(args),
+      isStageCurrent: stageStillCurrent,
+    });
+    const imported = { ...active.imported, filename: staged.imported.filename };
+    return this.publishDrawingProjectCommittedRevision({
+      staged: { ...staged, imported },
+      sourceDocument: selected,
+      document: active.document,
+      restored: active.restored,
+      committed,
+      download,
+    });
+  }
+
+  publishDrawingProjectCommittedRevision({
+    staged,
+    sourceDocument,
+    document,
+    restored,
+    committed,
+    download,
+  }) {
+    // Revoke before the first mutable UI state change or synchronous event callback.
+    // The replacement is fully validated above; no old revision may remain authorized.
+    this.closeOpenDrawingProject();
     this.panel.measurementUi?.invalidateDrawing();
     this.panel.drawing = staged.imported.drawing;
+    if (staged.slotMode) this.activeDrawingDocumentId = document.id;
     this.panel.tagFactsResolver = staged.imported.tagFactsResolver || null;
     this.panel.sheetLayout = null;
     this.panel.sheetRenderPlan = null;
     this.loadedDrawingProject = committed;
+    this.archiveSourceRevisions = this.archiveSourceRevisions.filter(
+      (item) =>
+        !(
+          item.modelSlotId === sourceDocument.modelSlotId &&
+          item.sourceRevisionId === staged.imported.revision.id
+        ),
+    );
+    this.archiveSourceRevisions.push({
+      modelSlotId: sourceDocument.modelSlotId,
+      sourceRevisionId: staged.imported.revision.id,
+      bytes: staged.file,
+    });
+    this.archiveExportSequence++;
+
     this.drawingProjectId = committed.projectId;
     this.setTagFamilyState(restored.tagFamilyState, { render: false });
     this.memberReviews = restored.memberReviews;
@@ -767,6 +1706,8 @@ export class PdfOverlaySessionController {
     this.clearDrawingProjectReplacement({
       status: `STB改訂を確定しました / ${document.view.storyId} / revision ${shortRevision}… / ${download ? '更新DrawingProject JSONを保存しました。' : ''}旧レビュー状態は履歴として保持し、新改訂へ自動継承していません。`,
     });
+    this.renderOrphanedIntentList();
+    this.openDrawingProject(committed);
     this.setDrawingProjectStatus(
       `改訂済み / ${document.view.storyId} / revision ${shortRevision}… / 履歴を保持`,
     );
@@ -786,7 +1727,7 @@ export class PdfOverlaySessionController {
 
   createDrawingProjectSnapshot() {
     const drawing = this.panel.drawing;
-    if (!drawing) throw new Error('SVG図面を先に生成してください。');
+    if (!drawing) throw new Error('図面を先に生成してください。');
     this.assertLoadedDrawingProjectRewriteSafe();
     this.drawingProjectId ||= runtimeProjectId();
 
@@ -809,7 +1750,8 @@ export class PdfOverlaySessionController {
         const revision = binding.revisions.find(
           (item) => item.sourceRevisionId === loadedDocument.sourceRevisionId,
         );
-        if (!revision) continue;
+        // 孤児化済みentityは現行改訂に対応部材がないため、identityからは引かない。
+        if (!revision?.sourceRef) continue;
         entityIdsByIdentity.set(
           identityKey([
             drawing.source.modelKey,
@@ -878,7 +1820,709 @@ export class PdfOverlaySessionController {
       : result.project;
   }
 
+  /**
+   * Export an already-normalized multi-view project without projecting it through
+   * the single-plan workspace snapshot editor. Only persisted project metadata
+   * is exported; runtime plan edits must be saved through a supported owner.
+   */
+  exportDrawingSheetProject() {
+    const project = this.loadedDrawingProject;
+    if (!project) throw new Error('DrawingProjectが開かれていません。');
+    // Sheet JSON is a persisted layout artifact. It must not require an
+    // active viewport DrawingModel or silently flatten multiple views.
+    const json = serializeDrawingProject(project);
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    const date = new Date().toISOString().slice(0, 10);
+    downloadBlob(blob, `drawing-sheets-${date}.json`);
+    this.setDrawingProjectStatus(
+      `シートメタデータを保存しました（ビュー ${project.drawingDocuments.length}件／シート ${project.drawingSheets?.length ?? 0}件）。未保存のworkspace編集は含みません。`,
+    );
+  }
+
+  /** #565: sheets exist but no model slot or view has been registered yet. */
+  hasPaperOnlyDrawingProject() {
+    const project = this.loadedDrawingProject;
+    return Boolean(project && !project.modelSlots?.length && !project.drawingDocuments?.length);
+  }
+
+  /**
+   * A multi-view sheet project is the persisted metadata authority. Re-projecting
+   * it through createDrawingProjectSnapshot() would flatten its documents and
+   * discard the other saved views/sheets. Verify the explicitly selected current
+   * document, then archive the existing project unchanged. As with sheet JSON
+   * export, unsaved runtime workspace edits are deliberately not included.
+   */
+  createDrawingProjectArchiveSnapshot() {
+    const project = this.loadedDrawingProject;
+    // With no open drawing there is no unsaved workspace state to merge; the saved
+    // project is the authority, so a sheet/view project is archived unchanged.
+    if (project && (!this.panel.drawing || this.hasPaperOnlyDrawingProject())) return project;
+    if (
+      !project ||
+      (project.drawingDocuments?.length === 1 &&
+        project.drawingDocuments[0].view?.type === 'plan' &&
+        !project.drawingDocuments[0].view.cutBoundsMm)
+    )
+      return this.createDrawingProjectSnapshot();
+    resolveCurrentSheetDrawingDocument(
+      project,
+      this.panel.drawing,
+      this.panel.selectedCadDrawingView?.(),
+      this.activeDrawingDocumentId,
+    );
+    return project;
+  }
+
+  /** P2: refuse export when historical source revisions are missing or modified. */
+  async exportDrawingProjectZip({
+    projectOverride = null,
+    extraSourceRevision = null,
+    assertExportStageCurrent = null,
+  } = {}) {
+    const project = projectOverride || this.createDrawingProjectArchiveSnapshot();
+    const serializedProject = serializeDrawingProject(project);
+    const drawing = this.panel.drawing;
+    const model = this.currentModelDocument();
+    const sequence = ++this.archiveExportSequence;
+    this.panel.services = this.panel.services || this.panel.getServices?.();
+    const services = this.panel.services;
+    if (typeof services?.inspectStbRevisionFile !== 'function')
+      throw new Error('ZIP保存にはSTB原本の改訂検査サービスが必要です。');
+    const sourceRevisions = await collectDrawingProjectArchiveSources({
+      project,
+      retainedSourceRevisions: [
+        ...this.archiveSourceRevisions.filter(
+          (item) =>
+            !extraSourceRevision ||
+            item.modelSlotId !== extraSourceRevision.modelSlotId ||
+            item.sourceRevisionId !== extraSourceRevision.sourceRevisionId,
+        ),
+        ...(extraSourceRevision ? [extraSourceRevision] : []),
+      ],
+      originalFiles: [getState('files.originalFileA'), getState('files.originalFileB')],
+      inspectOriginalStb: async ({ bytes }) => {
+        const inspected = await services.inspectStbRevisionFile({
+          file: new Blob([bytes], { type: 'application/xml' }),
+        });
+        return inspected.revision.sha256;
+      },
+    });
+    const hashes = new Map(
+      sourceRevisions.map((source) => [
+        JSON.stringify([source.modelSlotId, source.sourceRevisionId]),
+        source.originalSha256,
+      ]),
+    );
+    const archiveProject = {
+      ...project,
+      modelSlots: project.modelSlots.map((slot) => ({
+        ...slot,
+        revisions: slot.revisions.map((revision) => {
+          const originalSha256 = hashes.get(JSON.stringify([slot.id, revision.id]));
+          if (!originalSha256) throw new Error('ZIP書出しに必要な原本ハッシュが不足しています。');
+          return { ...revision, originalSha256 };
+        }),
+      })),
+    };
+    const persistedReferences = this.panel.referencePersistenceSnapshot?.() || [];
+    if ((this.panel.referenceDrawings?.length || 0) !== persistedReferences.length)
+      throw new Error('DXF参照原本が未保持の図形を含むためZIP保存できません。');
+    const referenceAssets = await Promise.all(
+      persistedReferences.map(async (record) => {
+        const documentId = record.asset.source.documentId;
+        const retained = this.panel.referenceAssets?.get(documentId);
+        if (!retained?.file || typeof retained.file.arrayBuffer !== 'function')
+          throw new Error('ZIP保存に必要なDXF参照原本がありません: ' + documentId);
+        return {
+          documentId,
+          descriptor: record.asset,
+          display: record.display,
+          bytes: new Uint8Array(await retained.file.arrayBuffer()),
+        };
+      }),
+    );
+    // A chosen print font is not automatically redistributable. Require an
+    // explicit confirmation before bundling the original TTF in a shared ZIP.
+    const selectedFont =
+      this.panel.e?.['pdf-overlay-vector-font']?.files?.[0] || this.archivedPdfFontFile || null;
+    if (
+      selectedFont &&
+      globalThis.confirm?.(
+        '指定したTTFフォント原本をZIPに同梱します。再配布のライセンスを確認し、同梱を許可しますか？',
+      ) !== true
+    )
+      throw new Error('TTF原本の再配布確認が得られないためZIP保存を中止しました。');
+    const fontAsset = selectedFont
+      ? { name: selectedFont.name, bytes: new Uint8Array(await selectedFont.arrayBuffer()) }
+      : null;
+    const referenceSignature = JSON.stringify(persistedReferences);
+    const zip = await createDrawingProjectArchive({
+      project: archiveProject,
+      sourceRevisions,
+      referenceAssets,
+      fontAsset,
+    });
+    if (
+      sequence !== this.archiveExportSequence ||
+      drawing !== this.panel.drawing ||
+      model !== this.currentModelDocument() ||
+      (projectOverride
+        ? typeof assertExportStageCurrent !== 'function' || !assertExportStageCurrent()
+        : serializedProject !==
+          serializeDrawingProject(this.createDrawingProjectArchiveSnapshot())) ||
+      referenceSignature !== JSON.stringify(this.panel.referencePersistenceSnapshot?.() || []) ||
+      selectedFont !==
+        (this.panel.e?.['pdf-overlay-vector-font']?.files?.[0] || this.archivedPdfFontFile || null)
+    ) {
+      throw new Error('ZIP作成中に図面またはプロジェクトが変更されました。再度保存してください。');
+    }
+    const date = new Date().toISOString().slice(0, 10);
+    downloadBlob(
+      new Blob([zip], { type: 'application/zip' }),
+      (projectOverride ? 'drawing-revision-prepared-' : 'drawing-workspace-') + date + '.sdv.zip',
+    );
+    this.setDrawingProjectStatus(
+      (projectOverride
+        ? '未適用の改訂ZIP保存済み（現在のSTB-Aは変更していません） / '
+        : 'ZIP保存済み / ') +
+        'STB原本 ' +
+        sourceRevisions.length +
+        '改訂 / DXF参照 ' +
+        referenceAssets.length +
+        '件 / TTF ' +
+        (fontAsset ? '同梱' : 'なし') +
+        ' / SHA-256検証済み' +
+        (project.drawingDocuments.length > 1
+          ? ' / 複数シート保存済み（未保存のworkspace編集を除く）'
+          : ''),
+    );
+    showSuccess(
+      projectOverride
+        ? '未適用の改訂済みDrawingProjectとSTB原本をZIPへ保存しました。現在のモデルは変更していません。'
+        : 'STB原本とDrawingProjectをZIPへ保存しました。',
+    );
+  }
+
+  /**
+   * Export a fully validated slot rebind as a portable ZIP without touching the
+   * global STB-A loader, selected drawing, runtime reviews or persisted project.
+   */
+  async exportPreparedDrawingProjectSlotZip() {
+    const { staged, project, committed } = this.prepareDrawingProjectSlotReplacement();
+    if (!staged.file || staged.modelSlotId == null || staged.inspection?.revision?.id == null)
+      throw new Error('改訂ZIPに同梱する新STB原本がありません。');
+    const serialized = serializeDrawingProject(project);
+    const stageStillCurrent = this.createDrawingProjectSlotStageLease();
+    return this.exportDrawingProjectZip({
+      projectOverride: committed,
+      extraSourceRevision: {
+        modelSlotId: staged.modelSlotId,
+        sourceRevisionId: staged.inspection.revision.id,
+        bytes: staged.file,
+      },
+      assertExportStageCurrent: () =>
+        stageStillCurrent() && serializeDrawingProject(project) === serialized,
+    });
+  }
+
+  /** ZIP import: existing-model validation or verified empty-session STB cold-start. */
+  async importDrawingProjectZip(file) {
+    if (!file) return;
+    // Every new selection, including a rejected oversized ZIP, must revoke
+    // the previous import before asynchronous validation or decompression.
+    const request = ++this.drawingImportSequence;
+    // Separate from drawingImportSequence: normal model/drawing lifecycle events
+    // legitimately increment that sequence during a successful cold-start.
+    const coldStartEpoch = (this.zipColdStartEpoch || 0) + 1;
+    this.zipColdStartEpoch = coldStartEpoch;
+    if (typeof file.size === 'number' && file.size > 160 * 1024 * 1024)
+      throw new Error('ZIPファイルが160MiBの制限を超えています。');
+    const drawing = this.panel.drawing;
+    const model = this.currentModelDocument();
+    const sourceA = getState('models.documentA');
+    const sourceB = getState('models.documentB');
+    const editing = getState('models.editing');
+    const editingSnapshot = {
+      active: editing?.active,
+      sessionId: editing?.sessionId,
+      workingRevision: editing?.workingRevision,
+      workingDocument: editing?.workingDocument,
+    };
+    const archiveSequence = this.archiveExportSequence;
+    const coldStart =
+      !drawing && !model && !getState('models.documentA') && !getState('models.documentB');
+    // A paper-only archive (#565) needs no open model, but that is known only after reading it.
+    const needsOpenModel = Boolean(this.drawingLifecycle && (!drawing || !model) && !coldStart);
+    const openModelMessage = 'ZIP読込前にモデルと図面を開くか、モデルを全て解除してください。';
+    const assertCurrentImport = () => {
+      const currentEditing = getState('models.editing');
+      if (
+        request !== this.drawingImportSequence ||
+        coldStartEpoch !== this.zipColdStartEpoch ||
+        archiveSequence !== this.archiveExportSequence ||
+        drawing !== this.panel.drawing ||
+        model !== this.currentModelDocument() ||
+        sourceA !== getState('models.documentA') ||
+        sourceB !== getState('models.documentB') ||
+        editing !== currentEditing ||
+        editingSnapshot.active !== currentEditing?.active ||
+        editingSnapshot.sessionId !== currentEditing?.sessionId ||
+        editingSnapshot.workingRevision !== currentEditing?.workingRevision ||
+        editingSnapshot.workingDocument !== currentEditing?.workingDocument
+      ) {
+        throw new Error(
+          'ZIP読込中にモデル、図面または編集状態が変更されました。再度読み込んでください。',
+        );
+      }
+    };
+    const zipBytes = new Uint8Array(await file.arrayBuffer());
+    assertCurrentImport(); // Avoid decompressing a ZIP selected for a previous model.
+    const {
+      project,
+      sourceRevisions,
+      referenceAssets = [],
+      fontAsset = null,
+    } = await readDrawingProjectArchive(zipBytes);
+    assertCurrentImport(); // Also cover a switch during asynchronous digest verification.
+    const paperOnlyArchive = !project.modelSlots.length && !project.drawingDocuments.length;
+    if (needsOpenModel && !paperOnlyArchive) throw new Error(openModelMessage);
+    // Hand a verified immutable font file interface to the existing PDF
+    // renderer. Never install fonts globally or change the user's file input.
+    const restoredFontFile = fontAsset
+      ? Object.freeze({
+          name: fontAsset.name,
+          size: fontAsset.bytes.length,
+          arrayBuffer: async () => new Uint8Array(fontAsset.bytes).buffer,
+        })
+      : null;
+    // Parse and verify every packaged DXF *before* the model/workspace is mutated.
+    const preparedReferences = [];
+    if (referenceAssets.length) {
+      const services = this.panel.services || this.panel.getServices?.();
+      if (typeof services?.restoreDxfReferenceDrawing !== 'function')
+        throw new Error('ZIP内DXF参照原本の復元サービスがありません。');
+      for (const asset of referenceAssets) {
+        const file = new Blob([asset.bytes], { type: 'application/dxf' });
+        const imported = await services.restoreDxfReferenceDrawing({
+          file,
+          assetDescriptor: asset.descriptor,
+        });
+        if (imported.referenceDrawing?.source?.documentId !== asset.documentId)
+          throw new Error('ZIP内DXF原本の参照IDが一致しません。');
+        preparedReferences.push({ asset, file, imported });
+        assertCurrentImport();
+      }
+    }
+    // A paper-only archive holds no STB original, so it never needs the STB cold start.
+    if (coldStart && this.drawingLifecycle && !paperOnlyArchive) {
+      await this.importDrawingProjectZipColdStart({
+        project,
+        sourceRevisions,
+        assertCurrentImport,
+        coldStartEpoch,
+        preparedReferences,
+        restoredFontFile,
+      });
+    } else {
+      // Existing-model imports retain the JSON stage and its source/binding validation.
+      // Keep the import lease across the JSON await. Without it, an earlier ZIP
+      // can publish its DXF, font or STB originals after a newer ZIP/JSON import.
+      await this.importDrawingProject(
+        { text: async () => serializeDrawingProject(project) },
+        { zipColdStartEpoch: coldStartEpoch },
+      );
+      if (coldStartEpoch !== this.zipColdStartEpoch)
+        throw new Error('ZIP読込中に別の読込操作が開始されました。');
+      this.applyZipReferenceAssets(preparedReferences);
+      if (coldStartEpoch !== this.zipColdStartEpoch)
+        throw new Error('ZIP読込中に別の読込操作が開始されました。');
+      this.archivedPdfFontFile = restoredFontFile;
+    }
+    // Cold-start legitimately advances drawingImportSequence and archiveExportSequence
+    // inside modelLoader/JSON restoration. The independent epoch is the only
+    // operation token that survives both lifecycles.
+    if (coldStartEpoch !== this.zipColdStartEpoch)
+      throw new Error('ZIP読込中に別の読込操作が開始されました。');
+    this.archiveSourceRevisions = sourceRevisions;
+    this.archiveExportSequence++;
+    this.setDrawingProjectStatus(
+      'ZIP読込済み / STB原本 ' +
+        sourceRevisions.length +
+        '改訂 / DXF参照 ' +
+        preparedReferences.length +
+        '件 / TTF ' +
+        (restoredFontFile ? '復元済み' : 'なし') +
+        ' / 図面復元済み',
+    );
+  }
+
+  /**
+   * Restore a ZIP into an *empty* SDV session. Never set models.documentA directly:
+   * the ordinary loader owns XML parsing, node maps, events and 3D lifecycle.
+   * All ZIP integrity, source revision and active drawing intent checks precede
+   * the first mutable operation. On subsequent failure, roll back to empty state.
+   */
+  async importDrawingProjectZipColdStart({
+    project,
+    sourceRevisions,
+    assertCurrentImport,
+    coldStartEpoch,
+    preparedReferences = [],
+    restoredFontFile = null,
+  }) {
+    assertCurrentImport();
+    const services = this.panel.services || this.panel.getServices?.();
+    if (
+      typeof services?.createDrawingFromStbFile !== 'function' ||
+      typeof services?.assertDrawingSourceCurrent !== 'function'
+    )
+      throw new Error('STB図面の正式な検証・生成サービスが初期化されていません。');
+
+    // Prefer plans by default, but permit explicit elevation selection even
+    // when the archive contains a current plan. A mixed plan/elevation project
+    // must not make its saved axis views inaccessible at cold start.
+    const currentDocuments = (project.drawingDocuments || []).filter((document) => {
+      const slot = project.modelSlots.find((item) => item.id === document.modelSlotId);
+      return (
+        slot?.currentRevisionId === document.sourceRevisionId &&
+        ['plan', 'elevation'].includes(document.view?.type)
+      );
+    });
+    const plans = currentDocuments.filter((document) => document.view.type === 'plan');
+    const elevations = currentDocuments.filter((document) => document.view.type === 'elevation');
+    const candidates = [...plans, ...elevations];
+    if (!candidates.length) throw new Error('ZIP初期復元に対応する現行STB図面がありません。');
+    let selectedDocument = candidates[0];
+    if (candidates.length > 1) {
+      const options = candidates
+        .map((document, index) => {
+          const label =
+            document.view.type === 'plan'
+              ? document.view.storyId
+              : `${document.view.axisDirection}/${document.view.axisId}`;
+          return `${index + 1}: ${document.id} / ${label}`;
+        })
+        .join('\n');
+      const answer = globalThis.prompt?.(
+        'ZIPから最初に復元する図面の番号を入力してください。\n' + options,
+        '1',
+      );
+      const index = Number(answer);
+      if (
+        answer == null ||
+        !/^\d+$/.test(String(answer)) ||
+        !Number.isSafeInteger(index) ||
+        index < 1 ||
+        index > candidates.length
+      )
+        throw new Error('ZIPの初期復元対象が選択されませんでした。');
+      selectedDocument = candidates[index - 1];
+    }
+    if (
+      selectedDocument.view.type === 'elevation' &&
+      typeof services.createElevationFromStbFile !== 'function'
+    )
+      throw new Error('軸組図の独立復元サービスがありません。');
+    const staged = await stageDrawingProjectArchiveWithIntents({
+      project,
+      sourceRevisions,
+      drawingId: selectedDocument.id,
+      createDrawingFromStbFile: (args) => services.createDrawingFromStbFile(args),
+      createElevationFromStbFile: (args) => services.createElevationFromStbFile(args),
+    });
+    assertCurrentImport();
+    // A multi-view ZIP publishes the complete DrawingProject, not just the
+    // first selected view. Reject unresolved tags, dimensions and reviews in
+    // other current views before the regular model loader mutates the session.
+    for (const document of currentDocuments) {
+      if (document.id === selectedDocument.id) continue;
+      // Even an intent-free view must have a valid story/axis in the packaged STB.
+      // Otherwise a missing view is silently accepted and fails only when opened later.
+      await stageDrawingProjectArchiveWithIntents({
+        project,
+        sourceRevisions,
+        drawingId: document.id,
+        createDrawingFromStbFile: (args) => services.createDrawingFromStbFile(args),
+        createElevationFromStbFile: (args) => services.createElevationFromStbFile(args),
+      });
+      assertCurrentImport();
+    }
+
+    const inputA = globalThis.document?.getElementById?.('fileA');
+    const inputB = globalThis.document?.getElementById?.('fileB');
+    if (
+      !inputA ||
+      !inputB ||
+      inputA.files?.length ||
+      inputB.files?.length ||
+      getState('models.documentA') ||
+      getState('models.documentB') ||
+      getState('models.editing')?.active
+    )
+      throw new Error('ZIP単独復元はSTB-A/Bが未選択・未読込の状態で実行してください。');
+    if (
+      typeof globalThis.File !== 'function' ||
+      typeof globalThis.DataTransfer !== 'function' ||
+      typeof globalThis.window?.handleCompareModelsClick !== 'function'
+    )
+      throw new Error('ZIPからモデルを初期化するためのブラウザ読込経路が利用できません。');
+
+    const importArchiveSequence = this.archiveExportSequence;
+    const assertNotSuperseded = () => {
+      if (
+        coldStartEpoch !== this.zipColdStartEpoch ||
+        importArchiveSequence !== this.archiveExportSequence
+      )
+        throw new Error('ZIP初期復元中に別の読込・保存操作が開始されました。');
+      // A user can select another STB while the regular model loader is still
+      // awaiting XML processing. A new selection may not yet have committed a
+      // model or advanced a drawing sequence, so also fence both file inputs.
+      if (installedFile && (inputA.files?.[0] !== installedFile || inputB.files?.length))
+        throw new Error('ZIP初期復元中にSTBの入力ファイル選択が変更されました。');
+    };
+    const modelFile = new File([staged.plan.sourceBytes], 'drawing-project.stb', {
+      type: 'application/xml',
+    });
+    const transfer = new DataTransfer();
+    transfer.items.add(modelFile);
+    // Immediately before invoking the normal loader, recheck the import token.
+    assertCurrentImport();
+    let committedModel = null;
+    let installedFile = null;
+    try {
+      inputA.files = transfer.files;
+      installedFile = inputA.files?.[0] || null;
+      if (!installedFile) throw new Error('ZIP内STB原本をモデルAの入力へ設定できませんでした。');
+      inputA.dispatchEvent(new Event('change', { bubbles: true }));
+      assertNotSuperseded();
+      await globalThis.window.handleCompareModelsClick();
+      assertNotSuperseded();
+      committedModel = getState('models.documentA');
+      if (!committedModel || getState('models.documentB'))
+        throw new Error('ZIPのSTB-Aを正式なmodelLoaderで読み込めませんでした。');
+      await services.assertDrawingSourceCurrent({ source: staged.drawing.source });
+      this.panel.e['pdf-overlay-model'].value = 'A';
+      this.panel.refreshModelAndStories();
+      if (staged.plan.view.type === 'plan') {
+        this.panel.e['pdf-overlay-story'].value = String(staged.plan.storyId);
+        if (this.panel.e['pdf-overlay-story'].value !== String(staged.plan.storyId))
+          throw new Error('ZIPに記録された対象階がSTB-Aにありません。');
+      }
+      if (Array.isArray(this.panel.cadDrawingViews)) {
+        const matchingView = this.panel.cadDrawingViews.find((view) =>
+          staged.plan.view.type === 'plan'
+            ? view.type === 'plan' && String(view.storyId) === String(staged.plan.storyId)
+            : view.type === 'elevation' &&
+              view.axisDirection === staged.plan.view.axisDirection &&
+              String(view.axisId) === String(staged.plan.view.axisId),
+        );
+        if (!matchingView || !this.panel.e['pdf-overlay-view-list'])
+          throw new Error('ZIPの保存図面に対応するビュー候補がありません。');
+        this.panel.e['pdf-overlay-view-list'].value = matchingView.key;
+      }
+      if (staged.plan.view.type === 'elevation') {
+        if (!this.panel.e['pdf-overlay-elevation-depth'])
+          throw new Error('軸組図の奥行指定欄がありません。');
+        this.panel.e['pdf-overlay-elevation-depth'].value = String(staged.plan.view.depth);
+      }
+      if (this.panel.e['pdf-overlay-display-mode'])
+        this.panel.e['pdf-overlay-display-mode'].value = 'stb';
+      await this.panel.buildDrawing();
+      assertNotSuperseded();
+      const actualView = this.panel.drawing?.view;
+      const expectedView = staged.plan.view;
+      const matchingView =
+        expectedView.type === 'plan'
+          ? actualView?.type === 'plan' &&
+            String(actualView.storyId) === String(staged.plan.storyId)
+          : actualView?.type === 'elevation' &&
+            actualView.axisDirection === expectedView.axisDirection &&
+            String(actualView.axisId) === String(expectedView.axisId) &&
+            Number.isFinite(actualView.lowerBound) &&
+            Number.isFinite(actualView.upperBound) &&
+            Number.isFinite(actualView.position) &&
+            Math.abs((actualView.lowerBound + actualView.upperBound) / 2 - actualView.position) <
+              1e-6 &&
+            Math.abs((actualView.upperBound - actualView.lowerBound) / 2 - expectedView.depth) <
+              1e-6;
+      if (
+        !this.panel.drawing ||
+        this.panel.drawing.source?.modelKey !== 'A' ||
+        this.panel.drawing.source?.modelRevision !== staged.plan.sourceSha256 ||
+        !matchingView
+      )
+        throw new Error('正式ロード後のDrawingModelがZIPの改訂・ビューと一致しません。');
+      // Reuse the regular JSON import's binding/view validation and workspace
+      // ownership path; do not duplicate its tag or lifecycle mutations.
+      await this.importDrawingProject(
+        {
+          text: async () => serializeDrawingProject(staged.plan.project),
+        },
+        { zipColdStartEpoch: coldStartEpoch, drawingId: staged.document.id },
+      );
+      // DXF activation is part of the same empty-session transaction. A
+      // rendering failure must roll back STB-A and the DrawingProject too;
+      // doing this after returning from cold-start left a half-open session.
+      if (coldStartEpoch !== this.zipColdStartEpoch)
+        throw new Error('ZIP初期復元中に別の読込操作が開始されました。');
+      if (staged.document.view.cutBoundsMm) {
+        this.panel.drawing = cutDrawingModelToBounds(
+          this.panel.drawing,
+          staged.document.view.cutBoundsMm,
+        );
+        this.panel.renderOverlay();
+      }
+      this.applyZipReferenceAssets(preparedReferences);
+      // importDrawingProject() intentionally increments archiveExportSequence
+      // when it commits the restored workspace. Its own source/view gate has
+      // completed; only a genuinely newer ZIP/JSON import can supersede us now.
+      if (coldStartEpoch !== this.zipColdStartEpoch)
+        throw new Error('ZIP初期復元中に別の読込操作が開始されました。');
+      this.archivedPdfFontFile = restoredFontFile;
+    } catch (error) {
+      // This entry is allowed only from an empty model session. Do not clear
+      // a newer external load if the user replaced the file during our await.
+      // A newly selected or loaded STB-B is never owned by this ZIP. Never
+      // clear it even if it was installed before the failure was observed.
+      // Dynamic import is asynchronous. Capture both loaded model identities
+      // now: committedModel may still be null if the ordinary loader failed
+      // before our first assignment. A newer model installed during the await
+      // must never be removed by an obsolete rollback.
+      const modelAAtFailure = getState('models.documentA');
+      const modelBAtFailure = getState('models.documentB');
+      const ownsFailedLoad = () =>
+        ownsZipColdStartRollback({
+          expectedEpoch: coldStartEpoch,
+          currentEpoch: this.zipColdStartEpoch,
+          installedFile,
+          currentInputFile: inputA.files?.[0],
+          otherInputFile: inputB.files?.[0] || null,
+          modelAAtFailure,
+          currentModelA: getState('models.documentA'),
+          modelBAtFailure,
+          currentModelB: getState('models.documentB'),
+          committedModel,
+        });
+      if (ownsFailedLoad()) {
+        let cleared = false;
+        try {
+          const { clearLoadedModels } =
+            await import('../../../app/controllers/modelLoaderController.js');
+          if (!ownsFailedLoad()) throw new Error('ZIPの復旧中に別のモデルが読み込まれました。');
+          clearLoadedModels();
+          cleared = true;
+          this.panel.invalidateDrawing?.('ZIP初期復元に失敗しました。');
+          this.closeOpenDrawingProject();
+          this.loadedDrawingProject = null;
+          this.drawingProjectId = null;
+          this.activeDrawingDocumentId = null;
+          this.archiveSourceRevisions = [];
+          this.archivedPdfFontFile = null;
+          this.memberReviews = [];
+          this.drawingMemos = [];
+          this.tagPlacements = [];
+        } catch (rollbackError) {
+          // Preserve the original import failure, not a secondary cleanup error.
+          globalThis.console?.error?.('ZIP初期復元のロールバックに失敗', rollbackError);
+        } finally {
+          // Do not erase an input supplied by a newer request. Clearing the
+          // global model also resets the ordinary loader's file/source state.
+          if (
+            cleared &&
+            coldStartEpoch === this.zipColdStartEpoch &&
+            inputA.files?.[0] === installedFile
+          ) {
+            inputA.value = '';
+            inputA.dispatchEvent(new Event('change', { bubbles: true }));
+            // A failed cold-start must not leave the old floor/view options active.
+            this.panel.refreshModelAndStories?.();
+          }
+        }
+      }
+      throw error;
+    }
+  }
+
+  /** Commit verified reference DXF drawings as one UI update after project restore. */
+  applyZipReferenceAssets(prepared) {
+    if (!(this.panel.referenceAssets instanceof Map)) return; // controller-only fixtures
+    const previous = {
+      drawings: this.panel.referenceDrawings,
+      assets: this.panel.referenceAssets,
+      display: this.panel.referenceDisplaySettings,
+      sequence: this.panel.referenceDocumentSequence,
+      sheetLayout: this.panel.sheetLayout,
+      sheetRenderPlan: this.panel.sheetRenderPlan,
+    };
+    try {
+      this.panel.referenceDrawings = prepared.map(({ imported }) => imported.referenceDrawing);
+      this.panel.referenceAssets = new Map(
+        prepared.map(({ asset, file }) => [
+          asset.documentId,
+          Object.freeze({ file, descriptor: asset.descriptor }),
+        ]),
+      );
+      this.panel.referenceDisplaySettings = Object.fromEntries(
+        prepared.map(({ asset, imported }) => [
+          asset.documentId,
+          asset.display || {
+            visible: true,
+            opacity: 0.65,
+            color: null,
+            layers: Object.fromEntries(
+              imported.referenceDrawing.layers.map((layer) => [layer.id, true]),
+            ),
+          },
+        ]),
+      );
+      this.panel.referenceDocumentSequence = Math.max(
+        previous.sequence || 0,
+        ...prepared.map(({ asset }) => {
+          const match = /^dxf-reference-(\d+)$/.exec(asset.documentId);
+          return match ? Number(match[1]) : 0;
+        }),
+      );
+      this.panel.sheetLayout = null;
+      this.panel.sheetRenderPlan = null;
+      this.panel.renderReferenceDrawingList?.();
+      this.panel.updatePdfFeatureAvailability?.();
+      if (this.panel.e?.['pdf-overlay-display-mode']?.value === 'stb') this.panel.renderOverlay?.();
+    } catch (error) {
+      this.panel.referenceDrawings = previous.drawings;
+      this.panel.referenceAssets = previous.assets;
+      this.panel.referenceDisplaySettings = previous.display;
+      this.panel.referenceDocumentSequence = previous.sequence;
+      this.panel.sheetLayout = previous.sheetLayout;
+      this.panel.sheetRenderPlan = previous.sheetRenderPlan;
+      // The list renderer may already have replaced DOM nodes before a later
+      // SVG overlay render fails. Restore the visible UI from the old state,
+      // without allowing a secondary cleanup error to mask the primary one.
+      try {
+        this.panel.renderReferenceDrawingList?.();
+        this.panel.updatePdfFeatureAvailability?.();
+        if (this.panel.e?.['pdf-overlay-display-mode']?.value === 'stb')
+          this.panel.renderOverlay?.();
+      } catch (restoreError) {
+        globalThis.console?.error?.('ZIP DXF表示の復旧に失敗', restoreError);
+      }
+      throw error;
+    }
+  }
+
   exportDrawingProject() {
+    // Issue #612: persisted multi-view / sheet projects must never be flattened
+    // through the single-plan workspace snapshot exporter. Route the single
+    // project-export command to the owner of the saved project instead.
+    const savedProject = this.loadedDrawingProject;
+    if (
+      savedProject &&
+      (!this.panel.drawing ||
+        (savedProject.drawingSheets?.length ?? 0) > 0 ||
+        (savedProject.drawingDocuments?.length ?? 0) > 1)
+    ) {
+      this.exportDrawingSheetProject();
+      return;
+    }
     const project = this.createDrawingProjectSnapshot();
     const json = serializeDrawingProject(project);
     const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
@@ -892,7 +2536,7 @@ export class PdfOverlaySessionController {
 
   drawingProjectDocumentForCurrent(project) {
     const drawing = this.panel.drawing;
-    if (!drawing) throw new Error('SVG図面を先に生成してください。');
+    if (!drawing) throw new Error('図面を先に生成してください。');
     const revisionKey = String(drawing.source.modelRevision || '').toLowerCase();
     const matches = project.drawingDocuments.filter((document) => {
       if (!samePlanView(document.view, drawing.view)) return false;
@@ -962,7 +2606,8 @@ export class PdfOverlaySessionController {
           document.annotations.find((item) => item.id === status.id)?.context.sourceRevisionId ===
           document.sourceRevisionId,
       ),
-      ...restored.tagStatuses,
+      // 孤児として保持したtagは現行改訂で描画しないだけで、復元失敗ではない。
+      ...restored.tagStatuses.filter((item) => item.invalidationCode !== 'BINDING_ORPHANED'),
     ].filter((item) => !item.active);
     if (inactive.length) {
       const detail = inactive
@@ -976,13 +2621,121 @@ export class PdfOverlaySessionController {
     return { document, restored };
   }
 
-  async importDrawingProject(file) {
+  async importDrawingProject(file, { zipColdStartEpoch = null, drawingId = null } = {}) {
     if (!file) return;
+    if (zipColdStartEpoch == null) {
+      this.zipColdStartEpoch = (this.zipColdStartEpoch || 0) + 1;
+    } else if (zipColdStartEpoch !== this.zipColdStartEpoch) {
+      throw new Error('ZIP初期復元中に別の読込操作が開始されました。');
+    }
+    const sequence = this.drawingLifecycle ? ++this.drawingImportSequence : null;
+    const drawing = this.panel.drawing;
+    const model = this.currentModelDocument();
+    const sourceA = getState('models.documentA');
+    const sourceB = getState('models.documentB');
+    const editing = getState('models.editing');
+    const editingSnapshot = {
+      active: editing?.active,
+      sessionId: editing?.sessionId,
+      workingRevision: editing?.workingRevision,
+      workingDocument: editing?.workingDocument,
+    };
+    const sourceUnchanged = () => {
+      const currentEditing = getState('models.editing');
+      return (
+        sourceA === getState('models.documentA') &&
+        sourceB === getState('models.documentB') &&
+        editing === currentEditing &&
+        editingSnapshot.active === currentEditing?.active &&
+        editingSnapshot.sessionId === currentEditing?.sessionId &&
+        editingSnapshot.workingRevision === currentEditing?.workingRevision &&
+        editingSnapshot.workingDocument === currentEditing?.workingDocument
+      );
+    };
     const project = parseDrawingProject(await readFileAsText(file));
-    const staged = this.stageDrawingProject(project);
-
+    // #565: a paper-only project (sheets, no model slot or view) needs no open model.
+    const paperOnlyProject = !project.modelSlots.length && !project.drawingDocuments.length;
+    if (this.drawingLifecycle && !paperOnlyProject && (!drawing || !model))
+      throw new Error('モデルと図面を先に開いてください。');
+    if (
+      this.drawingLifecycle &&
+      (sequence !== this.drawingImportSequence ||
+        drawing !== this.panel.drawing ||
+        model !== this.currentModelDocument() ||
+        !sourceUnchanged())
+    ) {
+      throw new Error('読込中にモデルまたは図面が変更されました。再度読み込んでください。');
+    }
+    if (paperOnlyProject) {
+      this.closeOpenDrawingProject();
+      this.archivedPdfFontFile = null;
+      this.drawingProjectId = project.projectId;
+      this.loadedDrawingProject = project;
+      this.activeDrawingDocumentId = null;
+      this.clearDrawingProjectReplacement();
+      this.panel.sheetBrowser?.invalidatePreviewSources?.();
+      this.panel.sheetBrowser?.render();
+      this.panel.updatePdfFeatureAvailability?.();
+      this.setDrawingProjectStatus(
+        `シートJSON読込済み / ビュー 0件 / シート ${project.drawingSheets.length}件。`,
+      );
+      showSuccess('空シートのDrawingProjectを復元しました。');
+      return;
+    }
+    // A multi-view DrawingProject is an independent sheet metadata owner.
+    // Never feed it through the legacy single-plan workspace restoration.
+    const multiViewSheetProject =
+      project.drawingDocuments.length > 1 ||
+      project.drawingDocuments[0]?.view?.type === 'elevation' ||
+      Boolean(project.drawingDocuments[0]?.view?.cutBoundsMm);
+    const staged = multiViewSheetProject
+      ? stageDrawingSheetProjectImport({
+          project,
+          drawing,
+          selectedView: this.panel.selectedCadDrawingView?.(),
+          drawingId,
+        })
+      : this.stageDrawingProject(project);
+    if (multiViewSheetProject) {
+      const services = this.panel.services || this.panel.getServices?.();
+      if (typeof services?.assertDrawingSourceCurrent !== 'function')
+        throw new Error('シートJSON再読込にはSTB-Aの現行改訂照合サービスが必要です。');
+      await services.assertDrawingSourceCurrent({ source: drawing.source });
+    }
+    if (
+      this.drawingLifecycle &&
+      (sequence !== this.drawingImportSequence ||
+        drawing !== this.panel.drawing ||
+        model !== this.currentModelDocument() ||
+        !sourceUnchanged())
+    ) {
+      throw new Error('読込中にモデルまたは図面が変更されました。');
+    }
+    if (multiViewSheetProject) {
+      // No active workspace state is silently restored from inactive views.
+      // Revoke the previous single-plan lifecycle before changing the owner.
+      this.closeOpenDrawingProject();
+      this.archivedPdfFontFile = null;
+      this.drawingProjectId = project.projectId;
+      this.loadedDrawingProject = project;
+      this.activeDrawingDocumentId = staged.currentDrawingDocumentId;
+      this.clearDrawingProjectReplacement();
+      this.panel.sheetBrowser?.invalidatePreviewSources?.();
+      this.panel.sheetBrowser?.render();
+      this.setDrawingProjectStatus(
+        `シートJSON読込済み / ビュー ${staged.drawingDocumentCount}件 / シート ${staged.drawingSheetCount}件。` +
+          '保存済み注記はJSON内に保持されますが、現在のworkspaceへ自動適用しません。',
+      );
+      showSuccess('複数ビューDrawingProjectのシート情報を復元しました。');
+      return;
+    }
+    this.closeOpenDrawingProject();
+    this.archivedPdfFontFile = null;
     this.drawingProjectId = project.projectId;
     this.loadedDrawingProject = project;
+    this.activeDrawingDocumentId = null;
+    this.archiveSourceRevisions = [];
+    this.archiveExportSequence++;
     this.clearDrawingProjectReplacement();
     this.setTagFamilyState(staged.restored.tagFamilyState, { render: false });
     this.memberReviews = staged.restored.memberReviews;
@@ -1008,7 +2761,52 @@ export class PdfOverlaySessionController {
     this.setDrawingProjectStatus(
       `読込済み / ${staged.document.view.storyId} / ${this.memberReviews.length}部材レビュー / ${this.drawingMemos.length}自由メモ / ${this.tagPlacements.length}タグ配置`,
     );
+    this.renderOrphanedIntentList();
+    this.openDrawingProject(project);
+    this.panel.sheetBrowser?.render();
     showSuccess('Drawing Workspace JSONを復元しました。');
+  }
+
+  /** 現在改訂で孤児化したtag/寸法意図を一覧し、明示操作で削除できるようにする。 */
+  renderOrphanedIntentList() {
+    const list = this.root.querySelector('#pdf-overlay-orphan-list');
+    if (!list) return;
+    list.replaceChildren();
+    const project = this.loadedDrawingProject;
+    const drawingId = project?.drawingDocuments?.[0]?.id;
+    if (!project || !drawingId) return;
+    const doc = this.root.ownerDocument;
+    for (const orphan of listOrphanedDrawingIntents({ project, drawingId })) {
+      const item = doc.createElement('li');
+      const ref = orphan.lastSourceRef;
+      const label = doc.createElement('span');
+      label.textContent = `${orphan.entityId}${ref ? ` (最後の対応: ${ref.elementType} #${ref.elementId})` : ''} / タグ ${orphan.tagIds.length}件・寸法 ${orphan.dimensionIds.length}件 `;
+      const button = doc.createElement('button');
+      button.type = 'button';
+      button.textContent = '作図意図を削除';
+      button.addEventListener('click', () => {
+        try {
+          this.discardOrphanedIntents(orphan.entityId);
+        } catch (error) {
+          showWarning(error?.message || '孤児の作図意図を削除できませんでした。');
+        }
+      });
+      item.append(label, button);
+      list.append(item);
+    }
+  }
+
+  discardOrphanedIntents(entityId) {
+    const project = this.loadedDrawingProject;
+    const drawingId = project?.drawingDocuments?.[0]?.id;
+    if (!project || !drawingId) throw new Error('Drawing Workspace JSONが読み込まれていません。');
+    const result = discardOrphanedDrawingIntents({ project, drawingId, entityIds: [entityId] });
+    this.loadedDrawingProject = result.project;
+    this.reviseOpenDrawingProject();
+    this.renderOrphanedIntentList();
+    this.setDrawingProjectStatus(
+      `孤児の作図意図を削除しました（タグ ${result.removedTagIds.length}件・寸法 ${result.removedDimensionIds.length}件）。プロジェクトJSONを書き出し直してください。`,
+    );
   }
 
   setTagFamilyState(input, { render = false } = {}) {
@@ -1028,6 +2826,7 @@ export class PdfOverlaySessionController {
     });
     refreshPdfDrawingTagFamilyOptions(normalized, globalThis.document);
     this.tagFamilyUi?.refresh();
+    this.reviseOpenDrawingProject();
     if (render && this.panel.drawing) this.panel.renderOverlay();
     return normalized;
   }
@@ -1040,6 +2839,7 @@ export class PdfOverlaySessionController {
       builtIns: BUILTIN_TAG_FAMILIES,
     });
     this.tagFamilyUi?.refresh();
+    this.reviseOpenDrawingProject();
     return true;
   }
 
@@ -1083,9 +2883,14 @@ export class PdfOverlaySessionController {
     this.refreshSelectedTagControls();
   }
 
+  onTagPlacementWindowVisibilityChanged() {
+    this.cancelTagDrag();
+    if (this.panel.drawing) this.panel.renderOverlay();
+  }
+
   isTagEditMode() {
     return Boolean(
-      this.root.querySelector('#pdf-overlay-tag-edit-mode')?.checked &&
+      this.root.querySelector('#pdf-overlay-win-tagPlacement')?.classList.contains('visible') &&
       !this.panel.measurementUi?.isActive() &&
       !this.panel.regionUi?.isSelecting({ includeSuppressedClick: false }) &&
       !this.panel.anchorPickTarget &&
@@ -1172,9 +2977,7 @@ export class PdfOverlaySessionController {
 
     if (!this.panel.currentModelToCss) {
       showWarning(
-        mode === 'pdf'
-          ? 'PDF上のSVG配置を先に確定してください。'
-          : 'SVG図面を先に生成してください。',
+        mode === 'pdf' ? 'PDF上の図面配置を先に確定してください。' : '図面を先に生成してください。',
       );
       return false;
     }
@@ -1213,6 +3016,9 @@ export class PdfOverlaySessionController {
         rounded(initialOffset[1] + model[1] - startModel[1]),
       ];
       placement.invalidationCode = null;
+      // The persisted drawing intent changes during the drag, not only on pointerup.
+      // Revoke an approved revision before any further read can observe moved content.
+      this.reviseOpenDrawingProject();
       this.refreshSelectedTagControls();
       this.panel.renderOverlay();
     };
@@ -1246,6 +3052,7 @@ export class PdfOverlaySessionController {
     const placement = this.ensureTagPlacement(context);
     placement.rotationDeg = Number(this.root.querySelector('#pdf-overlay-tag-rotation').value || 0);
     placement.leader = this.root.querySelector('#pdf-overlay-tag-leader').checked;
+    this.reviseOpenDrawingProject();
     this.refreshSelectedTagControls();
     this.panel.renderOverlay();
   }
@@ -1260,6 +3067,7 @@ export class PdfOverlaySessionController {
       (placement) => placementKey(placement) !== key,
     );
     this.refreshSelectedTagControls();
+    this.reviseOpenDrawingProject();
     this.panel.renderOverlay();
   }
 
@@ -1302,6 +3110,7 @@ export class PdfOverlaySessionController {
         invalidationCode: code,
       }));
     }
+    this.reviseOpenDrawingProject();
     this.refreshSelectedTagControls();
   }
 
@@ -1321,6 +3130,7 @@ export class PdfOverlaySessionController {
     if (index < 0) this.memberReviews.push(record);
     else this.memberReviews[index] = record;
     this.lastPlacementSignature = this.placementSignature();
+    this.reviseOpenDrawingProject();
     this.selectMember({ modelKey: identity[0], elementType: identity[1], elementId: identity[2] });
     this.root.querySelector('#pdf-overlay-member-review-status').textContent =
       `${identity[0]} / ${identity[1]} #${identity[2]} / ${stateLabel(status)} / 保存済み`;
@@ -1650,6 +3460,7 @@ export class PdfOverlaySessionController {
         this.panel.e['pdf-overlay-tag-orientation'].value = document.tagOrientationMode;
     }
 
+    this.reviseOpenDrawingProject();
     this.memberReviews = document.memberReviews.map((record) => ({ ...record }));
     this.setTagFamilyState(document.tagFamilyState ?? createEmptyTagFamilyState(), {
       render: false,
@@ -1741,6 +3552,9 @@ export class PdfOverlaySessionController {
     this.refreshSelectedTagControls();
     this.renderDrawingMemoList();
     this.lastPlacementSignature = this.placementSignature();
+    // Restore completion must publish counts/settings from the final runtime state,
+    // not the pre-restore snapshot.
+    this.reviseOpenDrawingProject();
   }
 
   refreshSelectedMember() {
@@ -1821,6 +3635,7 @@ export class PdfOverlaySessionController {
     });
     if (this.selectedIdentity) this.refreshSelectedMember();
     if (changed) {
+      this.reviseOpenDrawingProject();
       this.root.querySelector('#pdf-overlay-member-review-status').textContent =
         `条件が変わったため確認状態を未確認に戻しました: ${code}`;
     }
@@ -1875,6 +3690,7 @@ export class PdfOverlaySessionController {
     // 全件を変換できた後にだけruntime stateへ反映し、部分移行を残さない。
     this.drawingMemos = plan.drawingMemos;
     this.drawingMemoIdentity = null;
+    this.reviseOpenDrawingProject();
     this.renderDrawingMemoList();
     this.panel.renderOverlay();
     this.panel.updatePdfFeatureAvailability?.();
@@ -1889,7 +3705,7 @@ export class PdfOverlaySessionController {
     const text = this.root.querySelector('#pdf-overlay-drawing-memo').value.trim();
     if (!text) return showWarning('図面メモを入力してください。');
     if (!this.panel.drawing || !this.panel.currentModelToCss)
-      return showWarning('SVG図面を先に生成してください。');
+      return showWarning('図面を先に生成してください。');
     this.panel.resetMeasurementSequence?.('drawing-memo');
     this.pickDrawingMemo = true;
     this.root.querySelector('#pdf-overlay-cancel-drawing-memo').disabled = false;
@@ -1937,6 +3753,7 @@ export class PdfOverlaySessionController {
     });
     this.root.querySelector('#pdf-overlay-drawing-memo').value = '';
     this.cancelDrawingMemo();
+    this.reviseOpenDrawingProject();
     this.renderDrawingMemoList();
     this.panel.renderOverlay();
     showSuccess('図面上に自由メモを追加しました。');
@@ -2004,6 +3821,7 @@ export class PdfOverlaySessionController {
       remove.textContent = '削除';
       remove.addEventListener('click', () => {
         this.drawingMemos.splice(index, 1);
+        this.reviseOpenDrawingProject();
         if (!this.drawingMemos.some((item) => Array.isArray(item.pdfPoint)))
           this.drawingMemoIdentity = null;
         this.renderDrawingMemoList();

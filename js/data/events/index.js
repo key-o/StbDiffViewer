@@ -24,6 +24,7 @@ export {
   ImportanceEvents,
   ComparisonEvents,
   RenderEvents,
+  SceneEvents,
   AxisEvents,
   UIEvents,
   SelectionEvents,

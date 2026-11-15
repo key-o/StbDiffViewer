@@ -26,10 +26,10 @@ export const DEFAULT_DRAWING_SHEET = Object.freeze({
 
 function normalizeDrawingRotationDeg(value) {
   const rotation = Number(value);
-  if (!Number.isFinite(rotation)) throw new TypeError('SVG回転角が不正です。');
+  if (!Number.isFinite(rotation)) throw new TypeError('図面回転角が不正です。');
   const normalized = ((rotation % 360) + 360) % 360;
   if (!DRAWING_ROTATION_DEGREES.includes(normalized))
-    throw new RangeError('SVG回転は0°、90°、180°、270°のいずれかにしてください。');
+    throw new RangeError('図面回転は0°、90°、180°、270°のいずれかにしてください。');
   return normalized;
 }
 
@@ -254,6 +254,7 @@ export function createDrawingSheetRenderPlan({
   genericStrokeWidthPaperMm = 0.8,
   additionalDimensions = [],
   measurements = [],
+  formatDimensionValue = undefined,
 } = {}) {
   if (!layout || layout.paper !== 'A3') throw new TypeError('A3用紙レイアウトが必要です。');
   if (!Array.isArray(additionalDimensions))
@@ -278,6 +279,7 @@ export function createDrawingSheetRenderPlan({
       },
     },
     displaySettings,
+    formatDimensionValue,
     tagOptions: {
       showLabels,
       tagFamilyState,
@@ -366,7 +368,7 @@ export function renderDrawingSheetSvg({
   svg.setAttribute('data-render-profile', renderPlan.profile.id);
   svg.setAttribute(
     'aria-label',
-    `SVG図面 A3 ${layout.orientation === 'landscape' ? '横' : '縦'} 1:${layout.scaleDenominator} 回転${layout.drawingRotationDeg ?? 0}°`,
+    `図面 A3 ${layout.orientation === 'landscape' ? '横' : '縦'} 1:${layout.scaleDenominator} 回転${layout.drawingRotationDeg ?? 0}°`,
   );
   const frame = domDocument.createElementNS('http://www.w3.org/2000/svg', 'rect');
   frame.setAttribute('x', '0.25');

@@ -5,6 +5,7 @@
  */
 
 import { generateIfcGuid } from '../StepWriter.js';
+import { encodeSurfaceMetadata } from '../../../common-ifc/pipeline/StbSurfaceMetadata.js';
 import { createLogger } from '../../../utils/logger.js';
 
 const log = createLogger('export:ifc:wallEntityBuilder');
@@ -101,7 +102,7 @@ export function createWallEntities(w, wallData, bodyContext) {
     generateIfcGuid(),
     null,
     name,
-    null,
+    encodeSurfaceMetadata('wall', wallData),
     kindStructure, // ObjectType: kind_structure (RC/S/SRC)
     `#${wallLocalPlacement}`,
     `#${productShape}`,

@@ -17,6 +17,7 @@ import {
   requestStbSaveFileHandle,
 } from '../../../common-stb/export/xmlFormatter.js';
 import { createLogger } from '../../../utils/logger.js';
+import { assessIfcStbExport } from './ifcStbExportPreflight.js';
 import {
   normalizeStbVersion as normalizeVersion,
   toStbVersionFilenameToken as versionToFilenameToken,
@@ -181,7 +182,7 @@ async function handleStbExport() {
     const workingDocumentA =
       editingState?.active === true ? editingSession.getWorkingDocument?.() || null : null;
 
-    const { sourceDoc, sourceFile } = resolveStbExportSource({
+    const { sourceDoc, sourceFile, sourceModel } = resolveStbExportSource({
       targetModel,
       documentA: docA,
       documentB: docB,
@@ -201,6 +202,60 @@ async function handleStbExport() {
     }
 
     filename = ensureStbExtension(filename);
+
+    // #721: block known invalid IFC-derived STB before opening the save dialog.
+    // Acknowledgement of an unverified import is not proof of complete restoration.
+    const isIfcSource =
+      getState('models.versionInfo')?.[`sourceType${sourceModel}`] === 'ifc' ||
+      /\.ifc$/i.test(sourceFile?.name ?? '');
+    let ifcSchemaIssues = null;
+    if (isIfcSource) {
+      const schemaVersion = normalizeVersion(targetVersion);
+      const { isVersionLoaded, loadJsonSchemaForVersion } =
+        await import('../../../common-stb/import/parser/jsonSchemaLoader.js');
+      // validateJsonSchema returns [] for an unloaded version. Never interpret
+      // that empty result as a clean IFC-derived STB document.
+      const supportedVersions = new Set(['2.0.2', '2.1.0', '2.1.1']);
+      if (
+        !supportedVersions.has(schemaVersion) ||
+        (!isVersionLoaded(schemaVersion) && !(await loadJsonSchemaForVersion(schemaVersion)))
+      ) {
+        showError(
+          `IFC由来STBの出力を停止しました。対象バージョン ${schemaVersion} のスキーマを検証できません。`,
+        );
+        return;
+      }
+      const { validateJsonSchema } =
+        await import('../../../common-stb/validation/jsonSchemaValidator.js');
+      ifcSchemaIssues = validateJsonSchema(sourceDoc, {
+        version: schemaVersion,
+      });
+      const diagnostics = getState(`models.ifcDiagnostics${sourceModel}`);
+      const gate = assessIfcStbExport({
+        sourceType: 'ifc',
+        diagnostics,
+        schemaIssues: ifcSchemaIssues,
+      });
+      if (gate.decision === 'BLOCK') {
+        showError(
+          `IFC由来STBの出力を停止しました（${gate.code}）。${gate.details.slice(0, 3).join('／')}`,
+        );
+        return;
+      }
+      if (gate.decision === 'ACK_REQUIRED') {
+        const message = [
+          'IFC→STBの完全復元は未検証です。',
+          ...gate.details,
+          '変換情報の欠落がないことは保証されません。未検証のままSTBとして保存しますか？',
+        ].join('\n');
+        const acknowledged =
+          typeof globalThis.confirm === 'function' && globalThis.confirm(message);
+        if (!acknowledged) {
+          showWarning('未検証IFCからのSTB出力を中止しました。');
+          return;
+        }
+      }
+    }
 
     const saveFileResult = await requestStbSaveFileHandle(filename);
     if (saveFileResult.status === 'canceled') {
@@ -250,9 +305,11 @@ async function handleStbExport() {
     // IFCソースまたは同バージョンの場合はDOM経由で出力
     const { validateJsonSchema } =
       await import('../../../common-stb/validation/jsonSchemaValidator.js');
-    const schemaIssues = validateJsonSchema(sourceDoc, {
-      version: normalizeVersion(targetVersion),
-    });
+    const schemaIssues =
+      ifcSchemaIssues ??
+      validateJsonSchema(sourceDoc, {
+        version: normalizeVersion(targetVersion),
+      });
     const schemaErrors = schemaIssues.filter((i) => i.severity === 'error');
     if (schemaErrors.length > 0) {
       log.warn(
@@ -264,7 +321,11 @@ async function handleStbExport() {
 
     const { exportStbDocument } = await import('../../../export/stb/stbExporter.js');
     await exportStbDocument(sourceDoc, { filename, targetVersion, fileHandle: saveFileHandle });
-    showSuccess(`出力しました: ${filename}`);
+    if (isIfcSource) {
+      showWarning(`未検証のIFC由来STBを保存しました（完全復元未確認）: ${filename}`);
+    } else {
+      showSuccess(`出力しました: ${filename}`);
+    }
   } catch (error) {
     log.error('STB出力エラー:', error);
     showError(`STB出力に失敗しました: ${error.message}`);

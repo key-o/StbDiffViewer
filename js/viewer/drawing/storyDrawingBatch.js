@@ -82,6 +82,7 @@ export async function compileStoryDrawingRenderPlan({
     source,
     view,
     ...(openOnly ? { openingVisibilitySource: 'Open' } : {}),
+    includeNodes: selectedElementTypes.includes('Node'),
   });
   assertSelectedDrawingCoverage(drawing, selectedElementTypes, view.storyId);
   if (!drawing?.bounds) {
